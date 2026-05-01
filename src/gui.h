@@ -345,7 +345,7 @@ inline void draw_gui(Settings& s, AppState& app,
     }
 
     ImGui::Spacing();
-    const char* credit = "By Nobbie  v0.9";
+    const char* credit = "By Nobbie  v0.9.1";
     const float credit_width = ImGui::CalcTextSize(credit).x;
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + full_width - credit_width);
     ImGui::TextDisabled("%s", credit);

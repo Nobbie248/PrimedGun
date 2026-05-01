@@ -210,6 +210,53 @@ enum XrDpadDir {
     XrDpadLeft = 4,
 };
 
+static const char* xr_dpad_dir_name(XrDpadDir dir) {
+    switch (dir) {
+    case XrDpadUp: return "up";
+    case XrDpadRight: return "right";
+    case XrDpadDown: return "down";
+    case XrDpadLeft: return "left";
+    default: return "none";
+    }
+}
+
+static void append_xr_dpad_debug(const char* phase, bool near_head, bool in_head_zone,
+                                 float stick_x, float stick_y, XrDpadDir raw_dir,
+                                 XrDpadDir final_dir, int latch_frames,
+                                 bool send_press_event, uint8_t held0,
+                                 uint8_t held1, uint8_t pressed0) {
+    static std::ofstream log;
+    static auto start = std::chrono::steady_clock::now();
+    static auto last_log = std::chrono::steady_clock::time_point{};
+    const auto now = std::chrono::steady_clock::now();
+    if (last_log.time_since_epoch().count() != 0 &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log).count() < 50) {
+        return;
+    }
+    last_log = now;
+
+    if (!log.is_open()) {
+        log.open("xr_dpad_debug.txt", std::ios::out | std::ios::trunc);
+        if (!log.is_open())
+            return;
+        log << "ms,phase,near_head,in_head_zone,stick_x,stick_y,raw_dir,final_dir,latch,press,held0,held1,pressed0\n";
+    }
+
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+    log << ms << ',' << phase << ','
+        << (near_head ? 1 : 0) << ','
+        << (in_head_zone ? 1 : 0) << ','
+        << stick_x << ',' << stick_y << ','
+        << xr_dpad_dir_name(raw_dir) << ','
+        << xr_dpad_dir_name(final_dir) << ','
+        << latch_frames << ','
+        << (send_press_event ? 1 : 0) << ','
+        << static_cast<int>(held0) << ','
+        << static_cast<int>(held1) << ','
+        << static_cast<int>(pressed0) << '\n';
+    log.flush();
+}
+
 static XrDpadDir get_stick_dpad_direction(float x, float y, float deadzone) {
     const float ax = std::fabs(x);
     const float ay = std::fabs(y);
@@ -271,11 +318,12 @@ static bool left_controller_is_near_head(const Pose& left, const Pose& hmd) {
     const float dx = left.px - hmd.px;
     const float dy = left.py - hmd.py;
     const float dz = left.pz - hmd.pz;
-    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const float dist_sq = dx * dx + dy * dy + dz * dz;
+    const float radius = g_settings.xr_dpad_head_radius;
 
-    g_app.dbg_left_to_head_dist = dist;
+    g_app.dbg_left_to_head_dist = std::sqrt(dist_sq);
     g_app.dbg_left_to_head_y = dy;
-    return dist <= g_settings.xr_dpad_head_radius &&
+    return dist_sq <= radius * radius &&
            dy >= -g_settings.xr_dpad_head_y_below &&
            dy <= 0.22f;
 }
@@ -285,11 +333,12 @@ static bool left_controller_is_near_head_for_dpad(const Pose& left, const Pose& 
     const float dx = left.px - hmd.px;
     const float dy = left.py - hmd.py;
     const float dz = left.pz - hmd.pz;
-    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const float dist_sq = dx * dx + dy * dy + dz * dz;
+    const float radius = g_settings.xr_dpad_head_radius + 0.06f;
 
-    g_app.dbg_left_to_head_dist = dist;
+    g_app.dbg_left_to_head_dist = std::sqrt(dist_sq);
     g_app.dbg_left_to_head_y = dy;
-    return dist <= g_settings.xr_dpad_head_radius + 0.06f &&
+    return dist_sq <= radius * radius &&
            dy >= -(g_settings.xr_dpad_head_y_below + 0.04f) &&
            dy <= 0.28f;
 }
@@ -321,11 +370,28 @@ static void prime_xy_from_yaw(float yaw, float& x, float& y) {
 static void set_player_input_disabled_for_dpad(uint32_t state_mgr, bool disabled) {
     static bool s_forced_disabled = false;
     static bool s_was_disabled = false;
+    static uint32_t s_flags_addr = 0;
+    static auto s_last_refresh = std::chrono::steady_clock::time_point{};
+
+    const auto now = std::chrono::steady_clock::now();
+    if (disabled && s_forced_disabled && s_flags_addr >= 0x80000000) {
+        const bool refresh =
+            s_last_refresh.time_since_epoch().count() == 0 ||
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_refresh).count() >= 250;
+        if (!refresh)
+            return;
+        g_dolphin.write_u8(s_flags_addr, g_dolphin.read_u8(s_flags_addr) | k_player_disable_input_mask);
+        s_last_refresh = now;
+        return;
+    }
+
     const auto addrs = get_addresses();
     const uint32_t player = g_dolphin.read_u32(state_mgr + addrs.player_offset);
     if (player < 0x80000000) {
         s_forced_disabled = false;
         s_was_disabled = false;
+        s_flags_addr = 0;
+        s_last_refresh = {};
         return;
     }
 
@@ -338,6 +404,8 @@ static void set_player_input_disabled_for_dpad(uint32_t state_mgr, bool disabled
         }
         flags |= k_player_disable_input_mask;
         g_dolphin.write_u8(flags_addr, flags);
+        s_flags_addr = flags_addr;
+        s_last_refresh = now;
         return;
     }
 
@@ -347,6 +415,8 @@ static void set_player_input_disabled_for_dpad(uint32_t state_mgr, bool disabled
     }
     s_forced_disabled = false;
     s_was_disabled = false;
+    s_flags_addr = 0;
+    s_last_refresh = {};
 }
 
 static void suppress_c_stick_for_dpad(uint32_t state_mgr) {
@@ -375,6 +445,9 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     static auto s_dir_start = std::chrono::steady_clock::time_point{};
     static auto s_last_press_pulse = std::chrono::steady_clock::time_point{};
     static auto s_last_near_head = std::chrono::steady_clock::time_point{};
+    static XrDpadDir s_latched_dir = XrDpadNone;
+    static auto s_latch_until = std::chrono::steady_clock::time_point{};
+    static bool s_c_stick_suppressed = false;
     g_app.dbg_xr_dpad_active = false;
     g_app.dbg_xr_dpad_dir = XrDpadNone;
     float stick_x = 0.0f;
@@ -395,6 +468,9 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
         s_dir_start = {};
         s_last_press_pulse = {};
         s_last_near_head = {};
+        s_latched_dir = XrDpadNone;
+        s_latch_until = {};
+        s_c_stick_suppressed = false;
         return false;
     }
 
@@ -405,6 +481,9 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
         s_dir_start = {};
         s_last_press_pulse = {};
         s_last_near_head = {};
+        s_latched_dir = XrDpadNone;
+        s_latch_until = {};
+        s_c_stick_suppressed = false;
         return false;
     }
 
@@ -422,19 +501,40 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
             s_last_dir = XrDpadNone;
             s_dir_start = {};
             s_last_press_pulse = {};
+            s_latched_dir = XrDpadNone;
+            s_latch_until = {};
+            s_c_stick_suppressed = false;
             return false;
         }
         in_head_zone = true;
     }
     set_player_input_disabled_for_dpad(state_mgr, in_head_zone);
-    suppress_c_stick_for_dpad(state_mgr);
-
-    const XrDpadDir dir = get_stick_dpad_direction_with_hysteresis(
-        stick_x, stick_y, g_settings.xr_dpad_deadzone, s_last_dir);
+    if (!s_c_stick_suppressed) {
+        suppress_c_stick_for_dpad(state_mgr);
+        s_c_stick_suppressed = true;
+    }
+    const float dpad_deadzone = std::min(g_settings.xr_dpad_deadzone, 0.25f);
+    const XrDpadDir raw_dir = get_stick_dpad_direction_with_hysteresis(
+        stick_x, stick_y, dpad_deadzone, s_last_dir);
+    XrDpadDir dir = raw_dir;
+    if (dir != XrDpadNone) {
+        s_latched_dir = dir;
+        s_latch_until = now + std::chrono::milliseconds(120);
+    } else if (s_latched_dir != XrDpadNone && now < s_latch_until) {
+        dir = s_latched_dir;
+    }
+    const int latch_ms_left =
+        (s_latched_dir != XrDpadNone && now < s_latch_until)
+            ? static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(s_latch_until - now).count())
+            : 0;
     if (dir == XrDpadNone) {
+        append_xr_dpad_debug("no_dir", near_head, in_head_zone, stick_x, stick_y,
+                             raw_dir, dir, latch_ms_left, false, 0, 0, 0);
         s_last_dir = XrDpadNone;
         s_dir_start = {};
         s_last_press_pulse = {};
+        s_latched_dir = XrDpadNone;
+        s_latch_until = {};
         return false;
     }
 
@@ -486,6 +586,9 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     g_dolphin.write_u8(state_mgr + k_final_input_dpad_held_0, held0);
     g_dolphin.write_u8(state_mgr + k_final_input_dpad_held_1, held1);
     g_dolphin.write_u8(state_mgr + k_final_input_dpad_pressed_0, pressed0);
+    append_xr_dpad_debug("publish", near_head, in_head_zone, stick_x, stick_y,
+                         raw_dir, dir, latch_ms_left, send_press_event,
+                         held0, held1, pressed0);
 
     g_app.dbg_xr_dpad_active = true;
     g_app.dbg_xr_dpad_dir = dir;
@@ -1339,9 +1442,46 @@ static bool orbit_lock_button_held(uint32_t state_mgr) {
     return (held0 & 0x04u) != 0; // CFinalInput::x2c_b29_L
 }
 
+static bool scan_visor_active(uint32_t player) {
+    return player >= 0x80000000 && g_dolphin.read_u32(player + 0x330) == 1;
+}
+
+static bool gun_pitch_from_matrix(const float* mat, float& pitch_out) {
+    float dir_x = -mat[4];
+    float dir_y = mat[5];
+    float dir_flat_z = 0.0f;
+    if (!normalize3(dir_x, dir_y, dir_flat_z))
+        return false;
+
+    float dir_z = mat[6] * -dir_y + -mat[2] * dir_x;
+    if (!std::isfinite(dir_z))
+        return false;
+
+    pitch_out = std::asin(std::clamp(dir_z, -0.98f, 0.98f));
+    return std::isfinite(pitch_out);
+}
+
+static void write_scan_pitch_from_matrix(uint32_t player, const float* mat) {
+    if (!scan_visor_active(player))
+        return;
+
+    float pitch = 0.0f;
+    if (!gun_pitch_from_matrix(mat, pitch))
+        return;
+
+    constexpr float kMaxScanPitch = 1.35f;
+    pitch = std::clamp(pitch, -kMaxScanPitch, kMaxScanPitch);
+    constexpr float kPitchSmooth = 0.45f;
+    g_smooth_pitch = g_smooth_pitch * kPitchSmooth + pitch * (1.0f - kPitchSmooth);
+
+    const auto addrs = get_addresses();
+    g_dolphin.write_float(player + addrs.pitch_offset, g_smooth_pitch);
+}
+
 static void reset_lock_camera_pitch_suppression() {
     g_lock_pitch_have_unlocked = false;
     g_lock_pitch_unlocked = 0.0f;
+    g_smooth_pitch = 0.0f;
 }
 
 static void suppress_lock_camera_pitch(uint32_t state_mgr, uint32_t player) {
@@ -1647,6 +1787,22 @@ static void dpad_thread() {
     }
 }
 
+static void write_scan_pitch_from_controller_matrix(const Matrix3x4& mat) {
+    if (!g_dolphin.is_connected() || !g_app.dolphin_ok)
+        return;
+
+    const auto addrs = get_addresses();
+    const uint32_t state_mgr = addrs.state_manager;
+    if (state_mgr < 0x80000000)
+        return;
+
+    const uint32_t player = g_dolphin.read_u32(state_mgr + addrs.player_offset);
+    if (player < 0x80000000)
+        return;
+
+    write_scan_pitch_from_matrix(player, mat.m);
+}
+
 static void writer_thread() {
     using clock = std::chrono::steady_clock;
     auto last = clock::now();
@@ -1734,6 +1890,7 @@ static void writer_thread() {
             g_app.last_matrix = mat;
 
             if (g_app.active && g_app.dolphin_ok) {
+                write_scan_pitch_from_controller_matrix(mat);
                 const bool should_write = !g_settings.require_trigger ||
                                           pose.trigger >= g_settings.trigger_threshold;
                 if (should_write) {
