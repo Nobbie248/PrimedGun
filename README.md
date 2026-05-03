@@ -47,7 +47,8 @@ For distribution/share, the useful files are:
 1. Launch `PrimedGun.exe`.
 2. Load Metroid Prime in Dolphin.
 3. PrimedGun will check then start.
-4. While in game click the right thumb stick to center view with arm cannon correctly.
+4. While in game use y offset setting in PrimedGun to align cannon height,
+click the right thumb stick and move your body to center view with arm cannon correctly.
 
 ## Notes
 
