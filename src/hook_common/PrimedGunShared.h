@@ -7,7 +7,8 @@ namespace PrimedGun {
 inline constexpr wchar_t SharedMemoryName[] = L"Local\\PrimedGunSharedState";
 inline constexpr wchar_t SharedMutexName[] = L"Local\\PrimedGunSharedStateMutex";
 inline constexpr uint32_t SharedStateMagic = 0x50475652; // PGVR
-inline constexpr uint32_t SharedStateVersion = 1;
+inline constexpr uint32_t SharedStateVersion = 2;
+inline constexpr uint32_t MaxGamePatches = 128;
 
 struct Vec3 {
     float x = 0.0f;
@@ -52,6 +53,22 @@ struct GameState {
     uint32_t frameIndex = 0;
 };
 
+struct GamePatch {
+    uint32_t enabled = 0;
+    uint32_t address = 0;
+    uint32_t value = 0;
+    uint32_t requireOriginal = 0;
+    uint32_t original = 0;
+    uint32_t applied = 0;
+    uint32_t lastSeen = 0;
+};
+
+struct PatchState {
+    uint32_t generation = 0;
+    uint32_t count = 0;
+    GamePatch patches[MaxGamePatches]{};
+};
+
 struct SharedState {
     uint32_t magic = SharedStateMagic;
     uint32_t version = SharedStateVersion;
@@ -62,6 +79,7 @@ struct SharedState {
     PoseState rightHandPose{};
     SettingsState settings{};
     GameState game{};
+    PatchState patch{};
 };
 
 } // namespace PrimedGun

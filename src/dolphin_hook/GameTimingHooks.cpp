@@ -1,5 +1,7 @@
 #include "GameTimingHooks.h"
 
+#include "PrimedGunShared.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -46,6 +48,8 @@ uint64_t g_lockLatchUntilTick = 0;
 bool g_dumpedPlayerOrbitCode = false;
 bool g_dumpedFirstPersonCameraCode = false;
 uint32_t g_lastOrbitState = 0xffffffffu;
+uint32_t g_lastPatchGeneration = 0;
+uint32_t g_lastPatchCount = 0;
 
 struct PpcPatch {
     uint32_t address;
@@ -262,6 +266,44 @@ void PatchOrbitCode() {
     }
 }
 
+void ApplySharedPatches(SharedState* state) {
+    if (!state || !g_memBase || state->patch.count > MaxGamePatches) {
+        return;
+    }
+
+    if (state->patch.generation != g_lastPatchGeneration || state->patch.count != g_lastPatchCount) {
+        g_lastPatchGeneration = state->patch.generation;
+        g_lastPatchCount = state->patch.count;
+        Log(L"GameTimingHooks received app patch set generation=" +
+            std::to_wstring(g_lastPatchGeneration) +
+            L" count=" + std::to_wstring(g_lastPatchCount));
+    }
+
+    for (uint32_t i = 0; i < state->patch.count; ++i) {
+        GamePatch& patch = state->patch.patches[i];
+        if (!patch.enabled || patch.applied) {
+            continue;
+        }
+        if (!IsMem1Range(patch.address, 4)) {
+            patch.lastSeen = 0xffffffffu;
+            continue;
+        }
+
+        const uint32_t current = ReadU32(patch.address);
+        patch.lastSeen = current;
+        if (patch.requireOriginal && current != patch.original) {
+            continue;
+        }
+
+        if (WriteU32(patch.address, patch.value)) {
+            patch.applied = 1;
+            Log(L"GameTimingHooks applied app patch[" + std::to_wstring(i) +
+                L"] address=0x" + std::to_wstring(patch.address) +
+                L" value=0x" + std::to_wstring(patch.value));
+        }
+    }
+}
+
 bool OrbitLockHeldNow(uint32_t stateMgr, uint32_t player) {
     const uint8_t held0 = ReadU8(stateMgr + kFinalInputOffset + 0x2c);
     if ((held0 & 0x04u) != 0) {
@@ -342,12 +384,13 @@ void SuppressLockCameraPitchForLogicTick() {
     }
 }
 
-void Poll() {
+void Poll(SharedState* state) {
     if (g_installed.load()) {
         if (ResolveMemBase()) {
             DumpPlayerOrbitCodeOnce();
             DumpFirstPersonCameraCodeOnce();
             PatchOrbitCode();
+            ApplySharedPatches(state);
         }
     }
 }

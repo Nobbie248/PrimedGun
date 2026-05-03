@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <cmath>
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <fstream>
@@ -12,6 +13,8 @@
 #include <string_view>
 #include <vector>
 #include <cstring>
+#include <cstdlib>
+#include <sstream>
 #include <tlhelp32.h>
 
 #include "imgui.h"
@@ -48,6 +51,11 @@ static bool g_lock_pitch_have_unlocked = false;
 static float g_lock_pitch_unlocked = 0.0f;
 static std::atomic<bool> g_running = true;
 static std::mutex g_pose_mutex;
+
+struct LoadedPatch {
+    uint32_t address = 0;
+    uint32_t value = 0;
+};
 static std::mutex g_gun_target_mutex;
 static Pose g_latest_pose = {};
 static Pose g_latest_left_pose = {};
@@ -118,6 +126,71 @@ static void app_hook_log(std::wstring_view message) {
     }
 }
 
+static std::string trim_ascii(std::string value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return {};
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+static bool parse_hex_u32(const std::string& text, uint32_t& value) {
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(text.c_str(), &end, 16);
+    if (!end || *end != '\0')
+        return false;
+    value = static_cast<uint32_t>(parsed);
+    return true;
+}
+
+static bool parse_patch_line(const std::string& raw_line, LoadedPatch& patch) {
+    std::string line = trim_ascii(raw_line);
+    if (line.empty() || line[0] == '#' || line[0] == '$' || line[0] == '[')
+        return false;
+
+    const size_t comment = line.find_first_of("#;");
+    if (comment != std::string::npos)
+        line = trim_ascii(line.substr(0, comment));
+    if (line.empty())
+        return false;
+
+    const size_t dword = line.find(":dword:");
+    if (dword != std::string::npos) {
+        uint32_t address = 0;
+        uint32_t value = 0;
+        std::string addressText = line.substr(0, dword);
+        std::string valueText = line.substr(dword + 7);
+        if (addressText.rfind("0x", 0) == 0 || addressText.rfind("0X", 0) == 0)
+            addressText = addressText.substr(2);
+        if (valueText.rfind("0x", 0) == 0 || valueText.rfind("0X", 0) == 0)
+            valueText = valueText.substr(2);
+        if (parse_hex_u32(addressText, address) && parse_hex_u32(valueText, value)) {
+            patch = {address, value};
+            return true;
+        }
+        return false;
+    }
+
+    std::istringstream stream(line);
+    std::string left;
+    std::string right;
+    if (!(stream >> left >> right))
+        return false;
+
+    uint32_t code = 0;
+    uint32_t value = 0;
+    if (!parse_hex_u32(left, code) || !parse_hex_u32(right, value))
+        return false;
+
+    if (static_cast<uint8_t>(code >> 24) == 0x04) {
+        patch.address = 0x80000000u | (code & 0x01ffffffu);
+        patch.value = value;
+        return true;
+    }
+
+    return false;
+}
+
 static void open_app_hook_log() {
     std::error_code ec;
     const fs::path log_dir = local_app_data_path() / L"PrimedGun";
@@ -129,6 +202,39 @@ static fs::path exe_directory() {
     wchar_t buffer[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(MAX_PATH));
     return fs::path(buffer).parent_path();
+}
+
+static std::vector<LoadedPatch> load_app_patch_files() {
+    std::vector<LoadedPatch> patches;
+    const fs::path patchDir = exe_directory() / L"assets" / L"gecko";
+    if (!fs::exists(patchDir)) {
+        app_hook_log(L"Patch directory not found: " + patchDir.wstring());
+        return patches;
+    }
+
+    for (const fs::directory_entry& entry : fs::directory_iterator(patchDir)) {
+        if (!entry.is_regular_file())
+            continue;
+        const fs::path path = entry.path();
+        const std::wstring ext = path.extension().wstring();
+        if (_wcsicmp(ext.c_str(), L".ini") != 0 && _wcsicmp(ext.c_str(), L".txt") != 0)
+            continue;
+
+        std::ifstream file(path);
+        if (!file.is_open())
+            continue;
+
+        std::string line;
+        while (std::getline(file, line) && patches.size() < PrimedGun::MaxGamePatches) {
+            LoadedPatch patch{};
+            if (parse_patch_line(line, patch))
+                patches.push_back(patch);
+        }
+    }
+
+    app_hook_log(L"Loaded " + std::to_wstring(patches.size()) +
+        L" app patch line(s) from " + patchDir.wstring());
+    return patches;
 }
 
 static std::optional<DWORD> find_process_id_by_name(const wchar_t* exe_name) {
@@ -276,6 +382,8 @@ static bool inject_hook_dll(DWORD process_id, const fs::path& dll_path) {
 }
 
 static void ensure_shared_state() {
+    const std::vector<LoadedPatch> patches = load_app_patch_files();
+
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                                         sizeof(PrimedGun::SharedState), PrimedGun::SharedMemoryName);
     if (!mapping)
@@ -291,6 +399,14 @@ static void ensure_shared_state() {
     if (state->magic != PrimedGun::SharedStateMagic || state->version != PrimedGun::SharedStateVersion)
         *state = PrimedGun::SharedState{};
     state->appHeartbeat++;
+    state->patch = PrimedGun::PatchState{};
+    state->patch.count = static_cast<uint32_t>(std::min<size_t>(patches.size(), PrimedGun::MaxGamePatches));
+    state->patch.generation++;
+    for (uint32_t i = 0; i < state->patch.count; ++i) {
+        state->patch.patches[i].enabled = 1;
+        state->patch.patches[i].address = patches[i].address;
+        state->patch.patches[i].value = patches[i].value;
+    }
 
     UnmapViewOfFile(state);
     CloseHandle(mapping);

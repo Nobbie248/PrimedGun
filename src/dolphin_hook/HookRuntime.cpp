@@ -54,7 +54,7 @@ DWORD WINAPI RuntimeThread(void*) {
         if (now - lastMaintenanceTick >= 250) {
             lastMaintenanceTick = now;
             shared.Heartbeat();
-            GameTimingHooks::Poll();
+            GameTimingHooks::Poll(shared.Get());
             GraphicsHooks::PollBackendModules();
             JitHooks::Poll();
 

@@ -28,10 +28,12 @@ cmake --build . --config Release
 For distribution/share, the useful files are:
 
 - `PrimedGun.exe`
+- `PrimedGun_DolphinHook.dll`
 - `openvr_api.dll`
 - `libgcc_s_seh-1.dll`
 - `libstdc++-6.dll`
 - `libwinpthread-1.dll`
+- `assets/gecko/GM8E01_PrimedGun.ini`
 - `primedgun_settings.ini`
 - `PrimedGun Setup Guide.pdf`
 
@@ -42,6 +44,7 @@ For distribution/share, the useful files are:
 - Visor hand gesture input: the app reads the control stick as visor D-pad input when the controller is near your head.
 - Improved gun-based lock/scan targeting.
 - VR arm cannon tracking through OpenVR.
+- Dolphin-side hook bridge for app-owned game patches and diagnostics.
 
 ## Setup Guide
 
@@ -56,25 +59,43 @@ See [PrimedGun Setup Guide.pdf](<PrimedGun Setup Guide.pdf>) for screenshot help
 ## Usage
 
 1. Start SteamVR.
-2. Start Dolphin and load Metroid Prime.
-3. Launch `PrimedGun.exe`.
-4. Confirm both `Dolphin` and `OpenVR` show as connected.
-5. Click `INACTIVE` to start writing transforms.
-6. While moving your head, use Dolphin's reset-view toggle to line the arm cannon up with your controller position.
+2. Launch `PrimedGun.exe`.
+3. Let PrimedGun start or find Dolphin and inject `PrimedGun_DolphinHook.dll`.
+4. Load Metroid Prime in Dolphin.
+5. Confirm both `Dolphin` and `OpenVR` show as connected.
+6. Click `INACTIVE` to start writing transforms.
+7. While moving your head, use Dolphin's reset-view toggle to line the arm cannon up with your controller position.
    It's best to assign the reset-view toggle to your controller for this.
    Dolphin's game window must be focused for Dolphin hotkeys to register.
-7. If playing seated or standing, adjust the Y axis in `Offset Tuning` as needed.
+8. If playing seated or standing, adjust the Y axis in `Offset Tuning` as needed.
 
 ## Notes
 
 - Settings are saved to `primedgun_settings.ini`.
 - The app reads controller tracking from OpenVR and writes the cannon transform into Dolphin memory.
+- PrimedGun should be running before Metroid Prime is loaded so the Dolphin-side hook can apply app-owned patches as soon as GM8E01 memory appears.
+- Logs are written to `%LOCALAPPDATA%\PrimedGun`.
 - The project is OpenVR-only. Old OpenXR experiments have been removed.
 - For the best experience, try not to turn your body around. You can move in the game like this, but functionality is not ideal.
 
-## Dolphin AR Codes
+## App-Owned AR/Gecko Patches
 
-Use these with Metroid Prime GCN NTSC Rev 0 (`GM8E01`).
+PrimedGun now applies the Metroid Prime GCN NTSC Rev 0 (`GM8E01`) patch set through the Dolphin-side hook instead of Dolphin's INI/AR-code system. The active patch file is:
+
+```text
+assets/gecko/GM8E01_PrimedGun.ini
+```
+
+Supported app-owned patch formats:
+
+```ini
+0417CC70 4BE84C90
+0x8017CC70:dword:0x4BE84C90
+```
+
+Only simple 32-bit Gecko `04` writes and Dolphin `[OnFrame]` `:dword:` writes are supported by the app patch bridge right now. More complex AR/Gecko code types should still be converted to equivalent 32-bit writes before being placed in `assets/gecko`.
+
+Current app-owned patch set:
 
 ```ini
 PrimedGun Disable Culling Outside Camera View

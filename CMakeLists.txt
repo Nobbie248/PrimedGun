@@ -59,19 +59,11 @@ target_link_libraries(PrimedGun
     ${OPENVR_LIB}
 )
 
-# Dolphin hook sidecar. This is separate from the existing PrimedGun app:
-# launcher starts/finds Dolphin, then injects the hook DLL into Dolphin.
+# Dolphin hook sidecar. PrimedGun.exe starts/finds Dolphin, then injects this DLL.
 add_library(PrimedGunHookCommon INTERFACE)
 target_include_directories(PrimedGunHookCommon INTERFACE
     src/hook_common
 )
-
-add_executable(PrimedGun_Launcher
-    src/launcher/main.cpp
-)
-target_link_libraries(PrimedGun_Launcher PRIVATE PrimedGunHookCommon)
-target_compile_features(PrimedGun_Launcher PRIVATE cxx_std_20)
-target_compile_definitions(PrimedGun_Launcher PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 
 add_library(PrimedGun_DolphinHook SHARED
     src/dolphin_hook/dllmain.cpp
@@ -88,19 +80,21 @@ target_compile_definitions(PrimedGun_DolphinHook PRIVATE UNICODE _UNICODE NOMINM
 target_link_libraries(PrimedGun_DolphinHook PRIVATE psapi)
 set_target_properties(PrimedGun_DolphinHook PROPERTIES PREFIX "")
 
-if(MINGW)
-    target_link_options(PrimedGun_Launcher PRIVATE -municode)
-endif()
-
 # Copy runtime DLLs next to the built binaries for direct build\bin launches.
 set(OPENVR_DLL "${OPENVR_DIR}/bin/win64/openvr_api.dll")
 set(PRIMEDGUN_RUNTIME_TARGETS
     PrimedGun
-    PrimedGun_Launcher
     PrimedGun_DolphinHook
 )
 
 foreach(RUNTIME_TARGET IN LISTS PRIMEDGUN_RUNTIME_TARGETS)
+    add_custom_command(TARGET ${RUNTIME_TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:${RUNTIME_TARGET}>/assets"
+        COMMENT "Copying PrimedGun assets for ${RUNTIME_TARGET}"
+    )
+
     if(EXISTS "${OPENVR_DLL}")
         add_custom_command(TARGET ${RUNTIME_TARGET} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
