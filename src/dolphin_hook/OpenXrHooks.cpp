@@ -549,6 +549,22 @@ bool InstallIfAvailable(SharedState* state) {
     const bool runtimeDetour = runtime ? InstallRuntimeNegotiationDetour(runtime) : false;
     const bool patched = PatchLoadedModules();
     const bool installedAny = inlineDetour || patched || runtimeDetour || getProcDetour;
+    if (state) {
+        state->openxrInstallAttempts++;
+        uint32_t moduleFlags = 0;
+        if (openxr)
+            moduleFlags |= 1u << 0;
+        if (runtime)
+            moduleFlags |= 1u << 1;
+        state->openxrModuleFlags = moduleFlags;
+        state->hookStatusFlags |= HookStatusDllAlive;
+        if (installedAny || g_installed.load())
+            state->hookStatusFlags |= HookStatusOpenXrInstalled;
+        if (runtimeDetour || g_runtimeInstalled.load())
+            state->hookStatusFlags |= HookStatusOpenXrRuntimeInstalled;
+        if (g_realGetInstanceProcAddr)
+            state->hookStatusFlags |= HookStatusOpenXrGetProcReady;
+    }
     if (installedAny && !g_installed.exchange(true)) {
         Log(std::wstring(L"OpenXrHooks installed. inline=") + (inlineDetour ? L"yes" : L"no") +
             L" IAT patched=" + (patched ? L"yes" : L"no") +
@@ -567,6 +583,15 @@ void Poll(SharedState* state) {
             g_lastInstallCheckMs = now;
             InstallIfAvailable(state);
         }
+    }
+    if (state) {
+        state->hookStatusFlags |= HookStatusDllAlive;
+        if (g_installed.load())
+            state->hookStatusFlags |= HookStatusOpenXrInstalled;
+        if (g_runtimeInstalled.load())
+            state->hookStatusFlags |= HookStatusOpenXrRuntimeInstalled;
+        if (g_realGetInstanceProcAddr)
+            state->hookStatusFlags |= HookStatusOpenXrGetProcReady;
     }
 
     if (g_installed.load() && now - g_lastLogMs > 5000) {

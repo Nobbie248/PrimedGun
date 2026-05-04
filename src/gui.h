@@ -27,6 +27,7 @@ struct AppState {
     Matrix3x4 last_matrix = {};
     Pose  last_pose     = {};
     std::string dolphin_status;
+    std::string hook_status = "Hook: waiting for Dolphin";
     std::string tracking_status;
     bool  game_rev0_ok = false;
     std::string game_status = "Game: not checked";
@@ -82,7 +83,7 @@ inline void draw_gui(Settings& s, AppState& app,
 
     // ── Status bar ───────────────────────────
     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
-    ImGui::SetNextWindowSize({500 * UI_SCALE, 78}, ImGuiCond_Always);
+    ImGui::SetNextWindowSize({500 * UI_SCALE, 96}, ImGuiCond_Always);
 
     ImGui::Begin("##status", nullptr,
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -92,6 +93,8 @@ inline void draw_gui(Settings& s, AppState& app,
         app.tracking_ok ? ImVec4(0,1,0,1) : ImVec4(1,0.3f,0.3f,1),
         "Tracking: %s", app.tracking_status.c_str());
 
+    ImGui::Text("%s", app.hook_status.c_str());
+
     ImGui::TextColored(
         app.game_rev0_ok ? ImVec4(0,1,0,1) : ImVec4(1,0.3f,0.3f,1),
         "%s", app.game_status.c_str());
@@ -99,7 +102,7 @@ inline void draw_gui(Settings& s, AppState& app,
     ImGui::End();
 
     // ── Main window ──────────────────────────
-    ImGui::SetNextWindowPos({0, 78}, ImGuiCond_Once);
+    ImGui::SetNextWindowPos({0, 96}, ImGuiCond_Once);
     ImGui::SetNextWindowSize({520 * UI_SCALE, 600}, ImGuiCond_Once);
 
     ImGui::Begin("PrimedGun Settings");

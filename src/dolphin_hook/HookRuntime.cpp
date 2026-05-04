@@ -62,6 +62,7 @@ DWORD WINAPI RuntimeThread(void*) {
             JitHooks::Poll();
 
             if (SharedState* state = shared.Get()) {
+                state->hookStatusFlags |= HookStatusDllAlive;
                 state->game.frameIndex++;
             }
         }

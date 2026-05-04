@@ -738,6 +738,33 @@ static bool inject_hook_dll(DWORD process_id, const fs::path& dll_path) {
         return false;
     }
 
+    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    auto* set_dll_directory =
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(kernel32, "SetDllDirectoryW"));
+    if (set_dll_directory) {
+        const std::wstring dll_directory = fs::weakly_canonical(dll_path.parent_path(), ec).wstring();
+        const size_t dir_bytes = (dll_directory.size() + 1) * sizeof(wchar_t);
+        void* remote_dir = VirtualAllocEx(process, nullptr, dir_bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (remote_dir && WriteProcessMemory(process, remote_dir, dll_directory.c_str(), dir_bytes, nullptr)) {
+            HANDLE dir_thread = CreateRemoteThread(process, nullptr, 0, set_dll_directory, remote_dir, 0, nullptr);
+            if (dir_thread) {
+                WaitForSingleObject(dir_thread, 5000);
+                DWORD dir_result = 0;
+                GetExitCodeThread(dir_thread, &dir_result);
+                CloseHandle(dir_thread);
+                app_hook_log(dir_result != 0
+                    ? L"Set Dolphin DLL search directory to " + dll_directory
+                    : L"SetDllDirectoryW returned false inside Dolphin.");
+            } else {
+                app_hook_log(L"CreateRemoteThread failed while setting Dolphin DLL search directory.");
+            }
+        } else {
+            app_hook_log(L"Could not write Dolphin DLL search directory before injection.");
+        }
+        if (remote_dir)
+            VirtualFreeEx(process, remote_dir, 0, MEM_RELEASE);
+    }
+
     void* remote_path = VirtualAllocEx(process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remote_path) {
         app_hook_log(L"VirtualAllocEx failed for DLL injection.");
@@ -753,7 +780,6 @@ static bool inject_hook_dll(DWORD process_id, const fs::path& dll_path) {
         return false;
     }
 
-    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
     auto* load_library = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(kernel32, "LoadLibraryW"));
     HANDLE thread = CreateRemoteThread(process, nullptr, 0, load_library, remote_path, 0, nullptr);
     if (!thread) {
@@ -3080,7 +3106,50 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         }
 
         g_app.dolphin_status = g_dolphin.status();
-        if (open_live_shared_state() && g_shared_state && g_shared_state->trackingSource == 1 &&
+        const bool has_shared_state = open_live_shared_state() && g_shared_state;
+        static uint64_t last_hook_heartbeat_seen = 0;
+        static auto last_hook_heartbeat_time = std::chrono::steady_clock::time_point{};
+        if (has_shared_state && g_shared_state->hookHeartbeat != last_hook_heartbeat_seen) {
+            last_hook_heartbeat_seen = g_shared_state->hookHeartbeat;
+            last_hook_heartbeat_time = now;
+        }
+
+        const bool hook_recent =
+            last_hook_heartbeat_time.time_since_epoch().count() != 0 &&
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hook_heartbeat_time).count() < 2500;
+        static bool dolphin_running_for_hook_status = false;
+        static auto last_hook_process_check = std::chrono::steady_clock::time_point{};
+        if (last_hook_process_check.time_since_epoch().count() == 0 ||
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hook_process_check).count() >= 1000) {
+            dolphin_running_for_hook_status = find_process_id_by_name(L"Dolphin.exe").has_value();
+            last_hook_process_check = now;
+        }
+        if (!dolphin_running_for_hook_status) {
+            g_app.hook_status = "Hook: waiting for Dolphin";
+            last_hook_heartbeat_seen = 0;
+            last_hook_heartbeat_time = {};
+        } else if (!hook_recent) {
+            g_app.hook_status = "Hook: not alive in Dolphin";
+        } else {
+            const uint32_t flags = has_shared_state ? g_shared_state->hookStatusFlags : 0;
+            if ((flags & PrimedGun::HookStatusOpenXrInstalled) == 0) {
+                g_app.hook_status = "Hook: injected, waiting for OpenXR";
+            } else if ((flags & PrimedGun::HookStatusOpenXrGetProcReady) == 0) {
+                g_app.hook_status = "Hook: OpenXR seen, waiting for xrGetInstanceProcAddr";
+            } else {
+                g_app.hook_status = "Hook: OpenXR bridge attached";
+            }
+        }
+
+        static auto last_hook_alive_retry = std::chrono::steady_clock::time_point{};
+        if (dolphin_running_for_hook_status && !hook_recent &&
+            (last_hook_alive_retry.time_since_epoch().count() == 0 ||
+             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hook_alive_retry).count() >= 1000)) {
+            last_hook_alive_retry = now;
+            ensure_dolphin_hook_loaded();
+        }
+
+        if (has_shared_state && g_shared_state->trackingSource == 1 &&
             g_shared_state->trackingRuntimeActive && g_shared_state->trackingGeneration != 0) {
             g_app.tracking_ok = true;
             g_app.tracking_status = "DolphinXR OpenXR";
