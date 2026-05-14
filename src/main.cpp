@@ -1169,59 +1169,8 @@ static std::string primedgun_shader_test_mode() {
 }
 
 
-static void append_hud_texture_skip_overrides(std::vector<std::string>& shader_lines) {
-    if (!g_app.shader_texture_skip_enabled)
-        return;
-
-    g_app.shader_texture_skip_index = std::clamp(
-        g_app.shader_texture_skip_index, 0,
-        static_cast<int>(std::size(kHudTextureHashes)) - 1);
-    const std::string texture = kHudTextureHashes[g_app.shader_texture_skip_index];
-
-    static constexpr const char* kHudSkipShaderHashes[] = {
-        "00000000c06e6c69",
-        "00000000b9ec5b5f",
-        "0000000053bb9636",
-        "00000000ed33f8c8",
-        "00000000d9e56ba1",
-        "000000000f312e21",
-        "000000001fa17058",
-        "00000000a1291ea6",
-        "00000000bd217dc5",
-        "00000000d8ab2990",
-        "00000000f5f6bd31",
-        "00000000c1202e58",
-        "00000000076435a1",
-        "000000006d51147b",
-        "0000000075945182",
-    };
-
-    for (size_t i = 0; i < std::size(kHudSkipShaderHashes); ++i) {
-        const std::string name = "$PG Texture Skip " + std::to_string(i);
-        add_ini_section_line(shader_lines, "ShaderOverride_Enable", name);
-        shader_lines.push_back({});
-        shader_lines.push_back(name);
-        shader_lines.push_back(std::string("Hash=") + kHudSkipShaderHashes[i]);
-        shader_lines.push_back("Type=PS");
-        shader_lines.push_back("match_mode=exact_hash");
-        shader_lines.push_back("handling=skip");
-        shader_lines.push_back("texture_mode=include");
-        shader_lines.push_back("texture=" + texture);
-    }
-}
-
-
 static void apply_primedgun_shader_test_mode(std::vector<std::string>& shader_lines,
                                              const std::string& mode) {
-    if (!g_app.shader_hud_core_elements)
-        remove_ini_section_line(shader_lines, "ElementsGroupOverride_Enable", "$HUD Core Elements");
-    if (!g_app.shader_visor_beam_icon)
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Visor & Beam Icon");
-    if (!g_app.shader_area_variant_4)
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Area Variant 4");
-    if (!g_app.shader_missing_map_shader)
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Missing Map Shader");
-
     if (mode == "disable_c06e6c69" || mode == "disable_visor_beam_icon") {
         remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Visor & Beam Icon");
     } else if (mode == "disable_d8ab2990" || mode == "disable_area_variant_4") {
@@ -1231,7 +1180,6 @@ static void apply_primedgun_shader_test_mode(std::vector<std::string>& shader_li
     } else if (mode == "disable_hud_core_elements") {
         remove_ini_section_line(shader_lines, "ElementsGroupOverride_Enable", "$HUD Core Elements");
     }
-    append_hud_texture_skip_overrides(shader_lines);
 }
 
 
@@ -3079,14 +3027,12 @@ static void log_player_owned_projectiles(uint32_t state_mgr, uint32_t player, ui
 
     constexpr uint32_t k_object_list_offset = 0x810;
     constexpr uint32_t k_max_objects = 1024;
-    constexpr uint32_t k_scan_chunk = 64;
     static uint32_t seen[k_max_objects] = {};
-    static uint32_t next_scan_index = 0;
     static auto last_scan = std::chrono::steady_clock::time_point{};
 
     const auto now = std::chrono::steady_clock::now();
     if (last_scan.time_since_epoch().count() != 0 &&
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_scan).count() < 12) {
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_scan).count() < 8) {
         return;
     }
     last_scan = now;
@@ -3099,11 +3045,7 @@ static void log_player_owned_projectiles(uint32_t state_mgr, uint32_t player, ui
     if (player_uid == 0xffff)
         return;
 
-    const uint32_t start_index = next_scan_index % k_max_objects;
-    next_scan_index = (start_index + k_scan_chunk) % k_max_objects;
-
-    for (uint32_t n = 0; n < k_scan_chunk; ++n) {
-        const uint32_t i = (start_index + n) % k_max_objects;
+    for (uint32_t i = 0; i < k_max_objects; ++i) {
         const uint32_t obj = g_dolphin.read_u32(object_list + (i << 3) + 4);
         if (obj < 0x80000000 || obj == player || obj == gun_ptr)
             continue;
@@ -3111,10 +3053,6 @@ static void log_player_owned_projectiles(uint32_t state_mgr, uint32_t player, ui
         const uint32_t obj_uid_word = g_dolphin.read_u32(obj + 0x8);
         const uint16_t owner_uid = static_cast<uint16_t>(g_dolphin.read_u32(obj + 0xec) >> 16);
         if (owner_uid != player_uid)
-            continue;
-
-        const uint32_t marker = obj ^ obj_uid_word ^ (static_cast<uint32_t>(owner_uid) << 16);
-        if (seen[i] == marker)
             continue;
 
         float ox, oy, oz;
@@ -3125,16 +3063,17 @@ static void log_player_owned_projectiles(uint32_t state_mgr, uint32_t player, ui
 
         const bool can_correct_projectile =
             have_velocity && looks_like_real_player_projectile(obj, owner_uid);
+        const uint32_t marker = obj ^ obj_uid_word ^ (static_cast<uint32_t>(owner_uid) << 16);
+        const bool already_corrected = can_correct_projectile && seen[i] == marker;
 
-        if (can_correct_projectile) {
+        if (can_correct_projectile && !already_corrected) {
             write_basis_preserve_translation(obj + 0x34, basis);
             write_basis_preserve_translation(obj + 0x170 + 0x14, basis);
             seen[i] = marker;
         }
         const bool billboarded = false;
-        if (!can_correct_projectile)
+        if (!can_correct_projectile || already_corrected)
             continue;
-        (void)billboarded;
     }
 }
 
@@ -3842,7 +3781,6 @@ static void write_gun_matrix(const Matrix3x4& mat) {
         disarm_memory_writes();
         return;
     }
-    suppress_lock_camera_pitch(state_mgr, player);
 
     const uint32_t gun_ptr = g_dolphin.read_u32(player + addrs.cannon_offset);
     g_app.dbg_gun_ptr = gun_ptr;
@@ -4052,6 +3990,7 @@ static void writer_thread() {
                 g_app.dbg_directional_move_stick_mag = 0.0f;
                 g_directional_move_speed = 0.0f;
             }
+
             Pose adjusted_pose = smooth_openxr_gun_pose(pose);
             apply_tracking_world_yaw(adjusted_pose, player_yaw_delta_deg);
             Matrix3x4 controller_mat_no_offset = pose_to_prime_matrix(

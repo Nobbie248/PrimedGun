@@ -7,52 +7,6 @@
 #include <string>
 #include <algorithm>
 
-inline constexpr const char* kHudTextureHashes[] = {
-    "091f5d24144ede56",
-    "0f4cb495c960bcfa",
-    "378cc384e8052923",
-    "3c96a23daee3b1ba",
-    "40a6c697a216cd45",
-    "4659c82198269108",
-    "47382578f2df4238",
-    "49679a7ccbbbdefb",
-    "6213dc7b4cea2067",
-    "65029fc7530c2556",
-    "6770fbe0cce927a9",
-    "7b99549023d73d0e",
-    "7cd48b7c7d1eabe1",
-    "847faa3fbc72fafd",
-    "98d66e7812c70dd8",
-    "9e01777affbe3954",
-    "a521c0a9fe80801d",
-    "a63ebdc372c2c2b0",
-    "ab6e64b461e598b4",
-    "ac869b6f32d8bbdb",
-    "acfb2c156818d9b4",
-    "b2f411682a7de4a5",
-    "b6101c40f90e35b8",
-    "b9b77bed5f7fe2d2",
-    "bc0f57d9a99a47ba",
-    "c0a6e20f68761b39",
-    "c2f7a381aa992132",
-    "c30411f60672bd23",
-    "c325dd2e81b76450",
-    "c7687d7264fc0495",
-    "d3735622b3206ab0",
-    "dbfe3ff0180733f6",
-    "de81ade3d6923bae",
-    "e1bfa9d78b45f982",
-    "e378bac5ef1d4edc",
-    "e433bfd213466a50",
-    "e4907f1ef76b811b",
-    "e5b3e936a38f15b3",
-    "e8f3888a8db51c51",
-    "ecd7866aed633019",
-    "f394c71d898aa628",
-    "f6415ff79092ca08",
-    "f6f85f3048de0489",
-};
-
 struct AppState {
     bool  active        = false;
     bool  dolphin_ok    = false;
@@ -122,12 +76,6 @@ struct AppState {
     std::atomic<bool> remap_dolphin_controls_requested = false;
     std::atomic<bool> dolphin_performance_apply_requested = false;
     std::atomic<bool> shader_profile_apply_requested = false;
-    bool shader_hud_core_elements = true;
-    bool shader_visor_beam_icon = true;
-    bool shader_area_variant_4 = true;
-    bool shader_missing_map_shader = true;
-    bool shader_texture_skip_enabled = false;
-    int shader_texture_skip_index = 0;
 };
 
 inline void draw_gui(Settings& s, AppState& app,
@@ -351,41 +299,6 @@ inline void draw_gui(Settings& s, AppState& app,
     if (ImGui::CollapsingHeader("Debug")) {
         ImGui::Checkbox("Show matrix values", &s.show_matrix_debug);
         ImGui::Checkbox("Show controller pose", &s.show_controller_debug);
-        ImGui::SeparatorText("HUD shader test");
-        ImGui::TextWrapped("Toggle one item, apply, then check the headset. These only affect the generated Dolphin VR shader profile.");
-        ImGui::Checkbox("HUD core elements", &app.shader_hud_core_elements);
-        ImGui::Checkbox("Visor and beam icon shader", &app.shader_visor_beam_icon);
-        ImGui::Checkbox("Area variant 4 shader", &app.shader_area_variant_4);
-        ImGui::Checkbox("Missing map shader", &app.shader_missing_map_shader);
-        ImGui::SeparatorText("Texture isolation");
-        ImGui::Checkbox("Hide selected texture", &app.shader_texture_skip_enabled);
-        app.shader_texture_skip_index = std::clamp(
-            app.shader_texture_skip_index, 0,
-            static_cast<int>(std::size(kHudTextureHashes)) - 1);
-        const char* selected_texture = kHudTextureHashes[app.shader_texture_skip_index];
-        if (ImGui::BeginCombo("Texture hash", selected_texture)) {
-            for (int i = 0; i < static_cast<int>(std::size(kHudTextureHashes)); ++i) {
-                const bool selected = app.shader_texture_skip_index == i;
-                if (ImGui::Selectable(kHudTextureHashes[i], selected))
-                    app.shader_texture_skip_index = i;
-                if (selected)
-                    ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
-        if (ImGui::Button("Apply HUD Shader Toggles")) {
-            app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Reset HUD Toggles")) {
-            app.shader_hud_core_elements = true;
-            app.shader_visor_beam_icon = true;
-            app.shader_area_variant_4 = true;
-            app.shader_missing_map_shader = true;
-            app.shader_texture_skip_enabled = false;
-            app.shader_texture_skip_index = 0;
-            app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
-        }
         if (s.show_controller_debug && app.last_pose.valid) {
             ImGui::Text("Controller pos: %.3f %.3f %.3f",
                 app.last_pose.px, app.last_pose.py, app.last_pose.pz);

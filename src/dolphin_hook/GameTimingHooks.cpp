@@ -337,7 +337,7 @@ bool Install() {
     if (g_installed.exchange(true)) {
         return true;
     }
-    Log(L"GameTimingHooks installed. PPC code dumps enabled; gameplay patches disabled.");
+    Log(L"GameTimingHooks installed.");
     ResolveMemBase();
     return true;
 }

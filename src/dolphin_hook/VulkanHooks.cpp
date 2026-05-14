@@ -1638,17 +1638,8 @@ void PollRuntimeControls(const SharedState* shared) {
             L" appFlag=" + std::to_wstring(shared ? shared->settings.showAlignmentPrompt : 0) +
             L" tracking=" + std::to_wstring(shared ? shared->trackingRuntimeActive : 0));
     }
-
-    static uint64_t lastF7MarkerMs = 0;
-    const uint64_t nowMs = GetTickCount64();
-
-    const SHORT f7 = GetAsyncKeyState(VK_F7);
-    if ((f7 & 0x0001) != 0 && nowMs - lastF7MarkerMs > 500) {
-        lastF7MarkerMs = nowMs;
-        g_armCaptureNextFrame.store(true, std::memory_order_relaxed);
-        std::lock_guard<std::mutex> guard(g_logMutex);
-        Log(L"Frame summary and Vulkan draw-call capture armed with F7; waiting for next full frame.");
-    }
+    g_armCaptureNextFrame.store(false, std::memory_order_relaxed);
+    g_captureDrawCalls.store(false, std::memory_order_relaxed);
 }
 
 void Shutdown() {
