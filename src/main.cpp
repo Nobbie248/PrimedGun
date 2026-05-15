@@ -949,6 +949,9 @@ $Unnamed Shader 28
 $Unnamed Shader 29
 $Unnamed Shader 30
 $Unnamed Shader 31
+$Unnamed Shader 32
+$Unnamed Shader 33
+$Unnamed Shader 34
 [ShaderOverride]
 $Unnamed Shader 1
 Hash=000000000f312e21
@@ -1219,6 +1222,31 @@ Hash=00000000c06e6c69
 Type=PS
 match_mode=exact_hash
 handling=headlocked
+
+$Unnamed Shader 32
+Hash=00000000d8ab2990
+Type=PS
+match_mode=exact_hash
+handling=headlocked
+texture_mode=include
+texture=02f5631fb7a3b6ff
+
+$Unnamed Shader 33
+Hash=000000000f312e21
+Type=PS
+match_mode=exact_hash
+handling=headlocked
+texture_mode=include
+texture=7b99549023d73d0e
+texture=a63ebdc372c2c2b0
+
+$Unnamed Shader 34
+Hash=000000001fa17058
+Type=PS
+match_mode=exact_hash
+handling=headlocked
+texture_mode=include
+texture=02f5631fb7a3b6ff
 )ini";
 }
 
@@ -2286,7 +2314,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     static auto s_last_near_head = std::chrono::steady_clock::time_point{};
     static XrDpadDir s_latched_dir = XrDpadNone;
     static auto s_latch_until = std::chrono::steady_clock::time_point{};
-    static auto s_last_c_stick_suppress = std::chrono::steady_clock::time_point{};
+    static bool s_c_stick_suppressed = false;
     g_app.dbg_xr_dpad_active = false;
     g_app.dbg_xr_dpad_dir = XrDpadNone;
     float stick_x = 0.0f;
@@ -2309,7 +2337,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
         s_last_near_head = {};
         s_latched_dir = XrDpadNone;
         s_latch_until = {};
-        s_last_c_stick_suppress = {};
+        s_c_stick_suppressed = false;
         return false;
     }
 
@@ -2322,7 +2350,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
         s_last_near_head = {};
         s_latched_dir = XrDpadNone;
         s_latch_until = {};
-        s_last_c_stick_suppress = {};
+        s_c_stick_suppressed = false;
         return false;
     }
 
@@ -2342,18 +2370,15 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
             s_last_press_pulse = {};
             s_latched_dir = XrDpadNone;
             s_latch_until = {};
-            s_last_c_stick_suppress = {};
+            s_c_stick_suppressed = false;
             return false;
         }
         in_head_zone = true;
     }
     set_player_input_disabled_for_dpad(state_mgr, in_head_zone);
-    const bool refresh_c_stick_suppress =
-        s_last_c_stick_suppress.time_since_epoch().count() == 0 ||
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_c_stick_suppress).count() >= 16;
-    if (refresh_c_stick_suppress) {
+    if (!s_c_stick_suppressed) {
         suppress_c_stick_for_dpad(state_mgr);
-        s_last_c_stick_suppress = now;
+        s_c_stick_suppressed = true;
     }
     const float dpad_deadzone = std::min(g_settings.xr_dpad_deadzone, 0.25f);
     const XrDpadDir raw_dir = get_stick_dpad_direction_with_hysteresis(
