@@ -952,6 +952,7 @@ $Unnamed Shader 31
 $Unnamed Shader 32
 $Unnamed Shader 33
 $Unnamed Shader 34
+$Unnamed Shader 35
 [ShaderOverride]
 $Unnamed Shader 1
 Hash=000000000f312e21
@@ -1230,6 +1231,7 @@ match_mode=exact_hash
 handling=headlocked
 texture_mode=include
 texture=02f5631fb7a3b6ff
+texture=b093592e137cb513
 
 $Unnamed Shader 33
 Hash=000000000f312e21
@@ -1247,6 +1249,15 @@ match_mode=exact_hash
 handling=headlocked
 texture_mode=include
 texture=02f5631fb7a3b6ff
+texture=b093592e137cb513
+
+$Unnamed Shader 35
+Hash=00000000a1291ea6
+Type=PS
+match_mode=exact_hash
+handling=headlocked
+texture_mode=include
+texture=b093592e137cb513
 )ini";
 }
 
@@ -3986,7 +3997,7 @@ static void tracking_thread() {
 
 
 static void dpad_thread() {
-    constexpr auto k_tick = std::chrono::milliseconds(4);
+    constexpr auto k_tick = std::chrono::milliseconds(1);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     HighResWaitTimer wait_timer;
 
