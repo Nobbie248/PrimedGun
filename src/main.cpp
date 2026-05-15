@@ -953,6 +953,10 @@ $Unnamed Shader 32
 $Unnamed Shader 33
 $Unnamed Shader 34
 $Unnamed Shader 35
+$Unnamed Shader 36
+$Unnamed Shader 37
+$Unnamed Shader 38
+$Unnamed Shader 39
 [ShaderOverride]
 $Unnamed Shader 1
 Hash=000000000f312e21
@@ -1258,6 +1262,36 @@ match_mode=exact_hash
 handling=headlocked
 texture_mode=include
 texture=b093592e137cb513
+
+$Unnamed Shader 36
+Hash=00000000f5f6bd31
+Type=PS
+match_mode=exact_hash
+handling=skip
+texture_mode=include
+texture=0397d88175be76a4
+
+$Unnamed Shader 37
+Hash=0000000005b8ed11
+Type=PS
+match_mode=exact_hash
+handling=skip
+texture_mode=include
+texture=0397d88175be76a4
+
+$Unnamed Shader 38
+Hash=00000000ed33f8c8
+Type=PS
+match_mode=exact_hash
+handling=skip
+texture_mode=include
+texture=02f5631fb7a3b6ff
+
+$Unnamed Shader 39
+Hash=00000000ed33f8c8
+Type=PS
+match_mode=exact_hash
+handling=skip
 )ini";
 }
 
