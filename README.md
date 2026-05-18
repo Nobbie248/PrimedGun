@@ -56,11 +56,11 @@ PrimedGun configures the Dolphin pieces it needs at startup where possible:
 
 PrimedGun picks the active GM8E01 profile it can find, then writes its Dolphin defaults there:
 
-- `C:\Users\<user>\Documents\Dolphin Emulator\GameSettingsVR\GM8E01.ini`
-- `C:\Users\<user>\Documents\Dolphin Emulator\GameSettings\GM8E01.ini`
+- `%APPDATA%\Dolphin Emulator\GameSettingsVR\GM8E01.ini`
+- `%APPDATA%\Dolphin Emulator\GameSettings\GM8E01.ini`
 - Portable Dolphin profiles beside `Dolphin.exe`, such as `User\GameSettingsVR\GM8E01.ini` and `User\GameSettings\GM8E01.ini`
 
-When Dolphin is running, portable profiles near the running `Dolphin.exe` are preferred. If no existing GM8E01 profile is found, PrimedGun creates the best matching profile for that Dolphin setup.
+When Dolphin is running, portable profiles near the running `Dolphin.exe` are preferred. Otherwise PrimedGun uses Dolphin's normal roaming profile folder under `%APPDATA%\Dolphin Emulator`. If no existing GM8E01 profile is found, PrimedGun creates the best matching profile for that Dolphin setup.
 
 The VR profile is where PrimedGun saves the GM8E01 VR settings and pre-configured shader overrides. The normal game profile is used to disable unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
 
@@ -91,7 +91,7 @@ These patches are owned by PrimedGun and are applied through the hook, not throu
 ## Notes
 
 - Settings are saved to `primedgun_settings.ini`.
-- Temporary controller and hotkey setup is written to Dolphin's normal Documents config files under `C:\Users\<user>\Documents\Dolphin Emulator\Config\...`.
+- Temporary controller and hotkey setup is written to Dolphin's normal roaming config files under `%APPDATA%\Dolphin Emulator\Config\...`, or to the portable `User\Config\...` folder beside `Dolphin.exe` when portable Dolphin is in use.
 - The app reads controller tracking from Dolphin-side OpenXR and writes the cannon transform into Dolphin memory.
 - PrimedGun should be running before Metroid Prime is loaded so the Dolphin-side hook is ready as soon as GM8E01 memory appears.
 - For the best experience, try not to turn your body around. You can move in the game like this, but functionality is not ideal.
