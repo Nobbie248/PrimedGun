@@ -78,7 +78,6 @@ struct AppState {
     std::atomic<bool> reconnect_tracking_requested = false;
     std::atomic<bool> remap_dolphin_controls_requested = false;
     std::atomic<bool> dolphin_performance_apply_requested = false;
-    std::atomic<bool> shader_profile_apply_requested = false;
     ImTextureID controller_layout_texture = ImTextureID_Invalid;
     int controller_layout_width = 0;
     int controller_layout_height = 0;
@@ -243,11 +242,6 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
                 app.dolphin_performance_apply_requested.store(true, std::memory_order_relaxed);
             }
 
-            const bool old_shader_overrides_enabled = s.shader_overrides_enabled;
-            ImGui::Checkbox("Use PrimedGun shader overrides", &s.shader_overrides_enabled);
-            if (s.shader_overrides_enabled != old_shader_overrides_enabled) {
-                app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
-            }
             ImGui::Spacing();
             ImGui::TextDisabled("Applied to Dolphin's active GM8E01 VR profile.");
             end_panel();
@@ -472,7 +466,6 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
         s.reset_all();
         app.remap_dolphin_controls_requested.store(true, std::memory_order_relaxed);
         app.dolphin_performance_apply_requested.store(true, std::memory_order_relaxed);
-        app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
     }
     ImGui::SameLine();
     if (ImGui::Button("Save Settings")) {

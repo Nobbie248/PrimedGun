@@ -984,7 +984,13 @@ static void apply_dolphin_vr_units_per_meter() {
         {"UnitsPerMetre", "1.50"},
     };
 
-    for (const fs::path& path : dolphin_gm8e01_vr_settings_paths()) {
+    const std::vector<fs::path> paths = dolphin_gm8e01_vr_settings_paths();
+    if (paths.empty()) {
+        app_hook_log(L"No existing GM8E01 VR profile found; launch the game once in Dolphin before starting PrimedGun.");
+        return;
+    }
+
+    for (const fs::path& path : paths) {
         if (path.empty())
             continue;
 
@@ -1050,9 +1056,16 @@ static void disable_unmanaged_dolphin_codes_in(const fs::path& path) {
 }
 
 static void disable_unmanaged_dolphin_codes() {
-    for (const fs::path& path : dolphin_gm8e01_settings_paths())
+    const std::vector<fs::path> game_paths = dolphin_gm8e01_settings_paths();
+    const std::vector<fs::path> vr_paths = dolphin_gm8e01_vr_settings_paths();
+    if (game_paths.empty() && vr_paths.empty()) {
+        app_hook_log(L"No existing GM8E01 game profile found; unmanaged Dolphin AR/Gecko enabled-code lists were left untouched.");
+        return;
+    }
+
+    for (const fs::path& path : game_paths)
         disable_unmanaged_dolphin_codes_in(path);
-    for (const fs::path& path : dolphin_gm8e01_vr_settings_paths())
+    for (const fs::path& path : vr_paths)
         disable_unmanaged_dolphin_codes_in(path);
 }
 
@@ -1112,9 +1125,10 @@ static void add_dolphin_game_settings_paths(std::vector<fs::path>& paths,
 }
 
 
-static fs::path select_dolphin_game_settings_path(const wchar_t* folder_name,
-                                                  const fs::path& documents_path) {
+static std::vector<fs::path> existing_dolphin_game_settings_paths(const wchar_t* folder_name,
+                                                                  const fs::path& documents_path) {
     std::vector<fs::path> candidates;
+    std::vector<fs::path> paths;
 
     const std::optional<DWORD> dolphin_pid = find_process_id_by_name(L"Dolphin.exe");
     if (dolphin_pid) {
@@ -1127,533 +1141,22 @@ static fs::path select_dolphin_game_settings_path(const wchar_t* folder_name,
     add_unique_path(candidates, documents_path);
 
     for (const fs::path& path : candidates) {
-        if (_wcsicmp(path.wstring().c_str(), documents_path.wstring().c_str()) == 0)
-            continue;
         std::error_code ec;
-        if (fs::exists(path, ec))
-            return path;
+        if (fs::exists(path, ec) && !ec)
+            add_unique_path(paths, path);
     }
 
-    for (const fs::path& path : candidates) {
-        if (_wcsicmp(path.wstring().c_str(), documents_path.wstring().c_str()) == 0)
-            continue;
-        std::error_code ec;
-        if (fs::exists(path.parent_path(), ec))
-            return path;
-    }
-
-    std::error_code ec;
-    if (fs::exists(documents_path, ec) || fs::exists(documents_path.parent_path(), ec))
-        return documents_path;
-
-    return documents_path;
+    return paths;
 }
 
 
 static std::vector<fs::path> dolphin_gm8e01_settings_paths() {
-    std::vector<fs::path> paths;
-    add_unique_path(paths, select_dolphin_game_settings_path(
-                               L"GameSettings", dolphin_gm8e01_settings_path()));
-    return paths;
+    return existing_dolphin_game_settings_paths(L"GameSettings", dolphin_gm8e01_settings_path());
 }
 
 
 static std::vector<fs::path> dolphin_gm8e01_vr_settings_paths() {
-    std::vector<fs::path> paths;
-    add_unique_path(paths, select_dolphin_game_settings_path(
-                               L"GameSettingsVR", dolphin_gm8e01_vr_settings_path()));
-    return paths;
-}
-
-
-static const char* primedgun_gm8e01_vr_shader_profile() {
-return R"ini([ShaderOverride_Enable]
-$Unnamed Shader 1
-$Unnamed Shader 2
-$Unnamed Shader 3
-$Unnamed Shader 4
-$Unnamed Shader 5
-$Unnamed Shader 6
-$Unnamed Shader 7
-$Unnamed Shader 8
-$Unnamed Shader 9
-$Unnamed Shader 10
-$Unnamed Shader 11
-$Unnamed Shader 12
-$Unnamed Shader 13
-$Unnamed Shader 14
-$Unnamed Shader 15
-$Unnamed Shader 17
-$Unnamed Shader 18
-$Unnamed Shader 19
-$Unnamed Shader 21
-$Unnamed Shader 22
-$Unnamed Shader 23
-$Unnamed Shader 24
-$Unnamed Shader 25
-$Unnamed Shader 26
-$Unnamed Shader 27
-$Unnamed Shader 28
-$Unnamed Shader 29
-$Unnamed Shader 30
-$Unnamed Shader 31
-$Unnamed Shader 32
-$Unnamed Shader 33
-$Unnamed Shader 34
-$Unnamed Shader 35
-$Unnamed Shader 36
-$Unnamed Shader 37
-$Unnamed Shader 38
-$Unnamed Shader 39
-[ShaderOverride]
-$Unnamed Shader 1
-Hash=000000000f312e21
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-layer=0
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 2
-Hash=000000001fa17058
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 3
-Hash=0000000075945182
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=091f5d24144ede56
-texture=1887bd9eea299c6f
-texture=3c96a23daee3b1ba
-texture=49679a7ccbbbdefb
-texture=7b99549023d73d0e
-texture=a63ebdc372c2c2b0
-texture=b2f411682a7de4a5
-texture=b9b77bed5f7fe2d2
-texture=e433bfd213466a50
-texture=f394c71d898aa628
-texture=f6415ff79092ca08
-
-$Unnamed Shader 4
-Hash=00000000a1291ea6
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 5
-Hash=00000000bd217dc5
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=4659c82198269108
-
-$Unnamed Shader 6
-Hash=00000000c1202e58
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 7
-Hash=00000000d8ab2990
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=47382578f2df4238
-texture=5a8bf056331986c0
-
-$Unnamed Shader 8
-Hash=00000000f5f6bd31
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 9
-Hash=00000000076435a1
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-texture=b093592e137cb513
-
-$Unnamed Shader 10
-Hash=0000000017f46bd8
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-texture=7b99549023d73d0e
-texture=a63ebdc372c2c2b0
-
-$Unnamed Shader 11
-Hash=000000006d51147b
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=091f5d24144ede56
-texture=1887bd9eea299c6f
-texture=3c96a23daee3b1ba
-texture=4659c82198269108
-texture=49679a7ccbbbdefb
-texture=7b99549023d73d0e
-texture=a63ebdc372c2c2b0
-texture=b9b77bed5f7fe2d2
-texture=e433bfd213466a50
-texture=f394c71d898aa628
-texture=f6415ff79092ca08
-
-$Unnamed Shader 12
-Hash=00000000a5e4383c
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=4659c82198269108
-
-$Unnamed Shader 13
-Hash=00000000b9ec5b5f
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 14
-Hash=00000000c06e6c69
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=47382578f2df4238
-texture=5a8bf056331986c0
-
-$Unnamed Shader 15
-Hash=00000000ed33f8c8
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=02f5631fb7a3b6ff
-texture=5a8bf056331986c0
-
-$Unnamed Shader 17
-Hash=00000000d9e56ba1
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=5a8bf056331986c0
-
-$Unnamed Shader 18
-Hash=00000000076435a1
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=02f5631fb7a3b6ff
-texture=847faa3fbc72fafd
-texture=c2f7a381aa992132
-
-$Unnamed Shader 19
-Hash=0000000017f46bd8
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=6213dc7b4cea2067
-texture=7b99549023d73d0e
-texture=847faa3fbc72fafd
-
-$Unnamed Shader 21
-Hash=00000000b9ec5b5f
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=847faa3fbc72fafd
-texture=d642fe322e4d3ac8
-texture=de81ade3d6923bae
-texture=fd423b037c7bf9d8
-
-$Unnamed Shader 22
-Hash=00000000d9e56ba1
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=6213dc7b4cea2067
-
-$Unnamed Shader 23
-Hash=00000000ed33f8c8
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=6213dc7b4cea2067
-
-$Unnamed Shader 24
-Hash=00000000c06e6c69
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=47382578f2df4238
-texture=847faa3fbc72fafd
-texture=e8f3888a8db51c51
-
-$Unnamed Shader 25
-Hash=0000000017f46bd8
-Type=PS
-match_mode=exact_hash
-handling=skip
-texture_mode=include
-texture=98d66e7812c70dd8
-
-$Unnamed Shader 26
-Hash=0000000053bb9636
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-
-$Unnamed Shader 27
-Hash=00000000ed33f8c8
-Type=PS
-match_mode=exact_hash
-handling=fullscreen
-texture_mode=include
-texture=847faa3fbc72fafd
-
-$Unnamed Shader 28
-Hash=00000000c06e6c69
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=b0f5bd8d58ca0c28
-texture=c30411f60672bd23
-texture=e8f3888a8db51c51
-
-$Unnamed Shader 29
-Hash=0000000017f46bd8
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=45b8821df889a47d
-texture=6213dc7b4cea2067
-texture=a63ebdc372c2c2b0
-texture=e433bfd213466a50
-texture=f6f85f3048de0489
-
-$Unnamed Shader 30
-Hash=00000000076435a1
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=c2f7a381aa992132
-
-$Unnamed Shader 31
-Hash=00000000c06e6c69
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=47382578f2df4238
-texture=e8f3888a8db51c51
-
-$Unnamed Shader 32
-Hash=00000000d8ab2990
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=02f5631fb7a3b6ff
-texture=b093592e137cb513
-
-$Unnamed Shader 33
-Hash=000000000f312e21
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=7b99549023d73d0e
-texture=a63ebdc372c2c2b0
-
-$Unnamed Shader 34
-Hash=000000001fa17058
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=02f5631fb7a3b6ff
-texture=b093592e137cb513
-
-$Unnamed Shader 35
-Hash=00000000a1291ea6
-Type=PS
-match_mode=exact_hash
-handling=headlocked
-texture_mode=include
-texture=b093592e137cb513
-
-$Unnamed Shader 36
-Hash=00000000f5f6bd31
-Type=PS
-match_mode=exact_hash
-handling=skip
-texture_mode=include
-texture=0397d88175be76a4
-
-$Unnamed Shader 37
-Hash=0000000005b8ed11
-Type=PS
-match_mode=exact_hash
-handling=skip
-texture_mode=include
-texture=0397d88175be76a4
-
-$Unnamed Shader 38
-Hash=00000000ed33f8c8
-Type=PS
-match_mode=exact_hash
-handling=skip
-texture_mode=include
-texture=02f5631fb7a3b6ff
-
-$Unnamed Shader 39
-Hash=00000000ed33f8c8
-Type=PS
-match_mode=exact_hash
-handling=skip
-
-)ini";
-}
-
-
-static std::string primedgun_shader_test_mode() {
-    const fs::path path = exe_directory() / L"primedgun_shader_test_mode.txt";
-    std::ifstream in(path);
-    std::string mode;
-    if (!std::getline(in, mode))
-        return {};
-    return trim_ascii(mode);
-}
-
-
-static void apply_primedgun_shader_test_mode(std::vector<std::string>& shader_lines,
-                                             const std::string& mode) {
-    if (mode == "disable_c06e6c69" || mode == "disable_visor_beam_icon") {
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Visor & Beam Icon");
-    } else if (mode == "disable_d8ab2990" || mode == "disable_area_variant_4") {
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Area Variant 4");
-    } else if (mode == "disable_c1202e58" || mode == "disable_missing_map_shader") {
-        remove_ini_section_line(shader_lines, "ShaderOverride_Enable", "$HUD Missing Map Shader");
-    } else if (mode == "disable_hud_core_elements") {
-        remove_ini_section_line(shader_lines, "ElementsGroupOverride_Enable", "$HUD Core Elements");
-    }
-}
-
-
-static void apply_primedgun_vr_shader_profile_in(const fs::path& path) {
-    if (path.empty())
-        return;
-
-    backup_file_once(path);
-
-    std::vector<std::string> lines = remove_ini_sections(
-        read_text_lines(path),
-        {"ShaderOverride_Enable", "ShaderOverride",
-         "ElementsGroupOverride_Enable", "ElementsGroupOverride"});
-
-    while (!lines.empty() && lines.back().empty())
-        lines.pop_back();
-    if (!lines.empty())
-        lines.push_back({});
-
-    std::vector<std::string> shader_lines =
-        split_text_lines(primedgun_gm8e01_vr_shader_profile());
-    apply_primedgun_shader_test_mode(shader_lines, primedgun_shader_test_mode());
-    lines.insert(lines.end(), shader_lines.begin(), shader_lines.end());
-    write_text_lines_if_changed(path, lines);
-}
-
-static void remove_primedgun_vr_shader_profile_in(const fs::path& path) {
-    if (path.empty())
-        return;
-
-    std::vector<std::string> lines = remove_ini_sections(
-        read_text_lines(path),
-        {"ShaderOverride_Enable", "ShaderOverride",
-         "ElementsGroupOverride_Enable", "ElementsGroupOverride"});
-
-    while (!lines.empty() && lines.back().empty())
-        lines.pop_back();
-    write_text_lines_if_changed(path, lines);
-}
-
-
-static void apply_primedgun_vr_shader_profile() {
-    if (fs::exists(exe_directory() / L"primedgun_shader_capture_mode.txt")) {
-        app_hook_log(L"Skipped PrimedGun GM8E01 VR shader profile; shader capture mode is enabled.");
-        return;
-    }
-
-    for (const fs::path& path : dolphin_gm8e01_vr_settings_paths()) {
-        if (!g_settings.shader_overrides_enabled) {
-            remove_primedgun_vr_shader_profile_in(path);
-            app_hook_log(L"Removed PrimedGun GM8E01 VR shader profile from " + path.wstring());
-            continue;
-        }
-
-        apply_primedgun_vr_shader_profile_in(path);
-        std::wstring suffix;
-        const std::string mode = primedgun_shader_test_mode();
-        if (!mode.empty())
-            suffix = L" (test mode: " + std::wstring(mode.begin(), mode.end()) + L")";
-        app_hook_log(L"Forced PrimedGun GM8E01 VR shader profile in " + path.wstring() + suffix);
-    }
-}
-
-static bool primedgun_vr_shader_profile_needs_apply() {
-    if (!g_settings.shader_overrides_enabled)
-        return false;
-
-    for (const fs::path& path : dolphin_gm8e01_vr_settings_paths()) {
-        const std::vector<std::string> lines = read_text_lines(path);
-        bool has_enable_section = false;
-        bool has_shader_section = false;
-        bool has_last_shader = false;
-        for (const std::string& line : lines) {
-            const std::string trimmed = trim_ascii(line);
-            if (trimmed == "[ShaderOverride_Enable]")
-                has_enable_section = true;
-            else if (trimmed == "[ShaderOverride]")
-                has_shader_section = true;
-            else if (trimmed == "$Unnamed Shader 39")
-                has_last_shader = true;
-        }
-        if (!has_enable_section || !has_shader_section || !has_last_shader)
-            return true;
-    }
-    return false;
+    return existing_dolphin_game_settings_paths(L"GameSettingsVR", dolphin_gm8e01_vr_settings_path());
 }
 
 
@@ -2171,7 +1674,7 @@ static bool vr_settings_pointer_hit(const Pose& left, const Pose& right, float& 
     return x_out >= 0.0f && x_out <= 1.0f && y_out >= 0.0f && y_out <= 1.0f;
 }
 
-static constexpr uint32_t k_vr_settings_item_count = 32;
+static constexpr uint32_t k_vr_settings_item_count = 31;
 
 static std::chrono::steady_clock::time_point g_vr_settings_saved_notice_until{};
 
@@ -2185,7 +1688,6 @@ static void change_vr_setting(uint32_t index, bool increase) {
         return;
     case 1:
         g_settings.reset_all();
-        g_app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
         break;
     case 2: g_settings.use_right_hand = !g_settings.use_right_hand; break;
     case 3: g_settings.require_trigger = !g_settings.require_trigger; break;
@@ -2216,28 +1718,24 @@ static void change_vr_setting(uint32_t index, bool increase) {
         g_settings.gun_targeting_radius = kDefaultGunTargetingRadius;
         break;
     case 18: g_settings.auto_dolphin_xr_controls = !g_settings.auto_dolphin_xr_controls; break;
-    case 19:
-        g_settings.shader_overrides_enabled = !g_settings.shader_overrides_enabled;
-        g_app.shader_profile_apply_requested.store(true, std::memory_order_relaxed);
-        break;
-    case 20: g_settings.xr_dpad_enabled = !g_settings.xr_dpad_enabled; break;
-    case 21: g_settings.xr_dpad_head_radius = std::clamp(g_settings.xr_dpad_head_radius + sign * 0.01f, 0.08f, 0.28f); break;
-    case 22: g_settings.xr_dpad_head_y_below = std::clamp(g_settings.xr_dpad_head_y_below + sign * 0.01f, 0.02f, 0.25f); break;
-    case 23: g_settings.xr_dpad_deadzone = std::clamp(g_settings.xr_dpad_deadzone + sign * 0.01f, 0.20f, 0.80f); break;
-    case 24:
+    case 19: g_settings.xr_dpad_enabled = !g_settings.xr_dpad_enabled; break;
+    case 20: g_settings.xr_dpad_head_radius = std::clamp(g_settings.xr_dpad_head_radius + sign * 0.01f, 0.08f, 0.28f); break;
+    case 21: g_settings.xr_dpad_head_y_below = std::clamp(g_settings.xr_dpad_head_y_below + sign * 0.01f, 0.02f, 0.25f); break;
+    case 22: g_settings.xr_dpad_deadzone = std::clamp(g_settings.xr_dpad_deadzone + sign * 0.01f, 0.20f, 0.80f); break;
+    case 23:
         g_settings.xr_dpad_enabled = kDefaultXrDpadEnabled;
         g_settings.xr_dpad_head_radius = kDefaultXrDpadHeadRadius;
         g_settings.xr_dpad_head_y_below = kDefaultXrDpadHeadYBelow;
         g_settings.xr_dpad_deadzone = kDefaultXrDpadDeadzone;
         g_settings.xr_dpad_stick_axis = kDefaultXrDpadStickAxis;
         break;
-    case 25: g_settings.directional_movement_enabled = !g_settings.directional_movement_enabled; break;
-    case 26: g_settings.directional_movement_use_right_stick = !g_settings.directional_movement_use_right_stick; break;
-    case 27: g_settings.directional_movement_deadzone = std::clamp(g_settings.directional_movement_deadzone + sign * 0.01f, 0.05f, 0.80f); break;
-    case 28: g_settings.directional_movement_speed = std::clamp(g_settings.directional_movement_speed + sign * 0.25f, 4.0f, 30.0f); break;
-    case 29: g_settings.directional_movement_accel = std::clamp(g_settings.directional_movement_accel + sign * 1.0f, 5.0f, 120.0f); break;
-    case 30: g_settings.directional_movement_air_accel = std::clamp(g_settings.directional_movement_air_accel + sign * 0.5f, 0.0f, 60.0f); break;
-    case 31:
+    case 24: g_settings.directional_movement_enabled = !g_settings.directional_movement_enabled; break;
+    case 25: g_settings.directional_movement_use_right_stick = !g_settings.directional_movement_use_right_stick; break;
+    case 26: g_settings.directional_movement_deadzone = std::clamp(g_settings.directional_movement_deadzone + sign * 0.01f, 0.05f, 0.80f); break;
+    case 27: g_settings.directional_movement_speed = std::clamp(g_settings.directional_movement_speed + sign * 0.25f, 4.0f, 30.0f); break;
+    case 28: g_settings.directional_movement_accel = std::clamp(g_settings.directional_movement_accel + sign * 1.0f, 5.0f, 120.0f); break;
+    case 29: g_settings.directional_movement_air_accel = std::clamp(g_settings.directional_movement_air_accel + sign * 0.5f, 0.0f, 60.0f); break;
+    case 30:
         g_settings.directional_movement_enabled = kDefaultDirectionalMovementEnabled;
         g_settings.directional_movement_use_right_stick = kDefaultDirectionalMovementUseRightStick;
         g_settings.directional_movement_deadzone = kDefaultDirectionalMovementDeadzone;
@@ -2277,7 +1775,6 @@ static void sync_vr_settings_to_shared(uint32_t generation, bool visible, uint32
     s.gunTargetingRadius = g_settings.gun_targeting_radius;
     s.autoDolphinXrControls = g_settings.auto_dolphin_xr_controls ? 1u : 0u;
     s.dolphin60FpsCap = g_settings.dolphin_60fps_cap ? 1u : 0u;
-    s.shaderOverridesEnabled = g_settings.shader_overrides_enabled ? 1u : 0u;
     s.xrDpadEnabled = g_settings.xr_dpad_enabled ? 1u : 0u;
     s.xrDpadHeadRadius = g_settings.xr_dpad_head_radius;
     s.xrDpadHeadYBelow = g_settings.xr_dpad_head_y_below;
@@ -4612,7 +4109,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     apply_dolphin_vr_units_per_meter();
     apply_dolphin_required_runtime_config();
     apply_dolphin_60fps_cap();
-    apply_primedgun_vr_shader_profile();
     apply_dolphin_xr_camera_forward_zero();
     disable_unmanaged_dolphin_codes();
     sync_dolphin_xr_gamecube_controls(g_settings.auto_dolphin_xr_controls);
@@ -4726,7 +4222,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             apply_dolphin_vr_units_per_meter();
             apply_dolphin_required_runtime_config();
             apply_dolphin_60fps_cap();
-            apply_primedgun_vr_shader_profile();
             disable_unmanaged_dolphin_codes();
             sync_dolphin_xr_gamecube_controls(g_settings.auto_dolphin_xr_controls);
             apply_dolphin_xr_camera_forward_zero();
@@ -4745,11 +4240,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             apply_dolphin_60fps_cap();
             g_settings.save();
         }
-        if (g_app.shader_profile_apply_requested.exchange(false, std::memory_order_relaxed)) {
-            apply_primedgun_vr_shader_profile();
-            g_settings.save();
-        }
-
         static auto last_dolphin_auto_connect = std::chrono::steady_clock::time_point{};
         static DWORD last_auto_hook_pid = 0;
         const auto now = std::chrono::steady_clock::now();
@@ -4762,7 +4252,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 apply_dolphin_vr_units_per_meter();
                 apply_dolphin_required_runtime_config();
                 apply_dolphin_60fps_cap();
-                apply_primedgun_vr_shader_profile();
                 disable_unmanaged_dolphin_codes();
                 sync_dolphin_xr_gamecube_controls(g_settings.auto_dolphin_xr_controls);
                 apply_dolphin_xr_camera_forward_zero();
@@ -4785,10 +4274,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 app_hook_log(L"Dolphin setup watchdog reapplied OpenXR controller mapping.");
                 apply_dolphin_xr_gamecube_controls();
                 g_last_auto_dolphin_xr_controls = true;
-            }
-            if (primedgun_vr_shader_profile_needs_apply()) {
-                app_hook_log(L"Dolphin setup watchdog reapplied PrimedGun shader profile.");
-                apply_primedgun_vr_shader_profile();
             }
         }
 

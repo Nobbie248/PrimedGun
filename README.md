@@ -44,7 +44,6 @@ For distribution/share, the useful files are:
 - In-headset settings menu anchored to the left controller.
 - Dolphin-side hook bridge for app-owned game patches, OpenXR tracking, overlays, and diagnostics.
 - Automatic Dolphin XR setup for the GM8E01 VR settings PrimedGun expects.
-- Pre-configured shader profile.
 
 ## Dolphin Setup
 
@@ -54,15 +53,15 @@ PrimedGun configures the Dolphin pieces it needs at startup where possible:
 - Sets the GM8E01 Dolphin XR world scale / units-per-meter value used by PrimedGun.
 - Can map Dolphin's Port 1 controls and reset-view hotkey to OpenXR when the setting is enabled.
 
-PrimedGun picks the active GM8E01 profile it can find, then writes its Dolphin defaults there:
+PrimedGun writes its GM8E01 Dolphin defaults only to profile files that already exist. If matching GM8E01 profiles exist in more than one active Dolphin location, PrimedGun updates all of them:
 
 - `%APPDATA%\Dolphin Emulator\GameSettingsVR\GM8E01.ini`
 - `%APPDATA%\Dolphin Emulator\GameSettings\GM8E01.ini`
 - Portable Dolphin profiles beside `Dolphin.exe`, such as `User\GameSettingsVR\GM8E01.ini` and `User\GameSettings\GM8E01.ini`
 
-When Dolphin is running, portable profiles near the running `Dolphin.exe` are preferred. Otherwise PrimedGun uses Dolphin's normal roaming profile folder under `%APPDATA%\Dolphin Emulator`. If no existing GM8E01 profile is found, PrimedGun creates the best matching profile for that Dolphin setup.
+When Dolphin is running, PrimedGun checks portable profiles near the running `Dolphin.exe` and Dolphin's normal roaming profile folder under `%APPDATA%\Dolphin Emulator`. It does not create missing GM8E01 profile files. On a fresh Dolphin setup, launch Metroid Prime once so Dolphin creates the profile, then close Dolphin and start PrimedGun again.
 
-The VR profile is where PrimedGun saves the GM8E01 VR settings and pre-configured shader overrides. The normal game profile is used to disable unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
+The VR profile is where PrimedGun saves the GM8E01 VR settings it needs. The normal game profile is used to disable unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
 
 ## App-Owned Patches
 
@@ -72,7 +71,7 @@ The hook loads PrimedGun patches from:
 assets\gecko\GM8E01_PrimedGun.ini
 ```
 
-These patches are owned by PrimedGun and are applied through the hook, not through Dolphin's normal user-managed AR/Gecko enabled-code flow. Current patch areas include culling, VR rotation restore, lock/scan targeting, visor input support, and arm cannon idle fidget disable.
+These patches are applied automatically through the PrimedGun app.
 
 ## Usage
 
@@ -96,9 +95,10 @@ These patches are owned by PrimedGun and are applied through the hook, not throu
 - PrimedGun should be running before Metroid Prime is loaded so the Dolphin-side hook is ready as soon as GM8E01 memory appears.
 - For the best experience, try not to turn your body around. You can move in the game like this, but functionality is not ideal.
 
-For further enhancements to your VR experience, join the Dolphin VR Discord.
+## Credits
 
-- By Nobbie
-
-Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.
-Huge thank you to iChris4 for Dolphin ReduX development.
+- Created by Nobbie.
+- Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.
+- Huge thank you to iChris4 for Dolphin ReduX development.
+- Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, and VRified Games.
+- For further enhancements to your VR experience, join the Dolphin VR Discord.

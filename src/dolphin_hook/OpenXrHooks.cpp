@@ -763,7 +763,6 @@ std::vector<uint32_t> BuildSettingsMenuPixels(uint32_t width, uint32_t height, c
         {"TARGET RADIUS", FloatText(s.gunTargetingRadius, 1)},
         {"RESET TARGETING", "RESET"},
         {"DOLPHIN CONTROLS", s.autoDolphinXrControls ? "ON" : "OFF"},
-        {"SHADER OVERRIDES", s.shaderOverridesEnabled ? "ON" : "OFF"},
         {"VISOR GESTURE", s.xrDpadEnabled ? "ON" : "OFF"},
         {"HEAD RADIUS", FloatText(s.xrDpadHeadRadius, 2)},
         {"HEAD BELOW AMOUNT", FloatText(s.xrDpadHeadYBelow, 2)},

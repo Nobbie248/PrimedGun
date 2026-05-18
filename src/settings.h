@@ -17,7 +17,6 @@ inline constexpr float kDefaultGunTargetingRadius = 2.5f;
 inline constexpr bool kDefaultXrDpadEnabled = true;
 inline constexpr bool kDefaultAutoDolphinXrControls = true;
 inline constexpr bool kDefaultDolphin60FpsCap = false;
-inline constexpr bool kDefaultShaderOverridesEnabled = true;
 inline constexpr float kDefaultXrDpadHeadRadius = 0.18f;
 inline constexpr float kDefaultXrDpadHeadYBelow = 0.14f;
 inline constexpr float kDefaultXrDpadDeadzone = 0.45f;
@@ -89,7 +88,6 @@ struct Settings {
     float gun_targeting_radius = kDefaultGunTargetingRadius;
     bool auto_dolphin_xr_controls = kDefaultAutoDolphinXrControls;
     bool dolphin_60fps_cap = kDefaultDolphin60FpsCap;
-    bool shader_overrides_enabled = kDefaultShaderOverridesEnabled;
     bool xr_dpad_enabled = kDefaultXrDpadEnabled;
     float xr_dpad_head_radius = kDefaultXrDpadHeadRadius;
     float xr_dpad_head_y_below = kDefaultXrDpadHeadYBelow;
@@ -124,7 +122,6 @@ struct Settings {
         gun_targeting_radius = kDefaultGunTargetingRadius;
         auto_dolphin_xr_controls = kDefaultAutoDolphinXrControls;
         dolphin_60fps_cap = kDefaultDolphin60FpsCap;
-        shader_overrides_enabled = kDefaultShaderOverridesEnabled;
         xr_dpad_enabled = kDefaultXrDpadEnabled;
         xr_dpad_head_radius = kDefaultXrDpadHeadRadius;
         xr_dpad_head_y_below = kDefaultXrDpadHeadYBelow;
@@ -160,7 +157,6 @@ struct Settings {
         f << "gun_targeting_radius=" << gun_targeting_radius << "\n";
         f << "auto_dolphin_xr_controls=" << auto_dolphin_xr_controls << "\n";
         f << "dolphin_60fps_cap=" << dolphin_60fps_cap << "\n";
-        f << "shader_overrides_enabled=" << shader_overrides_enabled << "\n";
         f << "xr_dpad_enabled=" << xr_dpad_enabled << "\n";
         f << "xr_dpad_head_radius=" << xr_dpad_head_radius << "\n";
         f << "xr_dpad_head_y_below=" << xr_dpad_head_y_below << "\n";
@@ -202,7 +198,6 @@ struct Settings {
             else if (key == "gun_targeting_radius") gun_targeting_radius = std::stof(val);
             else if (key == "auto_dolphin_xr_controls") auto_dolphin_xr_controls = std::stoi(val);
             else if (key == "dolphin_60fps_cap") dolphin_60fps_cap = std::stoi(val);
-            else if (key == "shader_overrides_enabled") shader_overrides_enabled = std::stoi(val);
             else if (key == "xr_dpad_enabled")       xr_dpad_enabled = std::stoi(val);
             else if (key == "xr_dpad_head_radius")   xr_dpad_head_radius = std::stof(val);
             else if (key == "xr_dpad_head_y_below")  xr_dpad_head_y_below = std::stof(val);
