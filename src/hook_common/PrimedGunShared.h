@@ -70,6 +70,7 @@ struct SettingsState {
     float gunTargetingDistance = 60.0f;
     float gunTargetingRadius = 2.5f;
     uint32_t autoDolphinXrControls = 1;
+    uint32_t dolphin60FpsCap = 1;
     uint32_t shaderOverridesEnabled = 1;
     uint32_t xrDpadEnabled = 1;
     float xrDpadHeadRadius = 0.18f;

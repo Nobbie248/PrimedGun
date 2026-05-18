@@ -23,6 +23,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -44,6 +45,7 @@ using PFN_GetProcAddress = FARPROC(WINAPI*)(HMODULE, LPCSTR);
 PFN_xrGetInstanceProcAddr g_realGetInstanceProcAddr = nullptr;
 PFN_xrNegotiateLoaderRuntimeInterface g_realNegotiateLoaderRuntimeInterface = nullptr;
 PFN_GetProcAddress g_realGetProcAddress = nullptr;
+PFN_xrCreateInstance g_realCreateInstance = nullptr;
 PFN_xrCreateSession g_realCreateSession = nullptr;
 PFN_xrCreateSwapchain g_realCreateSwapchain = nullptr;
 PFN_xrEnumerateSwapchainFormats g_realEnumerateSwapchainFormats = nullptr;
@@ -62,6 +64,10 @@ PFN_xrGetActionStateFloat g_realGetActionStateFloat = nullptr;
 PFN_xrGetActionStateVector2f g_realGetActionStateVector2f = nullptr;
 PFN_xrLocateViews g_realLocateViews = nullptr;
 PFN_xrLocateSpace g_realLocateSpace = nullptr;
+PFN_xrEnumerateInstanceExtensionProperties g_realEnumerateInstanceExtensionProperties = nullptr;
+PFN_xrEnumerateDisplayRefreshRatesFB g_xrEnumerateDisplayRefreshRatesFB = nullptr;
+PFN_xrGetDisplayRefreshRateFB g_xrGetDisplayRefreshRateFB = nullptr;
+PFN_xrRequestDisplayRefreshRateFB g_xrRequestDisplayRefreshRateFB = nullptr;
 
 std::atomic<bool> g_installed = false;
 std::atomic<bool> g_runtimeInstalled = false;
@@ -76,6 +82,7 @@ uint64_t g_generation = 0;
 uint64_t g_lastLogMs = 0;
 uint64_t g_lastInstallCheckMs = 0;
 XrSession g_dolphinSession = XR_NULL_HANDLE;
+XrInstance g_dolphinInstance = XR_NULL_HANDLE;
 XrSpace g_dolphinReferenceSpace = XR_NULL_HANDLE;
 uint8_t* g_dolphinOpenXrManager = nullptr;
 uint64_t g_lastManagerScanMs = 0;
@@ -91,6 +98,9 @@ bool g_heightOnlyRecenterPatchAttempted = false;
 bool g_heightOnlyRecenterPatchInstalled = false;
 uint64_t g_leftGripPoseMs = 0;
 uint64_t g_rightGripPoseMs = 0;
+bool g_displayRefreshRateExtensionAvailable = false;
+bool g_displayRefreshRateExtensionEnabled = false;
+int g_lastDisplayRefreshRatePreference = -1;
 
 enum class GraphicsApi {
     Unknown,
@@ -1233,6 +1243,130 @@ std::string ActionName(XrAction action) {
     return it != g_actions.end() ? it->second : std::string{};
 }
 
+bool RuntimeSupportsDisplayRefreshRateExtension() {
+    if (g_displayRefreshRateExtensionAvailable)
+        return true;
+    if (!g_realEnumerateInstanceExtensionProperties && g_realGetInstanceProcAddr) {
+        PFN_xrVoidFunction fn = nullptr;
+        if (XR_SUCCEEDED(g_realGetInstanceProcAddr(
+                XR_NULL_HANDLE, "xrEnumerateInstanceExtensionProperties", &fn))) {
+            g_realEnumerateInstanceExtensionProperties =
+                reinterpret_cast<PFN_xrEnumerateInstanceExtensionProperties>(fn);
+        }
+    }
+    if (!g_realEnumerateInstanceExtensionProperties)
+        return false;
+
+    uint32_t count = 0;
+    XrResult result = g_realEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr);
+    if (XR_FAILED(result) || count == 0)
+        return false;
+
+    std::vector<XrExtensionProperties> extensions(
+        count, XrExtensionProperties{XR_TYPE_EXTENSION_PROPERTIES});
+    result = g_realEnumerateInstanceExtensionProperties(nullptr, count, &count, extensions.data());
+    if (XR_FAILED(result))
+        return false;
+
+    for (const XrExtensionProperties& extension : extensions) {
+        if (std::strcmp(extension.extensionName, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0) {
+            g_displayRefreshRateExtensionAvailable = true;
+            Log(L"OpenXrHooks detected XR_FB_display_refresh_rate support.");
+            return true;
+        }
+    }
+    Log(L"OpenXrHooks: XR_FB_display_refresh_rate is not supported by this runtime.");
+    return false;
+}
+
+bool ExtensionAlreadyEnabled(const XrInstanceCreateInfo* createInfo, const char* extensionName) {
+    if (!createInfo || !extensionName)
+        return false;
+    for (uint32_t i = 0; i < createInfo->enabledExtensionCount; ++i) {
+        const char* enabled = createInfo->enabledExtensionNames ? createInfo->enabledExtensionNames[i] : nullptr;
+        if (enabled && std::strcmp(enabled, extensionName) == 0)
+            return true;
+    }
+    return false;
+}
+
+void ResolveDisplayRefreshRateFunctions(XrInstance instance) {
+    if (!g_realGetInstanceProcAddr || instance == XR_NULL_HANDLE)
+        return;
+
+    auto resolve = [&](const char* name, auto& out) {
+        if (out)
+            return;
+        PFN_xrVoidFunction fn = nullptr;
+        if (XR_SUCCEEDED(g_realGetInstanceProcAddr(instance, name, &fn)) && fn)
+            out = reinterpret_cast<std::remove_reference_t<decltype(out)>>(fn);
+    };
+
+    resolve("xrEnumerateDisplayRefreshRatesFB", g_xrEnumerateDisplayRefreshRatesFB);
+    resolve("xrGetDisplayRefreshRateFB", g_xrGetDisplayRefreshRateFB);
+    resolve("xrRequestDisplayRefreshRateFB", g_xrRequestDisplayRefreshRateFB);
+}
+
+void ApplyDolphinDisplayRefreshRatePreference(XrInstance instance, XrSession session) {
+    if (!g_displayRefreshRateExtensionEnabled || session == XR_NULL_HANDLE)
+        return;
+
+    SharedState* shared = g_sharedState.load();
+    const bool limitTo60Hz = !shared || shared->settings.dolphin60FpsCap != 0;
+    const int preference = limitTo60Hz ? 1 : 0;
+    if (g_lastDisplayRefreshRatePreference == preference)
+        return;
+
+    ResolveDisplayRefreshRateFunctions(instance);
+    if (!g_xrRequestDisplayRefreshRateFB) {
+        Log(L"OpenXrHooks: 60 Hz request unavailable; xrRequestDisplayRefreshRateFB was not resolved.");
+        return;
+    }
+
+    float requestedRate = limitTo60Hz ? 60.0f : 0.0f;
+    if (limitTo60Hz && g_xrEnumerateDisplayRefreshRatesFB) {
+        uint32_t count = 0;
+        XrResult result = g_xrEnumerateDisplayRefreshRatesFB(session, 0, &count, nullptr);
+        if (XR_SUCCEEDED(result) && count > 0) {
+            std::vector<float> rates(count, 0.0f);
+            result = g_xrEnumerateDisplayRefreshRatesFB(session, count, &count, rates.data());
+            if (XR_SUCCEEDED(result)) {
+                float bestRate = rates[0];
+                float bestDelta = std::fabs(bestRate - 60.0f);
+                for (float rate : rates) {
+                    const float delta = std::fabs(rate - 60.0f);
+                    if (delta < bestDelta) {
+                        bestRate = rate;
+                        bestDelta = delta;
+                    }
+                }
+                if (bestDelta <= 0.25f) {
+                    requestedRate = bestRate;
+                } else {
+                    Log(L"OpenXrHooks: runtime does not advertise 60 Hz; nearest rate is " +
+                        std::to_wstring(bestRate) + L" Hz.");
+                }
+            }
+        }
+    }
+
+    float beforeRate = 0.0f;
+    if (g_xrGetDisplayRefreshRateFB &&
+        XR_FAILED(g_xrGetDisplayRefreshRateFB(session, &beforeRate))) {
+        beforeRate = 0.0f;
+    }
+
+    const XrResult requestResult = g_xrRequestDisplayRefreshRateFB(session, requestedRate);
+    if (XR_SUCCEEDED(requestResult))
+        g_lastDisplayRefreshRatePreference = preference;
+    Log((limitTo60Hz
+            ? L"OpenXrHooks requested Dolphin OpenXR display refresh rate "
+            : L"OpenXrHooks released Dolphin OpenXR display refresh preference ") +
+        (limitTo60Hz ? std::to_wstring(requestedRate) + L" Hz" : std::wstring{}) +
+        L" result=" + std::to_wstring(requestResult) +
+        (beforeRate > 0.0f ? L" previous=" + std::to_wstring(beforeRate) + L" Hz" : L""));
+}
+
 PFN_xrVoidFunction WrapProc(const char* name, PFN_xrVoidFunction proc);
 bool InstallInlineDetour(HMODULE openxr);
 bool InstallRuntimeNegotiationDetour(HMODULE runtime);
@@ -1310,6 +1444,41 @@ XrResult XRAPI_PTR Hook_xrCreateActionSpace(XrSession session, const XrActionSpa
     return result;
 }
 
+XrResult XRAPI_PTR Hook_xrCreateInstance(const XrInstanceCreateInfo* createInfo, XrInstance* instance) {
+    if (!g_realCreateInstance)
+        return XR_ERROR_RUNTIME_FAILURE;
+
+    XrInstanceCreateInfo patched{};
+    std::vector<const char*> extensions;
+    const XrInstanceCreateInfo* createInfoToUse = createInfo;
+    g_displayRefreshRateExtensionEnabled = false;
+
+    if (createInfo && RuntimeSupportsDisplayRefreshRateExtension()) {
+        extensions.reserve(static_cast<size_t>(createInfo->enabledExtensionCount) + 1);
+        for (uint32_t i = 0; i < createInfo->enabledExtensionCount; ++i) {
+            if (createInfo->enabledExtensionNames && createInfo->enabledExtensionNames[i])
+                extensions.push_back(createInfo->enabledExtensionNames[i]);
+        }
+        if (!ExtensionAlreadyEnabled(createInfo, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME)) {
+            extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+            patched = *createInfo;
+            patched.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+            patched.enabledExtensionNames = extensions.data();
+            createInfoToUse = &patched;
+            Log(L"OpenXrHooks enabling XR_FB_display_refresh_rate for Dolphin.");
+        } else {
+            Log(L"OpenXrHooks found XR_FB_display_refresh_rate already enabled by Dolphin.");
+        }
+    }
+
+    const XrResult result = g_realCreateInstance(createInfoToUse, instance);
+    if (XR_SUCCEEDED(result)) {
+        g_displayRefreshRateExtensionEnabled =
+            createInfoToUse && ExtensionAlreadyEnabled(createInfoToUse, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    }
+    return result;
+}
+
 XrResult XRAPI_PTR Hook_xrCreateSession(XrInstance instance, const XrSessionCreateInfo* createInfo,
                                         XrSession* session) {
     const GraphicsApi graphicsApi = DetectGraphicsApiFromSessionCreateInfo(createInfo);
@@ -1354,6 +1523,7 @@ XrResult XRAPI_PTR Hook_xrCreateSession(XrInstance instance, const XrSessionCrea
             g_quadLayer.d3dDevice->AddRef();
             g_quadLayer.d3dDevice->GetImmediateContext(&g_quadLayer.d3dContext);
         }
+        g_dolphinInstance = instance;
         g_quadLayer.swapchain = XR_NULL_HANDLE;
         g_quadLayer.promptSwapchain = XR_NULL_HANDLE;
         g_quadLayer.textureReady = false;
@@ -1366,6 +1536,8 @@ XrResult XRAPI_PTR Hook_xrCreateSession(XrInstance instance, const XrSessionCrea
         g_quadLayer.appendedFrames = 0;
         Log(L"OpenXR quad prompt observed session graphics API: " +
             std::wstring(GraphicsApiName(graphicsApi)));
+        g_lastDisplayRefreshRatePreference = -1;
+        ApplyDolphinDisplayRefreshRatePreference(instance, *session);
     }
     return result;
 }
@@ -1929,6 +2101,9 @@ bool BuildLaserLayer(const XrFrameEndInfo* frameEndInfo, XrCompositionLayerQuad&
 }
 
 XrResult XRAPI_PTR Hook_xrEndFrame(XrSession session, const XrFrameEndInfo* frameEndInfo) {
+    if (session == g_dolphinSession)
+        ApplyDolphinDisplayRefreshRatePreference(g_dolphinInstance, session);
+
     XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if (session == g_quadLayer.session && BuildQuadLayer(frameEndInfo, quad)) {
         XrCompositionLayerQuad laser{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -2165,6 +2340,11 @@ XrResult XRAPI_PTR Hook_xrLocateSpace(XrSpace space, XrSpace baseSpace, XrTime t
 PFN_xrVoidFunction WrapProc(const char* name, PFN_xrVoidFunction proc) {
     if (!name || !proc)
         return proc;
+    if (std::strcmp(name, "xrCreateInstance") == 0) {
+        if (!g_realCreateInstance)
+            g_realCreateInstance = reinterpret_cast<PFN_xrCreateInstance>(proc);
+        return reinterpret_cast<PFN_xrVoidFunction>(&Hook_xrCreateInstance);
+    }
     if (std::strcmp(name, "xrStringToPath") == 0) {
         if (!g_realStringToPath)
             g_realStringToPath = reinterpret_cast<PFN_xrStringToPath>(proc);
