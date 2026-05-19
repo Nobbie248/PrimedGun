@@ -1328,7 +1328,9 @@ bool ApplyPrimedGunDolphinSetupFromHook() {
     }
 
     for (const fs::path& path : DolphinActiveProfileFiles(L"GameSettingsVR\\GM8E01.ini", false)) {
-        ReplaceIniSection(path, "Graphics.VR", {{"UnitsPerMeter", "1.50"}});
+        ReplaceIniSection(path, "Graphics.VR",
+                          {{"UnitsPerMeter", "1.50"},
+                           {"CameraForward", "0.0"}});
         ApplyIniSectionValues(path, "GFX.VR", {},
                               {"UnitsPerMeter", "UnitsPerMetre", "LeanBackAngle",
                                "CameraForward", "HeadLockedCurvature", "ElementDepth",

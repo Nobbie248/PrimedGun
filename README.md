@@ -53,6 +53,7 @@ PrimedGun applies the Dolphin settings it needs automatically on startup:
 - Enables Dual Core.
 - Enables MMU.
 - Sets the GM8E01 Dolphin XR world scale / units-per-meter value to `1.50`.
+- Sets the GM8E01 Dolphin XR camera forward offset to `0`.
 - Maps Dolphin's Port 1 controls and reset-view hotkey to OpenXR.
 
 PrimedGun also disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
