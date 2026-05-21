@@ -96,6 +96,8 @@ std::wstring g_lastPublishedGameSettingsVrRoot;
 uint32_t g_lastSaveProbeRequestGeneration = 0;
 bool g_saveProbeAttempted = false;
 bool g_startupSetupAttempted = false;
+uint64_t g_lastStartupSetupAttemptTick = 0;
+uint32_t g_startupSetupAttemptCount = 0;
 
 using PFN_CreateFileW = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 using PFN_WriteFile = BOOL(WINAPI*)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
@@ -1225,14 +1227,24 @@ bool VerifyPrimedGunGCPadConfig(const fs::path& path) {
                                  {"Device = OpenXR/0/OpenXR Controller",
                                   "Buttons/A = `Right Button A`",
                                   "Buttons/B = `Right Button B`",
+                                  "Buttons/X = `Left Button X`",
                                   "Buttons/Y = `Right Button Squeeze`&`Right Squeeze`",
                                   "Buttons/Z = `Left Button Squeeze`&`Left Squeeze`",
+                                  "Buttons/Start = `Left Button Y`",
                                   "Main Stick/Up = `Left Thumbstick Y+`",
+                                  "Main Stick/Down = `Left Thumbstick Y-`",
+                                  "Main Stick/Left = `Left Thumbstick X-`",
                                   "Main Stick/Right = `Left Thumbstick X+`",
+                                  "Main Stick/Dead Zone = 12.",
                                   "C-Stick/Up = `Right Thumbstick Y+`",
+                                  "C-Stick/Down = `Right Thumbstick Y-`",
+                                  "C-Stick/Left = `Right Thumbstick X-`",
                                   "C-Stick/Right = `Right Thumbstick X+`",
+                                  "C-Stick/Dead Zone = 12.",
                                   "Triggers/L = `Left Trigger`",
                                   "Triggers/R = `Right Trigger`",
+                                  "Triggers/L-Analog = `Left Trigger`",
+                                  "Triggers/R-Analog = `Right Trigger`",
                                   "Rumble/Motor = `Motor Right`"});
 }
 
@@ -1925,13 +1937,28 @@ void ApplyStartupDolphinSetupOnce() {
     if (g_startupSetupAttempted)
         return;
 
+    const uint64_t now = GetTickCount64();
+    if (g_startupSetupAttemptCount >= 3)
+        return;
+    if (g_startupSetupAttemptCount > 0 && now - g_lastStartupSetupAttemptTick < 1000)
+        return;
+
     if (!TriggerDolphinPadConfigSaveProbe())
         return;
 
-    g_startupSetupAttempted = true;
+    ++g_startupSetupAttemptCount;
+    g_lastStartupSetupAttemptTick = now;
     const bool wrote_setup = ApplyPrimedGunDolphinSetupFromHook();
     Log(std::wstring(L"PrimedGun Dolphin startup setup deployment ") +
         (wrote_setup ? L"wrote config." : L"found no writable config targets."));
+    if (wrote_setup && VerifyPrimedGunInputBindings()) {
+        g_startupSetupAttempted = true;
+        Log(L"PrimedGun Dolphin startup setup verified.");
+        return;
+    }
+
+    Log(L"PrimedGun Dolphin startup setup will retry; binding verification failed. attempt=" +
+        std::to_wstring(g_startupSetupAttemptCount) + L"/3.");
 }
 
 bool OrbitLockHeldNow(uint32_t stateMgr, uint32_t player) {
