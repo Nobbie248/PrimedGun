@@ -48,6 +48,8 @@ constexpr uint32_t kCameraManagerOffset = 0x86Cu;
 constexpr uint32_t kTransformOffset = 0x34u;
 constexpr uint32_t kGunTargetHookScratch = 0x817FE400u;
 constexpr uint32_t kFinalInputOffset = 0xB54u;
+constexpr uint32_t kFinalInputRightStickY = kFinalInputOffset + 0x14u;
+constexpr uint32_t kFinalInputRightStickYPress = kFinalInputOffset + 0x23u;
 constexpr uint32_t kOrbitStateOffset = 0x304u;
 constexpr uint32_t kFirstPersonPitchOffset = 0x3ECu;
 constexpr uint32_t kFirstPersonPitchVelOffset = 0x3F0u;
@@ -79,6 +81,8 @@ uint32_t g_lastPatchGeneration = 0;
 uint32_t g_lastPatchCount = 0;
 std::unordered_map<uint32_t, uint32_t> g_appPatchOriginals;
 uint32_t g_lastInputBindingRequestGeneration = 0;
+uint64_t g_lastInputBindingAttemptTick = 0;
+uint32_t g_inputBindingAttemptCount = 0;
 bool g_dumpedDolphinConfigProbe = false;
 uint64_t g_lastDolphinConfigFileProbeTick = 0;
 uint64_t g_lastDolphinConfigMemoryProbeTick = 0;
@@ -142,20 +146,69 @@ struct PpcPatch {
     bool loggedWaiting;
 };
 
-PpcPatch g_orbitPatches[] = {
-    // The first target-lock frame can still run through the p304=0 transition
-    // branch before steady orbit state 2/3. Use each branch-local flattened
-    // target vector so combat lock never pitches toward target height. Scan
-    // lock uses the p304=1/4 branch and keeps pitch.
-    {0x8000EBECu, 0x3881044Cu, 0x388103FCu,
-     L"CFirstPersonCamera pre-orbit flattened target vector", false, false},
-    {0x8000EFF4u, 0x3881044Cu, 0x38810394u,
-     L"CFirstPersonCamera normal lock-on flattened target vector", false, false},
-    {0x8000F5C0u, 0x3881044Cu, 0x38810320u,
-     L"CFirstPersonCamera early follow flattened target vector", false, false},
+struct ConditionalOrbitPatch {
+    uint32_t address;
+    uint32_t original;
+    uint32_t flattened;
+    uint16_t flattenedStackOffset;
+    uint32_t cave;
+    const wchar_t* description;
+    bool applied;
+    bool loggedWaiting;
 };
 
+ConditionalOrbitPatch g_orbitPatches[] = {
+    {0x8000EBECu, 0x3881044Cu, 0x388103FCu, 0x03FCu, 0x80001AD0u,
+     L"CFirstPersonCamera pre-orbit scan-aware flattened target vector", false, false},
+    {0x8000EFF4u, 0x3881044Cu, 0x38810394u, 0x0394u, 0x80001B00u,
+     L"CFirstPersonCamera normal lock-on scan-aware flattened target vector", false, false},
+    {0x8000F5C0u, 0x3881044Cu, 0x38810320u, 0x0320u, 0x80001B30u,
+     L"CFirstPersonCamera early follow scan-aware flattened target vector", false, false},
+};
+
+struct ConditionalPitchLoadPatch {
+    uint32_t address;
+    uint32_t original;
+    uint32_t cave;
+    const wchar_t* description;
+    bool applied;
+    bool loggedWaiting;
+};
+
+ConditionalPitchLoadPatch g_firstPersonPitchLoadPatch = {
+    0x8000E548u, 0xC3FE03ECu, 0x80001B70u,
+    L"CFirstPersonCamera scan-aware first-person pitch load", false, false};
+
 constexpr uint32_t kLoadZeroToF2 = 0xC04280B0u; // lfs f2, -0x7f50(r2)
+constexpr uint32_t kLoadZeroToF1 = 0xC02280B0u; // lfs f1, -0x7f50(r2)
+constexpr uint32_t kLoadZeroToF31 = 0xC3E280B0u; // lfs f31, -0x7f50(r2)
+
+struct DynamicPpcPatch {
+    uint32_t address;
+    uint32_t original;
+    uint32_t replacement;
+    const wchar_t* description;
+};
+
+DynamicPpcPatch g_combatPitchPatches[] = {
+    {0x8000E7B4u, 0xEC21E828u, kLoadZeroToF1,
+     L"CFirstPersonCamera lock target Z delta A"},
+    {0x8000E808u, 0xEC21E828u, kLoadZeroToF1,
+     L"CFirstPersonCamera lock target Z delta B"},
+    {0x8000E83Cu, 0xEC21E828u, kLoadZeroToF1,
+     L"CFirstPersonCamera lock target Z delta C"},
+    {0x8000F050u, 0xC05F01B4u, kLoadZeroToF2,
+     L"CFirstPersonCamera combat orbit transition current camera Z"},
+    {0x8000EB44u, 0xC041086Cu, kLoadZeroToF2,
+     L"CFirstPersonCamera pre-orbit current camera Z"},
+    {0x8000EF44u, 0xC041086Cu, kLoadZeroToF2,
+     L"CFirstPersonCamera normal orbit current camera Z"},
+    {0x8000F50Cu, 0xC041086Cu, kLoadZeroToF2,
+     L"CFirstPersonCamera early follow current camera Z"},
+};
+
+bool g_combatPitchPatchActive = false;
+uint64_t g_lastCombatPitchPatchLogTick = 0;
 
 bool IsMem1Range(uint32_t gcAddr, size_t size) {
     if (gcAddr < kMem1Start || gcAddr >= kMem1Start + kMem1Size) {
@@ -163,6 +216,20 @@ bool IsMem1Range(uint32_t gcAddr, size_t size) {
     }
     return static_cast<uint64_t>(gcAddr) + static_cast<uint64_t>(size) <=
         static_cast<uint64_t>(kMem1Start) + kMem1Size;
+}
+
+uint32_t PpcBranch(uint32_t from, uint32_t to) {
+    const int32_t offset = static_cast<int32_t>(to - from);
+    return 0x48000000u | (static_cast<uint32_t>(offset) & 0x03FFFFFCu);
+}
+
+uint32_t PpcBeq(uint32_t from, uint32_t to) {
+    const int32_t offset = static_cast<int32_t>(to - from);
+    return 0x41820000u | (static_cast<uint32_t>(offset) & 0x0000FFFCu);
+}
+
+uint32_t PpcAddiR4R1(uint16_t offset) {
+    return 0x38810000u | offset;
 }
 
 std::string TrimAscii(const std::string& text) {
@@ -1131,6 +1198,60 @@ std::vector<fs::path> DolphinActiveProfileFiles(const fs::path& relative_path, b
     return paths;
 }
 
+bool IniSectionContainsAll(const fs::path& path, const std::string& section,
+                           const std::vector<std::string>& required_lines) {
+    const std::vector<std::string> lines = ReadLines(path);
+    size_t begin = 0;
+    size_t end = 0;
+    if (!FindIniSection(lines, section, begin, end))
+        return false;
+
+    for (const std::string& required : required_lines) {
+        bool found = false;
+        for (size_t i = begin + 1; i < end; ++i) {
+            if (SameAsciiNoCase(TrimAscii(lines[i]), required)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return false;
+    }
+    return true;
+}
+
+bool VerifyPrimedGunGCPadConfig(const fs::path& path) {
+    return IniSectionContainsAll(path, "GCPad1",
+                                 {"Device = OpenXR/0/OpenXR Controller",
+                                  "Buttons/A = `Right Button A`",
+                                  "Buttons/B = `Right Button B`",
+                                  "Buttons/Y = `Right Button Squeeze`&`Right Squeeze`",
+                                  "Buttons/Z = `Left Button Squeeze`&`Left Squeeze`",
+                                  "Main Stick/Up = `Left Thumbstick Y+`",
+                                  "Main Stick/Right = `Left Thumbstick X+`",
+                                  "C-Stick/Up = `Right Thumbstick Y+`",
+                                  "C-Stick/Right = `Right Thumbstick X+`",
+                                  "Triggers/L = `Left Trigger`",
+                                  "Triggers/R = `Right Trigger`",
+                                  "Rumble/Motor = `Motor Right`"});
+}
+
+bool VerifyPrimedGunInputBindings() {
+    bool saw_candidate = false;
+    for (const fs::path& path : DolphinActiveProfileFiles(L"Config\\GCPadNew.ini", true)) {
+        saw_candidate = true;
+        if (VerifyPrimedGunGCPadConfig(path)) {
+            Log(L"Verified PrimedGun GCPad config in Dolphin active path: " + path.wstring());
+            return true;
+        }
+        Log(L"PrimedGun GCPad config verification failed for: " + path.wstring());
+    }
+
+    if (!saw_candidate)
+        Log(L"PrimedGun GCPad config verification found no existing active GCPadNew.ini target.");
+    return false;
+}
+
 void ProbeDolphinConfigSystems() {
     if (!LoggingEnabled())
         return;
@@ -1391,6 +1512,14 @@ uint8_t ReadU8(uint32_t gcAddr) {
     return p ? *p : 0;
 }
 
+void WriteU8(uint32_t gcAddr, uint8_t value) {
+    uint8_t* p = HostPtr(gcAddr, 1);
+    if (!p) {
+        return;
+    }
+    *p = value;
+}
+
 float ReadFloat(uint32_t gcAddr) {
     const uint32_t raw = ReadU32(gcAddr);
     float value = 0.0f;
@@ -1522,29 +1651,28 @@ void DumpFirstPersonCameraCodeOnce() {
 }
 
 void PatchOrbitCode() {
-    // The dynamic combat pitch patch below handles lock-on without touching
-    // scan mode. Leave the branch-local camera vectors alone because scan can
-    // use the p304=0 branch while the scan visor is active.
+    // The dynamic combat pitch patch handles orbit lock without touching scan mode.
     return;
 
     if (!g_memBase) {
         return;
     }
 
-    for (PpcPatch& patch : g_orbitPatches) {
+    for (ConditionalOrbitPatch& patch : g_orbitPatches) {
         if (patch.applied) {
             continue;
         }
 
         const uint32_t current = ReadU32(patch.address);
-        if (current == patch.replacement) {
+        const uint32_t branch = PpcBranch(patch.address, patch.cave);
+        if (current == branch) {
             patch.applied = true;
             Log(L"GameTimingHooks orbit PPC patch already present at 0x" +
                 std::to_wstring(patch.address) + L": " + patch.description);
             continue;
         }
 
-        if (current != patch.original) {
+        if (current != patch.original && current != patch.flattened) {
             if (current != 0 && !patch.loggedWaiting) {
                 patch.loggedWaiting = true;
                 Log(L"GameTimingHooks waiting to patch orbit PPC at 0x" +
@@ -1553,10 +1681,131 @@ void PatchOrbitCode() {
             continue;
         }
 
-        if (WriteU32(patch.address, patch.replacement)) {
+        const uint32_t originalLabel = patch.cave + 0x20u;
+        const uint32_t flattenedLabel = patch.cave + 0x28u;
+        const uint32_t returnAddr = patch.address + 4u;
+
+        WriteU32(patch.cave + 0x00u, 0x3D808045u);                      // lis r12, 0x8045
+        WriteU32(patch.cave + 0x04u, 0x618CA1A8u);                      // ori r12, r12, 0xA1A8
+        WriteU32(patch.cave + 0x08u, 0x818C084Cu);                      // lwz r12, 0x84C(r12)
+        WriteU32(patch.cave + 0x0Cu, 0x2C0C0000u);                      // cmpwi r12, 0
+        WriteU32(patch.cave + 0x10u, PpcBeq(patch.cave + 0x10u, originalLabel));
+        WriteU32(patch.cave + 0x14u, 0x818C0330u);                      // lwz r12, 0x330(r12)
+        WriteU32(patch.cave + 0x18u, 0x2C0C0000u);                      // cmpwi r12, 0
+        WriteU32(patch.cave + 0x1Cu, PpcBeq(patch.cave + 0x1Cu, flattenedLabel));
+        WriteU32(patch.cave + 0x20u, patch.original);
+        WriteU32(patch.cave + 0x24u, PpcBranch(patch.cave + 0x24u, returnAddr));
+        WriteU32(patch.cave + 0x28u, PpcAddiR4R1(patch.flattenedStackOffset));
+        WriteU32(patch.cave + 0x2Cu, PpcBranch(patch.cave + 0x2Cu, returnAddr));
+
+        if (WriteU32(patch.address, branch)) {
             patch.applied = true;
             Log(L"GameTimingHooks patched orbit PPC at 0x" +
                 std::to_wstring(patch.address) + L": " + patch.description + L".");
+        }
+    }
+}
+
+bool ShouldFlattenCombatPitch(uint32_t stateMgr, uint32_t player) {
+    if (player < kMem1Start) {
+        return false;
+    }
+
+    const uint32_t scanState = ReadU32(player + 0x330);
+    if (scanState != 0) {
+        return false;
+    }
+
+    const uint32_t orbitState = ReadU32(player + kOrbitStateOffset);
+    const uint8_t held0 = ReadU8(stateMgr + kFinalInputOffset + 0x2c);
+    const uint32_t scratchPlayer = ReadU32(kGunTargetHookScratch);
+    const uint16_t scratchUid = ReadU16(kGunTargetHookScratch + 4);
+
+    const bool buttonLock = (held0 & 0x04u) != 0;
+    const bool scratchLock = scratchPlayer == player && scratchUid != 0xffffu;
+    const bool orbitActive = orbitState != 0 && orbitState != kOrbitStateGrapple;
+    return buttonLock || scratchLock || orbitActive;
+}
+
+void PatchFirstPersonPitchLoad() {
+    if (!g_memBase || g_firstPersonPitchLoadPatch.applied) {
+        return;
+    }
+
+    auto& patch = g_firstPersonPitchLoadPatch;
+    const uint32_t current = ReadU32(patch.address);
+    const uint32_t branch = PpcBranch(patch.address, patch.cave);
+    if (current == branch) {
+        patch.applied = true;
+        Log(L"GameTimingHooks first-person pitch load patch already present at 0x" +
+            std::to_wstring(patch.address) + L": " + patch.description);
+        return;
+    }
+
+    if (current != patch.original) {
+        if (current != 0 && !patch.loggedWaiting) {
+            patch.loggedWaiting = true;
+            Log(L"GameTimingHooks waiting to patch first-person pitch load at 0x" +
+                std::to_wstring(patch.address) + L"; current instruction did not match.");
+        }
+        return;
+    }
+
+    const uint32_t zeroLabel = patch.cave + 0x18u;
+    const uint32_t returnAddr = patch.address + 4u;
+
+    WriteU32(patch.cave + 0x00u, 0x819E0330u);                  // lwz r12, 0x330(r30)
+    WriteU32(patch.cave + 0x04u, 0x2C0C0000u);                  // cmpwi r12, 0
+    WriteU32(patch.cave + 0x08u, PpcBeq(patch.cave + 0x08u, zeroLabel));
+    WriteU32(patch.cave + 0x0Cu, patch.original);               // lfs f31, 0x3ec(r30)
+    WriteU32(patch.cave + 0x10u, PpcBranch(patch.cave + 0x10u, returnAddr));
+    WriteU32(patch.cave + 0x14u, 0x60000000u);                  // nop padding
+    WriteU32(patch.cave + 0x18u, kLoadZeroToF31);
+    WriteU32(patch.cave + 0x1Cu, PpcBranch(patch.cave + 0x1Cu, returnAddr));
+
+    if (WriteU32(patch.address, branch)) {
+        patch.applied = true;
+        Log(L"GameTimingHooks patched first-person pitch load at 0x" +
+            std::to_wstring(patch.address) + L": " + patch.description + L".");
+    }
+}
+
+bool SetDynamicPatchState(const DynamicPpcPatch& patch, bool active) {
+    const uint32_t current = ReadU32(patch.address);
+    const uint32_t desired = active ? patch.replacement : patch.original;
+    if (current == desired) {
+        return true;
+    }
+
+    const uint32_t expected = active ? patch.original : patch.replacement;
+    if (current != expected) {
+        return false;
+    }
+
+    return WriteU32(patch.address, desired);
+}
+
+void UpdateCombatPitchPatchForLogicTick() {
+    if (!g_installed.load() || !ResolveMemBase()) {
+        return;
+    }
+
+    const uint32_t stateMgr = kStateManager;
+    const uint32_t player = ReadU32(stateMgr + kPlayerOffset);
+    const bool shouldBeActive = ShouldFlattenCombatPitch(stateMgr, player);
+
+    bool allOk = true;
+    for (const DynamicPpcPatch& patch : g_combatPitchPatches) {
+        allOk = SetDynamicPatchState(patch, shouldBeActive) && allOk;
+    }
+
+    if (allOk && shouldBeActive != g_combatPitchPatchActive) {
+        g_combatPitchPatchActive = shouldBeActive;
+        const uint64_t now = GetTickCount64();
+        if (LoggingEnabled() && now - g_lastCombatPitchPatchLogTick >= 100) {
+            g_lastCombatPitchPatchLogTick = now;
+            Log(std::wstring(L"GameTimingHooks combat pitch patch ") +
+                (shouldBeActive ? L"enabled" : L"disabled"));
         }
     }
 }
@@ -1621,24 +1870,55 @@ void ApplySharedPatches(SharedState* state) {
 }
 
 void ApplyInputBindingRequest(SharedState* state) {
-    if (!state || state->inputBindingRequestGeneration == 0 ||
-        state->inputBindingRequestGeneration == g_lastInputBindingRequestGeneration) {
+    if (!state || state->inputBindingRequestGeneration == 0) {
+        return;
+    }
+
+    const uint64_t now = GetTickCount64();
+    if (state->inputBindingAppliedGeneration == state->inputBindingRequestGeneration &&
+        state->inputBindingStatus == 2u) {
+        return;
+    }
+
+    if (state->inputBindingRequestGeneration == g_lastInputBindingRequestGeneration &&
+        now - g_lastInputBindingAttemptTick < 1000) {
+        return;
+    }
+
+    if (state->inputBindingRequestGeneration != g_lastInputBindingRequestGeneration) {
+        g_inputBindingAttemptCount = 0;
+    } else if (g_inputBindingAttemptCount >= 3) {
+        state->inputBindingStatus = 4u;
         return;
     }
 
     g_lastInputBindingRequestGeneration = state->inputBindingRequestGeneration;
+    g_lastInputBindingAttemptTick = now;
+    ++g_inputBindingAttemptCount;
+    state->inputBindingStatus = 1u;
+
     if (g_lastSaveProbeRequestGeneration != state->inputBindingRequestGeneration) {
         g_lastSaveProbeRequestGeneration = state->inputBindingRequestGeneration;
         TriggerDolphinPadConfigSaveProbe();
-        const bool wrote_setup = ApplyPrimedGunDolphinSetupFromHook();
-        Log(std::wstring(L"PrimedGun Dolphin setup deployment after save probe ") +
-            (wrote_setup ? L"wrote config." : L"found no writable config targets."));
     }
-    state->inputBindingAppliedGeneration = state->inputBindingRequestGeneration;
-    state->inputBindingStatus = 2u;
-    Log(L"GameTimingHooks probe-only mode observed PrimedGun setup request generation=" +
+
+    const bool wrote_setup = ApplyPrimedGunDolphinSetupFromHook();
+    Log(std::wstring(L"PrimedGun Dolphin setup deployment after save probe ") +
+        (wrote_setup ? L"wrote config." : L"found no writable config targets."));
+
+    if (wrote_setup && VerifyPrimedGunInputBindings()) {
+        state->inputBindingAppliedGeneration = state->inputBindingRequestGeneration;
+        state->inputBindingStatus = 2u;
+        Log(L"GameTimingHooks verified PrimedGun input binding request generation=" +
+            std::to_wstring(g_lastInputBindingRequestGeneration) + L".");
+        return;
+    }
+
+    state->inputBindingStatus = 3u;
+    Log(L"GameTimingHooks will retry PrimedGun input binding request generation=" +
         std::to_wstring(g_lastInputBindingRequestGeneration) +
-        L"; Dolphin active config files were deployed by the hook.");
+        L"; Dolphin active config files were not verified yet. attempt=" +
+        std::to_wstring(g_inputBindingAttemptCount) + L"/3.");
 }
 
 void ApplyStartupDolphinSetupOnce() {
@@ -1937,6 +2217,11 @@ void SuppressLockCameraPitchForLogicTick() {
     }
 }
 
+void PollFast(SharedState*) {
+    UpdateCombatPitchPatchForLogicTick();
+    TraceOrbitLockForLogicTick();
+}
+
 void Poll(SharedState* state) {
     if (g_installed.load()) {
         g_activeSharedState = state;
@@ -1958,6 +2243,11 @@ void Poll(SharedState* state) {
 }
 
 void Shutdown() {
+    if (ResolveMemBase()) {
+        for (const DynamicPpcPatch& patch : g_combatPitchPatches) {
+            SetDynamicPatchState(patch, false);
+        }
+    }
     if (g_installed.exchange(false)) {
         if (g_symbolsInitialized) {
             SymCleanup(GetCurrentProcess());

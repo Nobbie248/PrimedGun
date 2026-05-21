@@ -51,6 +51,7 @@ DWORD WINAPI RuntimeThread(void*) {
     uint64_t lastMaintenanceTick = 0;
     while (g_running.load()) {
         const uint64_t now = GetTickCount64();
+        GameTimingHooks::PollFast(shared.Get());
         if (now - lastMaintenanceTick >= 250) {
             lastMaintenanceTick = now;
             shared.Heartbeat();
