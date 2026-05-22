@@ -121,6 +121,7 @@ static constexpr uint32_t k_projectile_fire_debug_addr = PrimedGun::HookLayout::
 static constexpr uint32_t k_projectile_probe_debug_addr = PrimedGun::HookLayout::ProjectileProbeScratch;
 static constexpr uint32_t k_gun_target_hook_addr = PrimedGun::HookLayout::GunTargetScratch;
 static constexpr uint32_t k_reticle_billboard_basis_addr = PrimedGun::HookLayout::ReticleBillboardScratch;
+static constexpr uint32_t k_xr_dpad_press_hook_addr = PrimedGun::HookLayout::DpadPressScratch;
 static constexpr uint32_t k_final_input_offset = 0xB54;
 static constexpr uint32_t k_final_input_right_stick_x = k_final_input_offset + 0x10;
 static constexpr uint32_t k_final_input_right_stick_y = k_final_input_offset + 0x14;
@@ -270,6 +271,16 @@ static std::string patch_group_name_from_header(const std::string& raw_line) {
 
 static bool validate_app_patch_layout(const std::vector<LoadedPatch>& patches) {
     bool ok = true;
+    const auto range_contains = [](const PrimedGun::HookLayout::Range& range, uint32_t address) {
+        return address >= range.begin && address < range.end;
+    };
+    const auto in_any_range = [&](const auto& ranges, uint32_t address) {
+        for (const auto& range : ranges) {
+            if (range_contains(range, address))
+                return true;
+        }
+        return false;
+    };
 
     for (size_t i = 0; i < patches.size(); ++i) {
         const LoadedPatch& a = patches[i];
@@ -283,21 +294,22 @@ static bool validate_app_patch_layout(const std::vector<LoadedPatch>& patches) {
             }
         }
 
-        const bool in_app_cave =
+        const bool in_low_cave_area =
             a.address >= PrimedGun::HookLayout::AppArCaveStart &&
-            a.address < PrimedGun::HookLayout::AppArCaveEnd;
-        const bool in_dll_cave =
-            a.address >= PrimedGun::HookLayout::DllCaveStart &&
             a.address < PrimedGun::HookLayout::DllCaveEnd;
+        if (!in_low_cave_area)
+            continue;
+
+        const bool in_app_cave = in_any_range(PrimedGun::HookLayout::AppArCaveRanges, a.address);
+        const bool in_dll_cave = in_any_range(PrimedGun::HookLayout::DllCaveRanges, a.address);
         if (in_dll_cave) {
             ok = false;
             app_hook_log(L"Patch layout warning: app-owned patch [" + widen_ascii(a.group) +
                 L"] writes into DLL-owned cave space at 0x" + hex32(a.address) + L".");
-        } else if (a.address >= PrimedGun::HookLayout::AppArCaveStart &&
-                   a.address < PrimedGun::HookLayout::DllCaveEnd && !in_app_cave) {
+        } else if (!in_app_cave) {
             ok = false;
             app_hook_log(L"Patch layout warning: app-owned patch [" + widen_ascii(a.group) +
-                L"] writes into unassigned cave space at 0x" + hex32(a.address) + L".");
+                L"] writes into unreserved low PPC cave space at 0x" + hex32(a.address) + L".");
         }
     }
 
@@ -321,6 +333,25 @@ static bool validate_app_patch_layout(const std::vector<LoadedPatch>& patches) {
                 ok = false;
                 app_hook_log(L"Hook cave layout warning: [" + widen_ascii(dll_range.owner) +
                     L"] overlaps [" + widen_ascii(other.owner) + L"].");
+            }
+        }
+    }
+    for (const auto& app_range : PrimedGun::HookLayout::AppArCaveRanges) {
+        for (const auto& other : PrimedGun::HookLayout::AppArCaveRanges) {
+            if (&app_range >= &other)
+                continue;
+            if (PrimedGun::HookLayout::Overlaps(app_range, other)) {
+                ok = false;
+                app_hook_log(L"App AR cave layout warning: [" + widen_ascii(app_range.owner) +
+                    L"] overlaps [" + widen_ascii(other.owner) + L"].");
+            }
+        }
+        for (const auto& dll_range : PrimedGun::HookLayout::DllCaveRanges) {
+            if (PrimedGun::HookLayout::Overlaps(app_range, dll_range)) {
+                ok = false;
+                app_hook_log(L"Low PPC cave layout warning: app cave [" +
+                    widen_ascii(app_range.owner) + L"] overlaps DLL cave [" +
+                    widen_ascii(dll_range.owner) + L"].");
             }
         }
     }
@@ -395,6 +426,27 @@ $PrimedGun Beam Projectile Timing Hook
 04001D94 7C0803A6
 04001D98 38210010
 04001D9C 4E800020
+
+$PrimedGun XR Visor D-Pad Timing Hook
+0401866C 4BFE9735
+04001DA0 9421FFF0
+04001DA4 7C0802A6
+04001DA8 90010014
+04001DAC 3CA0817F
+04001DB0 60A5E680
+04001DB4 80050000
+04001DB8 7C030000
+04001DBC 40820018
+04001DC0 38600001
+04001DC4 80010014
+04001DC8 7C0803A6
+04001DCC 38210010
+04001DD0 4E800020
+04001DD4 4800A9FD
+04001DD8 80010014
+04001DDC 7C0803A6
+04001DE0 38210010
+04001DE4 4E800020
 
 $PrimedGun Cannon Rotation Hook
 04040FEC 4BFC0854
@@ -517,20 +569,6 @@ $PrimedGun Disable Visor Effects
 04113A98 4E800020
 042BA4B4 4E800020
 042BA7E0 4E800020
-0419697C 4BE6AFC4
-04001940 806300A4
-04001944 2C030000
-04001948 4D820020
-0400194C 38800000
-04001950 38A00001
-04001954 482C8D94
-04194D34 4BE6CC2C
-04001960 80630078
-04001964 2C030000
-04001968 4D820020
-0400196C 38800000
-04001970 38A00001
-04001974 482C8D74
 0411437C C02295D0
 04114380 4E800020
 041143C4 C02295D0
@@ -1431,6 +1469,7 @@ static std::vector<LoadedPatch> load_app_patch_files() {
     std::vector<std::string> discovered_groups;
     size_t total_patch_lines = 0;
     size_t skipped_patch_lines = 0;
+    bool settings_changed = false;
 
     std::istringstream file{std::string(kPrimedGunBuiltinPatchIni)};
     std::string line;
@@ -1439,8 +1478,8 @@ static std::vector<LoadedPatch> load_app_patch_files() {
     while (std::getline(file, line) && patches.size() < PrimedGun::MaxGamePatches) {
         const std::string trimmed = trim_ascii(line);
         if (!trimmed.empty() && trimmed.front() == '$') {
-            current_group = patch_group_name_from_header(trimmed);
-            g_settings.ensure_ar_code_toggle(current_group);
+            current_group = Settings::normalized_ar_code_name(patch_group_name_from_header(trimmed));
+            settings_changed = g_settings.ensure_ar_code_toggle(current_group) || settings_changed;
             if (std::find(discovered_groups.begin(), discovered_groups.end(), current_group) ==
                 discovered_groups.end()) {
                 discovered_groups.push_back(current_group);
@@ -1453,7 +1492,7 @@ static std::vector<LoadedPatch> load_app_patch_files() {
         if (parse_patch_line(line, patch)) {
             if (current_group.empty()) {
                 current_group = "Ungrouped";
-                g_settings.ensure_ar_code_toggle(current_group);
+                settings_changed = g_settings.ensure_ar_code_toggle(current_group) || settings_changed;
                 if (std::find(discovered_groups.begin(), discovered_groups.end(), current_group) ==
                     discovered_groups.end()) {
                     discovered_groups.push_back(current_group);
@@ -1469,9 +1508,11 @@ static std::vector<LoadedPatch> load_app_patch_files() {
         }
     }
 
-    if (g_settings.prune_ar_code_toggles(discovered_groups)) {
+    if (g_settings.prune_ar_code_toggles(discovered_groups))
+        settings_changed = true;
+    if (settings_changed) {
         g_settings.save();
-        app_hook_log(L"Removed stale app-owned AR code toggles from settings.");
+        app_hook_log(L"Refreshed app-owned AR code toggles in settings.");
     }
 
     app_hook_log(L"Loaded " + std::to_wstring(patches.size() - skipped_patch_lines) +
@@ -1977,9 +2018,10 @@ enum class VrSettingsTab : uint32_t {
     Calibration = 1,
     Controller = 2,
     Movement = 3,
+    Presets = 4,
 };
 
-static constexpr uint32_t k_vr_settings_tab_count = 4;
+static constexpr uint32_t k_vr_settings_tab_count = 5;
 
 static uint32_t vr_settings_item_count_for_tab(uint32_t tab) {
     switch (static_cast<VrSettingsTab>(tab)) {
@@ -1987,6 +2029,7 @@ static uint32_t vr_settings_item_count_for_tab(uint32_t tab) {
     case VrSettingsTab::Calibration: return 13;
     case VrSettingsTab::Controller: return 9;
     case VrSettingsTab::Movement: return 7;
+    case VrSettingsTab::Presets: return 2;
     default: return 0;
     }
 }
@@ -2006,6 +2049,25 @@ static void change_vr_global_setting(uint32_t index) {
     default:
         break;
     }
+}
+
+static void reset_calibration_offsets_keep_scale() {
+    g_settings.offset_x = 0.0f;
+    g_settings.offset_y = 0.0f;
+    g_settings.offset_z = 0.0f;
+    g_settings.model_offset_x = 0.0f;
+    g_settings.model_offset_y = 0.0f;
+    g_settings.model_offset_z = 0.0f;
+    g_settings.rot_offset_x = 0.0f;
+    g_settings.rot_offset_y = 0.0f;
+    g_settings.rot_offset_z = 0.0f;
+}
+
+static void apply_samus_arm_preset() {
+    reset_calibration_offsets_keep_scale();
+    g_settings.model_offset_y = -0.300f;
+    g_settings.rot_offset_y = 20.0f;
+    g_settings.rot_offset_z = -90.0f;
 }
 
 static void change_vr_setting(uint32_t tab, uint32_t index, bool increase) {
@@ -2089,6 +2151,17 @@ static void change_vr_setting(uint32_t tab, uint32_t index, bool increase) {
             g_settings.directional_movement_speed = kDefaultDirectionalMovementSpeed;
             g_settings.directional_movement_accel = kDefaultDirectionalMovementAccel;
             g_settings.directional_movement_air_accel = kDefaultDirectionalMovementAirAccel;
+            break;
+        default: break;
+        }
+        break;
+    case VrSettingsTab::Presets:
+        switch (index) {
+        case 0:
+            reset_calibration_offsets_keep_scale();
+            break;
+        case 1:
+            apply_samus_arm_preset();
             break;
         default: break;
         }
@@ -2325,6 +2398,22 @@ static const char* xr_dpad_dir_name(XrDpadDir dir) {
     }
 }
 
+static uint32_t xr_dpad_visor_command(XrDpadDir dir) {
+    // ControlMapper::ECommands in GM8E01 rev 0.
+    switch (dir) {
+    case XrDpadUp: return 53u;    // Combat visor / no visor
+    case XrDpadRight: return 50u; // X-Ray visor
+    case XrDpadDown: return 51u;  // Scan visor
+    case XrDpadLeft: return 52u;  // Thermal visor
+    default: return 0xffffffffu;
+    }
+}
+
+static void write_xr_dpad_press_hook_command(uint32_t command) {
+    if (!g_dolphin.is_connected())
+        return;
+    g_dolphin.write_u32(k_xr_dpad_press_hook_addr, command);
+}
 
 static XrDpadDir get_stick_dpad_direction(float x, float y, float deadzone) {
     const float ax = std::fabs(x);
@@ -2535,6 +2624,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
             if (addrs.state_manager >= 0x80000000)
                 set_player_input_disabled_for_dpad(addrs.state_manager, false);
         }
+        write_xr_dpad_press_hook_command(0xffffffffu);
         s_last_dir = XrDpadNone;
         s_dir_start = {};
         s_last_press_pulse = {};
@@ -2548,6 +2638,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     const auto addrs = get_addresses();
     const uint32_t state_mgr = addrs.state_manager;
     if (state_mgr < 0x80000000) {
+        write_xr_dpad_press_hook_command(0xffffffffu);
         s_last_dir = XrDpadNone;
         s_dir_start = {};
         s_last_press_pulse = {};
@@ -2569,6 +2660,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
             std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_near_head).count() < 260;
         if (!in_head_grace) {
             set_player_input_disabled_for_dpad(state_mgr, false);
+            write_xr_dpad_press_hook_command(0xffffffffu);
             s_last_dir = XrDpadNone;
             s_dir_start = {};
             s_last_press_pulse = {};
@@ -2591,6 +2683,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     }
     if (dir == XrDpadNone) {
         set_player_input_disabled_for_dpad(state_mgr, false);
+        write_xr_dpad_press_hook_command(0xffffffffu);
         s_last_dir = XrDpadNone;
         s_dir_start = {};
         s_last_press_pulse = {};
@@ -2619,6 +2712,7 @@ static bool apply_xr_dpad_input(const Pose& left, const Pose& hmd) {
     const bool send_press_event = in_initial_press_window || repeat_press;
     if (send_press_event)
         s_last_press_pulse = now;
+    write_xr_dpad_press_hook_command(send_press_event ? xr_dpad_visor_command(dir) : 0xffffffffu);
 
     uint8_t held0 = g_dolphin.read_u8(state_mgr + k_final_input_dpad_held_0);
     uint8_t held1 = g_dolphin.read_u8(state_mgr + k_final_input_dpad_held_1);
@@ -3321,6 +3415,7 @@ static void disarm_memory_writes() {
         g_dolphin.write_u32(k_gun_target_hook_addr, 0);
         g_dolphin.write_u32(k_gun_target_hook_addr + 4, 0xffffffffu);
         g_dolphin.write_u32(k_reticle_billboard_basis_addr, 0);
+        g_dolphin.write_u32(k_xr_dpad_press_hook_addr, 0xffffffffu);
     }
 }
 
@@ -4525,6 +4620,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     TimerResolutionScope timer_resolution;
     g_settings.load();
     open_app_hook_log();
+    load_app_patch_files();
     apply_dolphin_vr_units_per_meter();
     apply_dolphin_required_runtime_config();
     apply_dolphin_xr_camera_forward_zero();
@@ -4789,7 +4885,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 constexpr float tabY = 64.0f;
                 constexpr float tabH = 38.0f;
                 constexpr float tabX = 36.0f;
-                constexpr float tabW = 232.0f;
+                constexpr float tabW = 180.0f;
                 constexpr float tabGap = 10.0f;
                 if (pointerY >= tabY && pointerY <= tabY + tabH) {
                     const int tab = static_cast<int>((pointerX - tabX) / (tabW + tabGap));

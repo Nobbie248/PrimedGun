@@ -28,6 +28,7 @@ inline constexpr uint32_t ProjectileProbeScratch = ScratchBase + 0x300u;      //
 inline constexpr uint32_t GunTargetScratch = ScratchBase + 0x400u;            // player + uid
 inline constexpr uint32_t ReticleBillboardScratch = ScratchBase + 0x500u;     // enabled + basis
 inline constexpr uint32_t ProjectileTimingScratch = ScratchBase + 0x600u;     // reserved
+inline constexpr uint32_t DpadPressScratch = ScratchBase + 0x680u;            // requested ControlMapper command
 
 inline constexpr Range ScratchRanges[] = {
     {CannonBasisScratch, CannonBasisScratch + 0x048u, "cannon transform hook"},
@@ -38,14 +39,26 @@ inline constexpr Range ScratchRanges[] = {
     {GunTargetScratch, GunTargetScratch + 0x008u, "gun target hook"},
     {ReticleBillboardScratch, ReticleBillboardScratch + 0x028u, "reticle billboard hook"},
     {ProjectileTimingScratch, ProjectileTimingScratch + 0x080u, "projectile timing hook reserve"},
+    {DpadPressScratch, DpadPressScratch + 0x010u, "XR D-pad press hook"},
 };
 
-// Low MEM1 PPC caves. App-owned AR codes live below 0x80001B00; injected DLL
-// dynamic hooks live above that line.
+// Low MEM1 PPC caves. Static app-owned AR code caves and injected DLL dynamic
+// hook caves share this area, so every block must be explicitly reserved.
 inline constexpr uint32_t AppArCaveStart = 0x80001800u;
-inline constexpr uint32_t AppArCaveEnd = 0x80001B00u;
+inline constexpr uint32_t AppArCaveEnd = 0x80001E00u;
 inline constexpr uint32_t DllCaveStart = 0x80001B00u;
 inline constexpr uint32_t DllCaveEnd = 0x80001F00u;
+
+inline constexpr Range AppArCaveRanges[] = {
+    {0x80001840u, 0x800018C0u, "cannon rotation hook A"},
+    {0x80001900u, 0x80001930u, "gun ray target hook"},
+    {0x80001940u, 0x80001978u, "visor effect hook"},
+    {0x80001980u, 0x800019A4u, "frustum culling hook"},
+    {0x800019C0u, 0x80001A10u, "cannon rotation hook B"},
+    {0x80001A20u, 0x80001ACCu, "reticle hook"},
+    {0x80001D00u, 0x80001DA0u, "beam projectile timing hook"},
+    {0x80001DA0u, 0x80001DE8u, "XR visor D-pad timing hook"},
+};
 
 inline constexpr uint32_t FirstPersonPitchLoadCave = 0x80001B70u;
 inline constexpr uint32_t RenderModelOffsetCave = 0x80001C00u;

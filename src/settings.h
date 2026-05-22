@@ -119,7 +119,11 @@ struct Settings {
             return "Disable Frustum Culling";
         if (name == "Restore VR rotation after 80040FE8 Hook")
             return "Cannon Rotation Hook";
-        if (name == "Visor Patch")
+        if (name == "Visor Patch" ||
+            name == "Disable Visor Screen Effects" ||
+            name == "Disable Visor Filter A" ||
+            name == "Disable Visor Filter B" ||
+            name == "Disable Visor Distortion")
             return "Disable Visor Effects";
         return name;
     }
@@ -234,6 +238,7 @@ struct Settings {
     void load() {
         std::ifstream f(filename());
         if (!f) return;
+        bool migrated_settings = false;
         std::string line;
         while (std::getline(f, line)) {
             auto eq = line.find('=');
@@ -273,7 +278,10 @@ struct Settings {
             else if (key == "directional_movement_air_accel") directional_movement_air_accel = std::stof(val);
             else if (key == "view_height_meters") view_height_meters = std::stof(val);
             else if (key.rfind("ar_code.", 0) == 0) {
-                const std::string name = normalized_ar_code_name(key.substr(8));
+                const std::string raw_name = key.substr(8);
+                const std::string name = normalized_ar_code_name(raw_name);
+                if (name != raw_name)
+                    migrated_settings = true;
                 ensure_ar_code_toggle(name);
                 for (ArCodeToggle& toggle : ar_code_toggles) {
                     if (toggle.name == name) {
@@ -297,5 +305,7 @@ struct Settings {
         model_offset_x = std::clamp(model_offset_x, -2.0f, 2.0f);
         model_offset_y = std::clamp(model_offset_y, -2.0f, 2.0f);
         model_offset_z = std::clamp(model_offset_z, -2.0f, 2.0f);
+        if (migrated_settings)
+            save();
     }
 };

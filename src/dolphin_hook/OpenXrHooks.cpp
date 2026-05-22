@@ -774,6 +774,11 @@ std::vector<VrMenuRow> BuildSettingsRows(const SettingsState& s) {
             {"AIR ACCELERATION", FloatText(s.directionalMovementAirAccel, 1)},
             {"RESET MOVEMENT", "RESET"},
         };
+    case 4:
+        return {
+            {"DEFAULT ARM PRESET", "APPLY"},
+            {"SAMUS ARM PRESET", "APPLY"},
+        };
     default:
         return {
             {"TARGETING", s.gunTargetingEnabled ? "ON" : "OFF"},
@@ -797,11 +802,11 @@ std::vector<uint32_t> BuildSettingsMenuPixels(uint32_t width, uint32_t height, c
                         34, 2, 0xFFFFE6B8u);
     }
 
-    constexpr const char* tabs[] = {"AIMING", "CALIBRATION", "CONTROLLER", "MOVEMENT"};
+    constexpr const char* tabs[] = {"AIMING", "CALIBRATION", "CONTROLLER", "MOVEMENT", "PRESETS"};
     const int tabY = 64;
     const int tabH = 38;
     const int tabX = 36;
-    const int tabW = 232;
+    const int tabW = 180;
     const int tabGap = 10;
     for (int i = 0; i < static_cast<int>(std::size(tabs)); ++i) {
         const bool active = i == static_cast<int>(s.vrMenuTab);

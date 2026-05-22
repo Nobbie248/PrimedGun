@@ -220,6 +220,10 @@ bool IsMem1Range(uint32_t gcAddr, size_t size) {
         static_cast<uint64_t>(kMem1Start) + kMem1Size;
 }
 
+bool IsLowPpcCaveAddress(uint32_t gcAddr) {
+    return gcAddr >= HookLayout::AppArCaveStart && gcAddr < HookLayout::DllCaveEnd;
+}
+
 uint32_t PpcBranch(uint32_t from, uint32_t to) {
     const int32_t offset = static_cast<int32_t>(to - from);
     return 0x48000000u | (static_cast<uint32_t>(offset) & 0x03FFFFFCu);
@@ -1926,11 +1930,11 @@ void ApplySharedPatches(SharedState* state) {
             L" count=" + std::to_wstring(g_lastPatchCount));
     }
 
-    for (uint32_t i = 0; i < state->patch.count; ++i) {
+    auto processPatch = [&](uint32_t i) {
         GamePatch& patch = state->patch.patches[i];
         if (!IsMem1Range(patch.address, 4)) {
             patch.lastSeen = 0xffffffffu;
-            continue;
+            return;
         }
 
         const uint32_t current = ReadU32(patch.address);
@@ -1944,20 +1948,20 @@ void ApplySharedPatches(SharedState* state) {
                 Log(L"GameTimingHooks restored disabled app patch[" + std::to_wstring(i) +
                     L"] address=0x" + std::to_wstring(patch.address));
             }
-            continue;
+            return;
         }
 
         if (patch.applied) {
-            continue;
+            return;
         }
 
         if (current == patch.value) {
             patch.applied = 1;
-            continue;
+            return;
         }
 
         if (patch.requireOriginal && current != patch.original) {
-            continue;
+            return;
         }
 
         if (g_appPatchOriginals.find(patch.address) == g_appPatchOriginals.end())
@@ -1969,7 +1973,25 @@ void ApplySharedPatches(SharedState* state) {
                 L"] address=0x" + std::to_wstring(patch.address) +
                 L" value=0x" + std::to_wstring(patch.value));
         }
-    }
+    };
+
+    auto processMatchingPatches = [&](bool enabled, bool cave) {
+        for (uint32_t i = 0; i < state->patch.count; ++i) {
+            GamePatch& patch = state->patch.patches[i];
+            if ((patch.enabled != 0) != enabled)
+                continue;
+            if (IsLowPpcCaveAddress(patch.address) != cave)
+                continue;
+            processPatch(i);
+        }
+    };
+
+    // Install cave code before branch sites can jump to it. When a code is
+    // disabled, remove branch sites before restoring the cave bytes.
+    processMatchingPatches(true, true);
+    processMatchingPatches(true, false);
+    processMatchingPatches(false, false);
+    processMatchingPatches(false, true);
 }
 
 void ApplyInputBindingRequest(SharedState* state) {
