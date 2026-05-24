@@ -78,10 +78,6 @@ struct AppState {
     std::atomic<bool> reconnect_tracking_requested = false;
     std::atomic<bool> remap_dolphin_controls_requested = false;
     std::atomic<bool> app_patches_apply_requested = false;
-    std::atomic<bool> open_config_fallback_requested = false;
-    bool dolphin_config_fallback_visible = false;
-    std::string dolphin_config_fallback_path;
-    std::string dolphin_config_fallback_message;
     ImTextureID controller_layout_texture = ImTextureID_Invalid;
     int controller_layout_width = 0;
     int controller_layout_height = 0;
@@ -240,15 +236,6 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
             ImGui::BulletText("%s", app.dolphin_status.c_str());
             ImGui::BulletText("%s", app.hook_status.c_str());
             ImGui::BulletText("Tracking: %s", app.tracking_status.c_str());
-            if (app.dolphin_config_fallback_visible) {
-                ImGui::Spacing();
-                ImGui::TextColored(warn, "%s", app.dolphin_config_fallback_message.c_str());
-                ImGui::TextWrapped("Fallback configs were written to:");
-                ImGui::TextWrapped("%s", app.dolphin_config_fallback_path.c_str());
-                if (ImGui::Button("Open Config Folder")) {
-                    app.open_config_fallback_requested.store(true, std::memory_order_relaxed);
-                }
-            }
             end_panel();
             ImGui::EndTabItem();
         }

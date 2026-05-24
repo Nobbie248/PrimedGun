@@ -2,6 +2,7 @@
 #include <mmsystem.h>
 #include <d3d11.h>
 #include <wincodec.h>
+#include <dwmapi.h>
 #include <chrono>
 #include <thread>
 #include <cmath>
@@ -564,15 +565,6 @@ $PrimedGun Reticle Hook
 04001AC4 EC3F0032
 04001AC8 480BB648
 
-$PrimedGun Disable Visor Effects
-041133D8 48000040
-04113A98 4E800020
-042BA4B4 4E800020
-042BA7E0 4E800020
-0411437C C02295D0
-04114380 4E800020
-041143C4 C02295D0
-041143C8 4E800020
 )PGINI";
 
 static void open_app_hook_log() {
@@ -589,6 +581,38 @@ static fs::path exe_directory() {
     wchar_t buffer[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(MAX_PATH));
     return fs::path(buffer).parent_path();
+}
+
+static fs::path bundled_core_directory() {
+    return exe_directory() / L"core";
+}
+
+static fs::path bundled_core_exe_path() {
+    const fs::path core_exe = bundled_core_directory() / L"Core.exe";
+    std::error_code ec;
+    if (fs::exists(core_exe, ec) && !ec)
+        return core_exe;
+    return bundled_core_directory() / L"Dolphin.exe";
+}
+
+static bool path_is_inside_bundled_core(const fs::path& path) {
+    if (path.empty())
+        return false;
+
+    std::error_code ec;
+    fs::path core = fs::weakly_canonical(bundled_core_directory(), ec);
+    if (ec)
+        return false;
+    fs::path candidate = fs::weakly_canonical(path, ec);
+    if (ec)
+        return false;
+
+    std::wstring core_text = core.wstring();
+    std::wstring candidate_text = candidate.wstring();
+    if (!core_text.empty() && core_text.back() != L'\\' && core_text.back() != L'/')
+        core_text.push_back(L'\\');
+    return candidate_text.size() >= core_text.size() &&
+           _wcsnicmp(candidate_text.c_str(), core_text.c_str(), core_text.size()) == 0;
 }
 
 static void release_texture(ID3D11ShaderResourceView*& srv, int& width, int& height,
@@ -751,10 +775,7 @@ static fs::path roaming_dolphin_root_path() {
 }
 
 static fs::path documents_dolphin_config_path(const fs::path& relative_path) {
-    const fs::path profile = user_profile_path();
-    if (profile.empty())
-        return {};
-    return profile / L"Documents" / L"Dolphin Emulator" / L"Config" / relative_path;
+    return bundled_core_directory() / L"User" / L"Config" / relative_path;
 }
 
 static fs::path shared_dolphin_root_path(const wchar_t* path_text) {
@@ -800,28 +821,8 @@ static std::vector<fs::path> dolphin_config_path_candidates(const fs::path& rela
         candidates.push_back(path);
     };
 
-    add_candidate(hook_observed_dolphin_config_path(relative_path));
-
-    const std::optional<DWORD> dolphin_pid = find_process_id_by_name(L"Dolphin.exe");
-    if (dolphin_pid) {
-        if (const std::optional<fs::path> dolphin_path = dolphin_process_path(*dolphin_pid)) {
-            const fs::path exe_dir = dolphin_path->parent_path();
-            add_candidate(exe_dir / L"User" / L"Config" / relative_path);
-            add_candidate(exe_dir / L"Config" / relative_path);
-            if (exe_dir.has_parent_path()) {
-                const fs::path parent = exe_dir.parent_path();
-                add_candidate(parent / L"User" / L"Config" / relative_path);
-                add_candidate(parent / L"Config" / relative_path);
-            }
-        }
-    }
-
-    const fs::path roaming_root = roaming_dolphin_root_path();
-    if (!roaming_root.empty())
-        add_candidate(roaming_root / L"Config" / relative_path);
-
-    const fs::path documents_path = documents_dolphin_config_path(relative_path);
-    add_candidate(documents_path);
+    add_candidate(bundled_core_directory() / L"User" / L"Config" / relative_path);
+    add_candidate(bundled_core_directory() / L"Config" / relative_path);
     return candidates;
 }
 
@@ -895,10 +896,6 @@ static fs::path dolphin_ini_path() {
     return active_dolphin_config_path(L"Dolphin.ini");
 }
 
-static fs::path fallback_config_directory() {
-    return exe_directory() / L"PrimeGun configs";
-}
-
 static std::string narrow_path(const fs::path& path) {
     const std::wstring wide = path.wstring();
     return std::string(wide.begin(), wide.end());
@@ -915,19 +912,11 @@ static fs::path primedgun_backup_path_for(const fs::path& path) {
 }
 
 static fs::path dolphin_gm8e01_vr_settings_path() {
-    const fs::path profile = user_profile_path();
-    if (profile.empty())
-        return {};
-    return profile / L"Documents" / L"Dolphin Emulator" /
-        L"GameSettingsVR" / L"GM8E01.ini";
+    return bundled_core_directory() / L"User" / L"GameSettingsVR" / L"GM8E01.ini";
 }
 
 static fs::path dolphin_gm8e01_settings_path() {
-    const fs::path profile = user_profile_path();
-    if (profile.empty())
-        return {};
-    return profile / L"Documents" / L"Dolphin Emulator" /
-        L"GameSettings" / L"GM8E01.ini";
+    return bundled_core_directory() / L"User" / L"GameSettings" / L"GM8E01.ini";
 }
 
 static std::vector<std::string> read_text_lines(const fs::path& path) {
@@ -1421,16 +1410,8 @@ static std::vector<fs::path> existing_dolphin_game_settings_paths(const wchar_t*
     std::vector<fs::path> candidates;
     std::vector<fs::path> paths;
 
-    add_unique_path(candidates, hook_observed_dolphin_game_settings_path(folder_name));
-
-    const std::optional<DWORD> dolphin_pid = find_process_id_by_name(L"Dolphin.exe");
-    if (dolphin_pid) {
-        if (const std::optional<fs::path> dolphin_path = dolphin_process_path(*dolphin_pid))
-            add_dolphin_game_settings_paths(candidates, *dolphin_path, folder_name);
-    }
-    const fs::path roaming_root = roaming_dolphin_root_path();
-    if (!roaming_root.empty())
-        add_unique_path(candidates, roaming_root / folder_name / L"GM8E01.ini");
+    add_unique_path(candidates, bundled_core_directory() / L"User" / folder_name / L"GM8E01.ini");
+    add_unique_path(candidates, bundled_core_directory() / folder_name / L"GM8E01.ini");
     add_unique_path(candidates, documents_path);
 
     for (const fs::path& path : candidates) {
@@ -1522,7 +1503,16 @@ static std::optional<DWORD> find_process_id_by_name(const wchar_t* exe_name) {
     entry.dwSize = sizeof(entry);
     if (Process32FirstW(snapshot, &entry)) {
         do {
-            if (_wcsicmp(entry.szExeFile, exe_name) == 0) {
+            const bool name_matches =
+                _wcsicmp(entry.szExeFile, exe_name) == 0 ||
+                (_wcsicmp(exe_name, L"Dolphin.exe") == 0 &&
+                 (_wcsicmp(entry.szExeFile, L"Core.exe") == 0 ||
+                  _wcsicmp(entry.szExeFile, L"Dolphin.exe") == 0));
+            if (!name_matches)
+                continue;
+
+            const std::optional<fs::path> process_path = dolphin_process_path(entry.th32ProcessID);
+            if (process_path && path_is_inside_bundled_core(*process_path)) {
                 CloseHandle(snapshot);
                 return entry.th32ProcessID;
             }
@@ -2224,6 +2214,43 @@ static bool ensure_dolphin_hook_loaded() {
 
     app_hook_log(L"Dolphin.exe is not running; waiting for the user to start Dolphin.");
     return false;
+}
+
+static bool launch_or_attach_bundled_core() {
+    ensure_shared_state();
+
+    const fs::path dll_path = exe_directory() / L"PrimedGun_DolphinHook.dll";
+    if (!fs::exists(dll_path)) {
+        app_hook_log(L"Missing hook DLL next to PrimedGun.exe: " + dll_path.wstring());
+        return false;
+    }
+
+    if (const std::optional<DWORD> dolphin_pid = find_process_id_by_name(L"Dolphin.exe")) {
+        app_hook_log(L"PrimedGun.exe found bundled core with pid " + std::to_wstring(*dolphin_pid));
+        return inject_hook_dll(*dolphin_pid, dll_path);
+    }
+
+    const fs::path core_exe = bundled_core_exe_path();
+    std::error_code ec;
+    if (!fs::exists(core_exe, ec) || ec) {
+        app_hook_log(L"Bundled core executable not found: " + core_exe.wstring());
+        return false;
+    }
+
+    const std::optional<StartedDolphinProcess> started = start_dolphin_suspended(core_exe);
+    if (!started)
+        return false;
+
+    const bool injected = inject_hook_dll(started->process_id, dll_path);
+    const DWORD resume_result = ResumeThread(started->thread);
+    if (resume_result == static_cast<DWORD>(-1))
+        app_hook_log(L"ResumeThread failed for bundled core.");
+    else
+        app_hook_log(L"Bundled core resumed.");
+
+    CloseHandle(started->thread);
+    CloseHandle(started->process);
+    return injected && resume_result != static_cast<DWORD>(-1);
 }
 
 static void push_timing_sample(float* hist, int& head, float ms) {
@@ -4605,6 +4632,15 @@ static bool init_d3d(HWND hwnd) {
     return true;
 }
 
+static void enable_dark_title_bar(HWND hwnd) {
+    BOOL enabled = TRUE;
+    constexpr DWORD kDwmUseImmersiveDarkMode = 20;
+    if (FAILED(DwmSetWindowAttribute(hwnd, kDwmUseImmersiveDarkMode, &enabled, sizeof(enabled)))) {
+        constexpr DWORD kDwmUseImmersiveDarkModeBefore20H1 = 19;
+        DwmSetWindowAttribute(hwnd, kDwmUseImmersiveDarkModeBefore20H1, &enabled, sizeof(enabled));
+    }
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     TimerResolutionScope timer_resolution;
     g_settings.load();
@@ -4615,15 +4651,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     apply_dolphin_xr_camera_forward_zero();
     disable_unmanaged_dolphin_codes();
     sync_dolphin_xr_gamecube_controls(g_settings.auto_dolphin_xr_controls);
-    if (find_process_id_by_name(L"Dolphin.exe")) {
-        MessageBoxW(nullptr,
-            L"Dolphin is already running.\n\n"
-            L"For the cleanest startup, close Dolphin, start PrimedGun, then start Dolphin again.",
-            L"Restart Dolphin",
-            MB_OK | MB_ICONWARNING);
-    }
-    ensure_dolphin_hook_loaded();
-
     HICON app_icon = static_cast<HICON>(LoadImageW(
         hInstance, MAKEINTRESOURCEW(IDI_PRIMEDGUN), IMAGE_ICON,
         32, 32, LR_DEFAULTCOLOR));
@@ -4649,6 +4676,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         window_rect.bottom - window_rect.top,
         nullptr, nullptr, hInstance, nullptr);
 
+    enable_dark_title_bar(g_hwnd);
     SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(app_icon));
     SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(app_icon_small));
 
@@ -4663,6 +4691,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     ShowWindow(g_hwnd, SW_SHOWDEFAULT);
     UpdateWindow(g_hwnd);
+
+    launch_or_attach_bundled_core();
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -4789,19 +4819,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         const bool has_shared_state = open_live_shared_state() && g_shared_state;
         if (has_shared_state) {
             g_shared_state->appHeartbeat++;
-            if (g_shared_state->inputBindingStatus == 4u) {
-                g_app.dolphin_config_fallback_visible = true;
-                g_app.dolphin_config_fallback_path = narrow_path(fallback_config_directory());
-                g_app.dolphin_config_fallback_message =
-                    "Failed to locate local Dolphin configs.";
-            } else if (g_shared_state->inputBindingStatus == 2u) {
-                g_app.dolphin_config_fallback_visible = false;
-                g_app.dolphin_config_fallback_message.clear();
-            }
-            if (g_app.open_config_fallback_requested.exchange(false, std::memory_order_relaxed)) {
-                const fs::path folder = fallback_config_directory();
-                ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-            }
             static bool vr_settings_visible = false;
             static bool last_left_thumb_click = false;
             static bool last_right_select = false;

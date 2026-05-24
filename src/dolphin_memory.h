@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 // Dolphin emulates the GameCube/Wii memory starting at a base address in its process.
-// We find Dolphin.exe, locate its emulated RAM base, then read/write at offsets.
+// We only attach to the bundled runtime under PrimedGun.exe's sibling "core" folder.
 
 class DolphinMemory {
 public:
@@ -20,7 +20,7 @@ public:
         disconnect();
 
         dolphin_pid_ = find_process("Dolphin.exe");
-        if (!dolphin_pid_) { status_ = "Dolphin not found"; return false; }
+        if (!dolphin_pid_) { status_ = "Bundled core not found"; return false; }
 
         handle_ = OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION,
                               FALSE, dolphin_pid_);
@@ -149,7 +149,51 @@ private:
         WriteProcessMemory(handle_, (LPVOID)gc_to_host(gc_addr), buf, size, &bytes_written);
     }
 
-    // Find process by name, return PID
+    static std::string lower_ascii(std::string text) {
+        for (char& ch : text) {
+            if (ch >= 'A' && ch <= 'Z')
+                ch = static_cast<char>(ch - 'A' + 'a');
+            else if (ch == '/')
+                ch = '\\';
+        }
+        return text;
+    }
+
+    static std::string bundled_core_prefix() {
+        char module_path[MAX_PATH] = {};
+        const DWORD len = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
+        if (len == 0 || len >= MAX_PATH)
+            return {};
+
+        std::string dir(module_path, len);
+        const size_t slash = dir.find_last_of("\\/");
+        if (slash == std::string::npos)
+            return {};
+        dir.resize(slash + 1);
+        dir += "core\\";
+        return lower_ascii(dir);
+    }
+
+    static bool process_is_bundled_core(DWORD pid) {
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!process)
+            return false;
+
+        char path[MAX_PATH] = {};
+        DWORD size = MAX_PATH;
+        const BOOL ok = QueryFullProcessImageNameA(process, 0, path, &size);
+        CloseHandle(process);
+        if (!ok || size == 0)
+            return false;
+
+        const std::string core = bundled_core_prefix();
+        const std::string candidate = lower_ascii(std::string(path, size));
+        return !core.empty() &&
+               candidate.size() >= core.size() &&
+               candidate.compare(0, core.size(), core) == 0;
+    }
+
+    // Find the bundled Dolphin/Core process, return PID.
     static DWORD find_process(const char* name) {
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap == INVALID_HANDLE_VALUE) return 0;
@@ -157,7 +201,12 @@ private:
         DWORD pid = 0;
         if (Process32First(snap, &pe)) {
             do {
-                if (_stricmp(pe.szExeFile, name) == 0) {
+                const bool name_matches =
+                    _stricmp(pe.szExeFile, name) == 0 ||
+                    (_stricmp(name, "Dolphin.exe") == 0 &&
+                     (_stricmp(pe.szExeFile, "Core.exe") == 0 ||
+                      _stricmp(pe.szExeFile, "Dolphin.exe") == 0));
+                if (name_matches && process_is_bundled_core(pe.th32ProcessID)) {
                     pid = pe.th32ProcessID;
                     break;
                 }

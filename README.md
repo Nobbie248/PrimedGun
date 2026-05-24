@@ -49,15 +49,6 @@ For distribution/share, the useful files are:
 - Dolphin-side hook bridge for app-owned game patches, OpenXR tracking, and overlays.
 - Automatic Dolphin OpenXR controller binding setup.
 
-## Dolphin Setup
-
-PrimedGun only applies Dolphin's Port 1 controller bindings automatically on startup.
-
-- Maps Dolphin's Port 1 controls to OpenXR.
-
-Set Dolphin VR/OpenXR, world scale, camera forward, and other emulator settings manually in Dolphin.
-If PrimedGun cannot find Dolphin's active controller config location, it shows a warning in the app.
-
 ## App-Owned Patches
 
 Patches are applied automatically through the PrimedGun app.
