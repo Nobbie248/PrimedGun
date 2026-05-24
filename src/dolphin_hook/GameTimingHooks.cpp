@@ -1434,47 +1434,6 @@ bool ApplyPrimedGunDolphinSetupFromHook() {
         Log(L"Applied PrimedGun GCPad config to Dolphin active path: " + path.wstring());
     }
 
-    for (const fs::path& path : DolphinActiveProfileFiles(L"Config\\Dolphin.ini", false)) {
-        ApplyIniSectionValues(path, "VR", {{"EnableVR", "True"}}, {});
-        wrote_any = true;
-        Log(L"Applied PrimedGun Dolphin global config to Dolphin active path: " +
-            path.wstring());
-    }
-
-    for (const fs::path& path : DolphinActiveProfileFiles(L"Config\\GFX.ini", false)) {
-        ApplyIniSectionValues(path, "VR", {{"EnableOpenXR", "True"}}, {});
-        wrote_any = true;
-        Log(L"Applied PrimedGun GFX OpenXR config to Dolphin active path: " + path.wstring());
-    }
-
-    for (const fs::path& path : DolphinActiveProfileFiles(L"GameSettings\\GM8E01.ini", false)) {
-        ApplyIniSectionValues(path, "Video_Stereoscopy",
-                              {{"StereoDepthPercentage", "100"},
-                               {"StereoConvergence", "20.00"},
-                               {"StereoEFBMonoDepth", "False"}},
-                              {});
-        wrote_any = true;
-        Log(L"Applied PrimedGun GM8E01 game config to Dolphin active path: " + path.wstring());
-    }
-
-    for (const fs::path& path : DolphinActiveProfileFiles(L"GameSettingsVR\\GM8E01.ini", false)) {
-        ReplaceIniSection(path, "Graphics.VR",
-                          {{"UnitsPerMeter", "1.50"},
-                           {"CameraForward", "0.0"}});
-        ApplyIniSectionValues(path, "GFX.VR", {},
-                              {"UnitsPerMeter", "UnitsPerMetre", "LeanBackAngle",
-                               "CameraForward", "HeadLockedCurvature", "ElementDepth",
-                               "VirtualScreen", "DontClearScreen", "OpcodeReplay",
-                               "AutoVBIFromHMD"});
-        ApplyIniSectionValues(path, "VR", {},
-                              {"UnitsPerMeter", "UnitsPerMetre", "LeanBackAngle",
-                               "CameraForward", "HeadLockedCurvature", "ElementDepth",
-                               "VirtualScreen", "DontClearScreen", "OpcodeReplay",
-                               "AutoVBIFromHMD"});
-        wrote_any = true;
-        Log(L"Applied PrimedGun GM8E01 VR config to Dolphin active path: " + path.wstring());
-    }
-
     return wrote_any;
 }
 

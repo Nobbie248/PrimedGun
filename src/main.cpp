@@ -1294,7 +1294,7 @@ static void request_dolphin_openxr_controller_bindings() {
 
     ++g_shared_state->inputBindingRequestGeneration;
     g_shared_state->inputBindingStatus = 0;
-    app_hook_log(L"Requested Dolphin-side PrimedGun OpenXR bindings and GM8E01 defaults.");
+    app_hook_log(L"Requested Dolphin-side PrimedGun OpenXR controller bindings.");
 }
 
 static void apply_dolphin_xr_gamecube_controls() {
@@ -1327,23 +1327,12 @@ static std::vector<fs::path> dolphin_gm8e01_settings_paths();
 static std::vector<fs::path> dolphin_gm8e01_vr_settings_paths();
 
 static void apply_dolphin_vr_units_per_meter() {
-    request_dolphin_openxr_controller_bindings();
 }
 
 static void apply_dolphin_required_runtime_config() {
-    request_dolphin_openxr_controller_bindings();
-
-    const fs::path path = dolphin_ini_path();
-    if (path.empty())
-        return;
-
-    backup_file_once(path);
-    apply_ini_section_values(path, "Input", {{"BackgroundInput", "True"}}, {});
-    app_hook_log(L"Applied Dolphin background input; requested Dolphin-side GM8E01 runtime defaults.");
 }
 
 static void apply_dolphin_xr_camera_forward_zero() {
-    request_dolphin_openxr_controller_bindings();
 }
 
 static void disable_unmanaged_dolphin_codes_in(const fs::path& path) {

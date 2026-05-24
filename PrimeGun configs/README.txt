@@ -9,7 +9,7 @@ Copy it into the Config folder inside the Dolphin user folder your build is usin
 
 Do not replace your whole Dolphin folder. This fallback only provides the OpenXR GameCube controller map.
 
-You should still set these Dolphin settings manually if PrimeGun could not apply them:
+PrimeGun does not write Dolphin emulator/game settings. Set these manually in Dolphin:
 - Enable OpenXR / VR.
 - Enable background input.
 - For Metroid Prime GM8E01 VR config, set Units Per Meter to 1.50.

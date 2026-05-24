@@ -47,25 +47,23 @@ For distribution/share, the useful files are:
 - Position, rotation, scale, and render-only model offset calibration.
 - In-headset settings menu.
 - Dolphin-side hook bridge for app-owned game patches, OpenXR tracking, and overlays.
-- Automatic Dolphin XR setup for the GM8E01 VR settings PrimedGun expects.
+- Automatic Dolphin OpenXR controller binding setup.
 
 ## Dolphin Setup
 
-PrimedGun applies the Dolphin settings it needs automatically on startup:
+PrimedGun only applies Dolphin's Port 1 controller bindings automatically on startup.
 
-- Enables Dolphin VR/OpenXR.
-- Sets the GM8E01 Dolphin XR world scale / units-per-meter value to `1.50`.
-- Sets the GM8E01 Dolphin XR camera forward offset to `0`.
 - Maps Dolphin's Port 1 controls to OpenXR.
 
-If PrimedGun cannot find Dolphin's active config location, it shows a warning in the app.
+Set Dolphin VR/OpenXR, world scale, camera forward, and other emulator settings manually in Dolphin.
+If PrimedGun cannot find Dolphin's active controller config location, it shows a warning in the app.
 
 ## App-Owned Patches
 
 Patches are applied automatically through the PrimedGun app.
 Each app-owned AR/Gecko code can be enabled or disabled from the `AR Codes` tab.
 
-PrimedGun also disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
+PrimedGun disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owned patch set is the one in control.
 
 ## Usage
 
@@ -84,7 +82,7 @@ PrimedGun also disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app
 ## Notes
 
 - Settings are saved to `primedgun_settings.ini`.
-- Dolphin settings and controller setup are applied automatically on startup.
+- Dolphin controller bindings are applied automatically on startup.
 - The app reads controller tracking from Dolphin-side OpenXR and writes the cannon transform into Dolphin memory.
 - PrimedGun should be running before Metroid Prime is loaded so the Dolphin-side hook is ready as soon as GM8E01 memory appears.
 - For the best experience, try not to turn your body around. You can move in the game like this, but functionality is not ideal.
