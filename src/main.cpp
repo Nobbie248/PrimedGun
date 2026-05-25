@@ -449,6 +449,9 @@ $PrimedGun XR Visor D-Pad Timing Hook
 04001DE0 38210010
 04001DE4 4E800020
 
+$PrimedGun Disable Visor Blur
+041133D8 48000040
+
 $PrimedGun Cannon Rotation Hook
 04040FEC 4BFC0854
 04001840 807C0740
@@ -1449,12 +1452,15 @@ static std::vector<LoadedPatch> load_app_patch_files() {
         const std::string trimmed = trim_ascii(line);
         if (!trimmed.empty() && trimmed.front() == '$') {
             current_group = Settings::normalized_ar_code_name(patch_group_name_from_header(trimmed));
-            settings_changed = g_settings.ensure_ar_code_toggle(current_group) || settings_changed;
-            if (std::find(discovered_groups.begin(), discovered_groups.end(), current_group) ==
-                discovered_groups.end()) {
-                discovered_groups.push_back(current_group);
+            const bool user_toggleable = current_group == "Disable Visor Blur";
+            if (user_toggleable) {
+                settings_changed = g_settings.ensure_ar_code_toggle(current_group) || settings_changed;
+                if (std::find(discovered_groups.begin(), discovered_groups.end(), current_group) ==
+                    discovered_groups.end()) {
+                    discovered_groups.push_back(current_group);
+                }
             }
-            current_group_enabled = g_settings.ar_code_enabled(current_group);
+            current_group_enabled = !user_toggleable || g_settings.ar_code_enabled(current_group);
             continue;
         }
 
@@ -1462,12 +1468,7 @@ static std::vector<LoadedPatch> load_app_patch_files() {
         if (parse_patch_line(line, patch)) {
             if (current_group.empty()) {
                 current_group = "Ungrouped";
-                settings_changed = g_settings.ensure_ar_code_toggle(current_group) || settings_changed;
-                if (std::find(discovered_groups.begin(), discovered_groups.end(), current_group) ==
-                    discovered_groups.end()) {
-                    discovered_groups.push_back(current_group);
-                }
-                current_group_enabled = g_settings.ar_code_enabled(current_group);
+                current_group_enabled = true;
             }
             ++total_patch_lines;
             patch.group = current_group;
@@ -2005,7 +2006,7 @@ static constexpr uint32_t k_vr_settings_tab_count = 5;
 static uint32_t vr_settings_item_count_for_tab(uint32_t tab) {
     switch (static_cast<VrSettingsTab>(tab)) {
     case VrSettingsTab::Aiming: return 4;
-    case VrSettingsTab::Calibration: return 13;
+    case VrSettingsTab::Calibration: return 9;
     case VrSettingsTab::Controller: return 9;
     case VrSettingsTab::Movement: return 7;
     case VrSettingsTab::Presets: return 2;
@@ -2068,26 +2069,18 @@ static void change_vr_setting(uint32_t tab, uint32_t index, bool increase) {
     case VrSettingsTab::Calibration:
         switch (index) {
         case 0: g_settings.world_scale = std::clamp(g_settings.world_scale + sign * 0.5f, 1.0f, 50.0f); break;
-        case 1: g_settings.offset_x = std::clamp(g_settings.offset_x + sign * 0.01f, -2.0f, 2.0f); break;
-        case 2: g_settings.offset_y = std::clamp(g_settings.offset_y + sign * 0.01f, -2.0f, 2.0f); break;
-        case 3: g_settings.offset_z = std::clamp(g_settings.offset_z + sign * 0.01f, -2.0f, 2.0f); break;
+        case 1: g_settings.model_offset_x = std::clamp(g_settings.model_offset_x + sign * 0.01f, -2.0f, 2.0f); break;
+        case 2: g_settings.model_offset_y = std::clamp(g_settings.model_offset_y + sign * 0.01f, -2.0f, 2.0f); break;
+        case 3: g_settings.model_offset_z = std::clamp(g_settings.model_offset_z + sign * 0.01f, -2.0f, 2.0f); break;
         case 4:
-            g_settings.offset_x = kDefaultOffsetX;
-            g_settings.offset_y = kDefaultOffsetY;
-            g_settings.offset_z = kDefaultOffsetZ;
-            break;
-        case 5: g_settings.model_offset_x = std::clamp(g_settings.model_offset_x + sign * 0.01f, -2.0f, 2.0f); break;
-        case 6: g_settings.model_offset_y = std::clamp(g_settings.model_offset_y + sign * 0.01f, -2.0f, 2.0f); break;
-        case 7: g_settings.model_offset_z = std::clamp(g_settings.model_offset_z + sign * 0.01f, -2.0f, 2.0f); break;
-        case 8:
             g_settings.model_offset_x = kDefaultModelOffsetX;
             g_settings.model_offset_y = kDefaultModelOffsetY;
             g_settings.model_offset_z = kDefaultModelOffsetZ;
             break;
-        case 9: g_settings.rot_offset_x = std::clamp(g_settings.rot_offset_x + sign * 0.5f, -180.0f, 180.0f); break;
-        case 10: g_settings.rot_offset_y = std::clamp(g_settings.rot_offset_y + sign * 0.5f, -180.0f, 180.0f); break;
-        case 11: g_settings.rot_offset_z = std::clamp(g_settings.rot_offset_z + sign * 0.5f, -180.0f, 180.0f); break;
-        case 12:
+        case 5: g_settings.rot_offset_x = std::clamp(g_settings.rot_offset_x + sign * 0.5f, -180.0f, 180.0f); break;
+        case 6: g_settings.rot_offset_y = std::clamp(g_settings.rot_offset_y + sign * 0.5f, -180.0f, 180.0f); break;
+        case 7: g_settings.rot_offset_z = std::clamp(g_settings.rot_offset_z + sign * 0.5f, -180.0f, 180.0f); break;
+        case 8:
             g_settings.rot_offset_x = kDefaultRotOffsetX;
             g_settings.rot_offset_y = kDefaultRotOffsetY;
             g_settings.rot_offset_z = kDefaultRotOffsetZ;
@@ -2364,6 +2357,8 @@ static float wrap_angle_radians(float angle);
 static void apply_tracking_world_yaw(Pose& pose, float yaw_deg);
 
 static void update_game_revision_detection() {
+    static bool saw_valid_prime_rev0 = false;
+
     if (!g_dolphin.is_connected()) {
         g_app.game_rev0_ok = false;
         g_app.game_status = "Load game: not ready, try reconnect";
@@ -2377,9 +2372,12 @@ static void update_game_revision_detection() {
     g_app.game_rev0_ok = is_gm8e01 && revision == 0;
 
     if (g_app.game_rev0_ok) {
+        saw_valid_prime_rev0 = true;
         g_app.game_status = "Load game: Rev 0 OK";
     } else if (is_gm8e01) {
         g_app.game_status = "Load game: wrong game revision";
+    } else if (saw_valid_prime_rev0 && id0 == 0 && id1 == 0 && revision == 0) {
+        g_app.game_status = "Load game: not ready, try reconnect";
     } else {
         g_app.game_status = "Load game: wrong game";
     }
@@ -5084,7 +5082,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             if ((flags & PrimedGun::HookStatusOpenXrInstalled) == 0) {
                 g_app.hook_status = "Hook: injected, waiting for OpenXR";
             } else if ((flags & PrimedGun::HookStatusOpenXrGetProcReady) == 0) {
-                g_app.hook_status = "Hook: OpenXR seen, waiting for xrGetInstanceProcAddr";
+                g_app.hook_status = "Hook: OpenXR seen, waiting for bridge";
             } else {
                 g_app.hook_status = "Hook: OpenXR bridge attached";
             }
@@ -5112,6 +5110,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_game_detection).count() >= 500) {
             update_game_revision_detection();
             last_game_detection = now;
+        }
+        static auto last_game_memory_retry = std::chrono::steady_clock::time_point{};
+        if (g_app.dolphin_ok && !g_app.game_rev0_ok &&
+            g_app.game_status == "Load game: not ready, try reconnect" &&
+            (last_game_memory_retry.time_since_epoch().count() == 0 ||
+             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_game_memory_retry).count() >= 2000)) {
+            last_game_memory_retry = now;
+            g_app.dolphin_ok = g_dolphin.refresh_memory_base();
+            g_app.dolphin_status = g_dolphin.status();
+            update_game_revision_detection();
         }
         static bool last_game_rev0_ok_for_controls = false;
         static auto force_control_remap_until = std::chrono::steady_clock::time_point{};
@@ -5144,9 +5152,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             last_patch_watchdog = now;
         }
 
+        const bool runtime_ready =
+            g_app.dolphin_ok && g_app.game_rev0_ok && g_app.tracking_ok &&
+            g_app.hook_status.find("attached") != std::string::npos;
+        if (g_app.active && !runtime_ready) {
+            g_app.active = false;
+        }
+
         if (!g_app.manually_paused.load(std::memory_order_relaxed) &&
-            !g_app.active && g_app.dolphin_ok && g_app.game_rev0_ok &&
-            g_app.tracking_ok && app_patches_are_applied()) {
+            !g_app.active && runtime_ready && app_patches_are_applied()) {
             g_app.active = true;
             g_app.recenter_requested.store(true, std::memory_order_relaxed);
             force_control_remap_until = now + std::chrono::seconds(10);

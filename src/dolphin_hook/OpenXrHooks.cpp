@@ -739,14 +739,10 @@ std::vector<VrMenuRow> BuildSettingsRows(const SettingsState& s) {
     case 1:
         return {
             {"WORLD SCALE", FloatText(s.worldScale, 2)},
-            {"POSITION LEFT RIGHT", FloatText(s.offsetX, 3)},
-            {"POSITION UP DOWN", FloatText(s.offsetY, 3)},
-            {"POSITION FORWARD BACK", FloatText(s.offsetZ, 3)},
+            {"POSITION LEFT RIGHT", FloatText(s.modelOffsetX, 3)},
+            {"POSITION UP DOWN", FloatText(s.modelOffsetY, 3)},
+            {"POSITION FORWARD BACK", FloatText(s.modelOffsetZ, 3)},
             {"RESET POSITION", "RESET"},
-            {"MODEL OFFSET LEFT RIGHT", FloatText(s.modelOffsetX, 3)},
-            {"MODEL OFFSET UP DOWN", FloatText(s.modelOffsetY, 3)},
-            {"MODEL OFFSET FORWARD BACK", FloatText(s.modelOffsetZ, 3)},
-            {"RESET MODEL OFFSET", "RESET"},
             {"ROTATION PITCH", FloatText(s.rotOffsetX, 1)},
             {"ROTATION YAW", FloatText(s.rotOffsetY, 1)},
             {"ROTATION ROLL", FloatText(s.rotOffsetZ, 1)},

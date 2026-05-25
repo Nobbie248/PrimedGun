@@ -220,6 +220,41 @@ bool IsMem1Range(uint32_t gcAddr, size_t size) {
         static_cast<uint64_t>(kMem1Start) + kMem1Size;
 }
 
+bool IsReadableMemoryProtect(DWORD protect);
+bool IsWritableMemoryProtect(DWORD protect);
+
+bool IsCommittedRange(uintptr_t address, size_t size, bool requireWrite) {
+    if (address == 0 || size == 0)
+        return false;
+
+    const uintptr_t end = address + size;
+    if (end < address)
+        return false;
+
+    uintptr_t cursor = address;
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+            return false;
+        if (mbi.State != MEM_COMMIT)
+            return false;
+        if (requireWrite) {
+            if (!IsWritableMemoryProtect(mbi.Protect))
+                return false;
+        } else if (!IsReadableMemoryProtect(mbi.Protect)) {
+            return false;
+        }
+
+        const uintptr_t base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        const uintptr_t next = base + static_cast<uintptr_t>(mbi.RegionSize);
+        if (next <= cursor)
+            return false;
+        cursor = next;
+    }
+
+    return true;
+}
+
 bool IsLowPpcCaveAddress(uint32_t gcAddr) {
     return gcAddr >= HookLayout::AppArCaveStart && gcAddr < HookLayout::DllCaveEnd;
 }
@@ -1437,44 +1472,70 @@ bool ApplyPrimedGunDolphinSetupFromHook() {
     return wrote_any;
 }
 
-uint8_t* HostPtr(uint32_t gcAddr, size_t size) {
+uintptr_t HostAddress(uint32_t gcAddr, size_t size) {
     if (!g_memBase || !IsMem1Range(gcAddr, size)) {
-        return nullptr;
+        return 0;
     }
-    return reinterpret_cast<uint8_t*>(g_memBase + (gcAddr - kMem1Start));
+    const uintptr_t address = g_memBase + (gcAddr - kMem1Start);
+    return IsCommittedRange(address, size, false) ? address : 0;
+}
+
+bool ReadMem1(uint32_t gcAddr, void* out, size_t size) {
+    const uintptr_t address = HostAddress(gcAddr, size);
+    if (!address || !out) {
+        return false;
+    }
+
+    SIZE_T bytesRead = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), out, size,
+                             &bytesRead) &&
+           bytesRead == size;
+}
+
+bool WriteMem1(uint32_t gcAddr, const void* data, size_t size, bool flushInstructionCache) {
+    if (!data)
+        return false;
+    if (!g_memBase || !IsMem1Range(gcAddr, size))
+        return false;
+
+    const uintptr_t address = g_memBase + (gcAddr - kMem1Start);
+    if (!IsCommittedRange(address, size, true))
+        return false;
+
+    SIZE_T bytesWritten = 0;
+    const bool ok = WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<LPVOID>(address), data,
+                                       size, &bytesWritten) &&
+                    bytesWritten == size;
+    if (ok && flushInstructionCache) {
+        FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), size);
+    }
+    return ok;
 }
 
 uint32_t ReadU32(uint32_t gcAddr) {
-    uint8_t* p = HostPtr(gcAddr, 4);
-    if (!p) {
+    uint32_t raw = 0;
+    if (!ReadMem1(gcAddr, &raw, sizeof(raw))) {
         return 0;
     }
-    uint32_t raw = 0;
-    std::memcpy(&raw, p, sizeof(raw));
     return _byteswap_ulong(raw);
 }
 
 uint16_t ReadU16(uint32_t gcAddr) {
-    uint8_t* p = HostPtr(gcAddr, 2);
-    if (!p) {
+    uint16_t raw = 0;
+    if (!ReadMem1(gcAddr, &raw, sizeof(raw))) {
         return 0;
     }
-    uint16_t raw = 0;
-    std::memcpy(&raw, p, sizeof(raw));
     return _byteswap_ushort(raw);
 }
 
 uint8_t ReadU8(uint32_t gcAddr) {
-    uint8_t* p = HostPtr(gcAddr, 1);
-    return p ? *p : 0;
+    uint8_t value = 0;
+    ReadMem1(gcAddr, &value, sizeof(value));
+    return value;
 }
 
 void WriteU8(uint32_t gcAddr, uint8_t value) {
-    uint8_t* p = HostPtr(gcAddr, 1);
-    if (!p) {
-        return;
-    }
-    *p = value;
+    WriteMem1(gcAddr, &value, sizeof(value), false);
 }
 
 float ReadFloat(uint32_t gcAddr) {
@@ -1485,28 +1546,46 @@ float ReadFloat(uint32_t gcAddr) {
 }
 
 void WriteFloat(uint32_t gcAddr, float value) {
-    uint8_t* p = HostPtr(gcAddr, 4);
-    if (!p) {
-        return;
-    }
     uint32_t raw = 0;
     std::memcpy(&raw, &value, sizeof(raw));
     raw = _byteswap_ulong(raw);
-    std::memcpy(p, &raw, sizeof(raw));
+    WriteMem1(gcAddr, &raw, sizeof(raw), false);
 }
 
 bool WriteU32(uint32_t gcAddr, uint32_t value) {
-    uint8_t* p = HostPtr(gcAddr, 4);
-    if (!p) {
-        return false;
-    }
     uint32_t raw = _byteswap_ulong(value);
-    std::memcpy(p, &raw, sizeof(raw));
-    FlushInstructionCache(GetCurrentProcess(), p, 4);
-    return true;
+    return WriteMem1(gcAddr, &raw, sizeof(raw), true);
 }
 
 bool ResolveMemBase();
+
+bool MemBaseLooksLikePrime() {
+    return g_memBase &&
+           ReadU32(0x80000000) == 0x474D3845u &&
+           ReadU16(0x80000004) == 0x3031u;
+}
+
+void ResetGameMemoryState() {
+    g_memBase = 0;
+    g_renderModelOffsetPatch.applied = false;
+    g_renderModelOffsetPatch.original = 0;
+    g_firstPersonPitchLoadPatch.applied = false;
+    g_firstPersonPitchLoadPatch.loggedWaiting = false;
+    for (DynamicPpcPatch& patch : g_combatPitchPatches) {
+        patch.applied = false;
+        patch.loggedWaiting = false;
+    }
+    g_combatElevationPitchPatch.applied = false;
+    g_combatElevationPitchPatch.loggedWaiting = false;
+    g_combatPitchPatchActive = false;
+    g_lockLatchUntilTick = 0;
+    g_traceLastLockHeld = false;
+    g_traceHavePitch = false;
+    g_traceHaveCamera = false;
+    g_traceFramesRemaining = 0;
+    g_lastOrbitState = 0xffffffffu;
+    g_appPatchOriginals.clear();
+}
 
 bool RestoreRenderModelOffsetPatch() {
     if (!g_memBase || g_renderModelOffsetPatch.original == 0) {
@@ -1591,7 +1670,9 @@ bool ApplyRenderModelOffsetPatch() {
 bool ResolveMemBase() {
     const uint64_t now = GetTickCount64();
     if (g_memBase && now - g_lastResolveTick < 1000) {
-        return true;
+        if (MemBaseLooksLikePrime())
+            return true;
+        ResetGameMemoryState();
     }
     g_lastResolveTick = now;
 
@@ -1604,7 +1685,7 @@ bool ResolveMemBase() {
             mbi.Type == MEM_MAPPED &&
             (size == 0x02000000 || size == 0x04000000)) {
             g_memBase = base;
-            if (ReadU32(0x80000000) == 0x474D3845u && ReadU16(0x80000004) == 0x3031u) {
+            if (MemBaseLooksLikePrime()) {
                 Log(L"GameTimingHooks resolved GM8E01 MEM1 base in-process.");
                 return true;
             }
@@ -1617,7 +1698,7 @@ bool ResolveMemBase() {
         address = next;
     }
 
-    g_memBase = 0;
+    ResetGameMemoryState();
     return false;
 }
 
@@ -1639,9 +1720,10 @@ void DumpPlayerOrbitCodeOnce() {
     }
     g_dumpedPlayerOrbitCode = true;
 
-    uint8_t* bytes = HostPtr(kPlayerOrbitStart, kPlayerOrbitEnd - kPlayerOrbitStart);
-    if (!bytes) {
-        Log(L"GameTimingHooks failed to dump CPlayerOrbit PPC range: no host pointer.");
+    const size_t dumpSize = kPlayerOrbitEnd - kPlayerOrbitStart;
+    std::vector<uint8_t> bytes(dumpSize);
+    if (!ReadMem1(kPlayerOrbitStart, bytes.data(), bytes.size())) {
+        Log(L"GameTimingHooks failed to dump CPlayerOrbit PPC range: MEM1 not readable.");
         return;
     }
 
@@ -1654,7 +1736,7 @@ void DumpPlayerOrbitCodeOnce() {
         Log(L"GameTimingHooks failed to open CPlayerOrbit dump: " + path.wstring());
         return;
     }
-    out.write(reinterpret_cast<const char*>(bytes), kPlayerOrbitEnd - kPlayerOrbitStart);
+    out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     Log(L"GameTimingHooks dumped CPlayerOrbit PPC code: " + path.wstring());
 }
 
@@ -1666,9 +1748,10 @@ void DumpFirstPersonCameraCodeOnce() {
         return;
     }
 
-    uint8_t* bytes = HostPtr(kFirstPersonCameraStart, kFirstPersonCameraEnd - kFirstPersonCameraStart);
-    if (!bytes) {
-        Log(L"GameTimingHooks failed to dump CFirstPersonCamera PPC range: no host pointer.");
+    const size_t dumpSize = kFirstPersonCameraEnd - kFirstPersonCameraStart;
+    std::vector<uint8_t> bytes(dumpSize);
+    if (!ReadMem1(kFirstPersonCameraStart, bytes.data(), bytes.size())) {
+        Log(L"GameTimingHooks failed to dump CFirstPersonCamera PPC range: MEM1 not readable.");
         return;
     }
     if (ReadU32(0x8000E7B4u) == 0 || ReadU32(0x8000F128u) == 0) {
@@ -1685,7 +1768,7 @@ void DumpFirstPersonCameraCodeOnce() {
         Log(L"GameTimingHooks failed to open CFirstPersonCamera dump: " + path.wstring());
         return;
     }
-    out.write(reinterpret_cast<const char*>(bytes), kFirstPersonCameraEnd - kFirstPersonCameraStart);
+    out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     Log(L"GameTimingHooks dumped CFirstPersonCamera PPC code: " + path.wstring());
 }
 

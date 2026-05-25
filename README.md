@@ -2,15 +2,6 @@
 
 PrimedGun is a Dolphin OpenXR-side VR enhancement app for Metroid Prime.
 
-## Requirements To Build
-
-- Windows 10/11
-- CMake 3.16+
-- A C++ compiler toolchain
-- OpenXR SDK headers at `C:\OpenXR-SDK`
-- Dolphin running Metroid Prime GCN NTSC Rev 0 (`GM8E01`)
-- Built and tested with Dolphin-OpenXR 2512-421 -dirty
-
 ## Build
 
 ```bat
@@ -29,12 +20,14 @@ For distribution/share, the useful files are:
 - `PrimedGun.exe`
 - `PrimedGun_DolphinHook.dll`
 - `assets/`
+- `core/`
 - `PrimeGun configs/`
 - `D3DCompiler_47.dll`
 - `libgcc_s_seh-1.dll`
 - `libstdc++-6.dll`
 - `libwinpthread-1.dll`
 - `primedgun_settings.ini`
+- `README.md`
 
 ## Features
 
@@ -44,9 +37,8 @@ For distribution/share, the useful files are:
 - Improved gun-based lock/scan targeting.
 - VR arm cannon tracking through Dolphin-side OpenXR.
 - One-click height calibration.
-- Position, rotation, scale, and render-only model offset calibration.
+- Position, rotation, scale calibration.
 - In-headset settings menu.
-- Dolphin-side hook bridge for app-owned game patches, OpenXR tracking, and overlays.
 - Automatic Dolphin OpenXR controller binding setup.
 
 ## App-Owned Patches
@@ -61,7 +53,7 @@ PrimedGun disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owne
 1. Launch `PrimedGun.exe`.
 2. Load Metroid Prime GCN NTSC Rev 0 (`GM8E01`) in Dolphin.
 3. PrimedGun detects the game when GM8E01 is loaded into memory.
-4. Click the right stick to set height.
+4. When in game click the right stick to set height.
 
 ## VR Settings Menu
 
@@ -83,5 +75,5 @@ PrimedGun disables unmanaged AR/Gecko enabled-code lists so PrimedGun's app-owne
 - Created by Nobbie.
 - Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.
 - Huge thank you to iChris4 for Dolphin ReduX development.
-- Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, Samevi, and VRified Games.
+- Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, Samevi, Mochu, VideoGameEsoterica and VRified Games.
 - For further enhancements to your VR experience, join the Dolphin VR Discord.

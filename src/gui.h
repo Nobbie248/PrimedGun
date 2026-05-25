@@ -106,7 +106,7 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
     const bool compact = logical_width < 650.0f;
     const float label_column = scaled(compact ? 145.0f : 190.0f);
     const float input_width = scaled(compact ? 96.0f : 112.0f);
-    const float header_height = scaled(compact ? 208.0f : 182.0f);
+    const float header_height = scaled(compact ? 198.0f : 174.0f);
     const float footer_height = scaled(48.0f);
 
     const ImVec4 accent = ImVec4(0.95f, 0.64f, 0.22f, 1.0f);
@@ -125,7 +125,13 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
     ImGui::SetWindowFontScale(ui_scale);
 
-    auto status_pill = [&](const char* label, const char* value, bool healthy) {
+    const float header_action_width = scaled(138.0f);
+    const float header_action_right_margin = scaled(14.0f);
+    const float start_stop_width = scaled(170.0f);
+
+    auto status_pill = [&](const char* label, const char* value, bool healthy,
+                           const char* action_label = nullptr,
+                           std::atomic<bool>* action_request = nullptr) {
         const ImVec2 start = ImGui::GetCursorScreenPos();
         const float badge_width = scaled(116.0f);
         const float badge_height = scaled(24.0f);
@@ -141,6 +147,15 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
         ImGui::Dummy(ImVec2(badge_width, badge_height));
         ImGui::SameLine();
         ImGui::TextColored(healthy ? ok : warn, "%s", value);
+        if (action_label && action_request) {
+            ImGui::SameLine();
+            const float avail = ImGui::GetContentRegionAvail().x;
+            if (avail > header_action_width + header_action_right_margin)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - header_action_width - header_action_right_margin);
+            if (ImGui::Button(action_label, ImVec2(header_action_width, 0.0f))) {
+                action_request->store(true, std::memory_order_relaxed);
+            }
+        }
     };
 
     auto begin_panel = [&](const char* id, const char* title, float height = 0.0f) {
@@ -186,15 +201,18 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
     ImGui::TextColored(accent, "PrimedGun");
     ImGui::SameLine();
     ImGui::TextDisabled("v%s", PRIMEDGUN_VERSION_STRING);
-    ImGui::TextDisabled("Metroid Prime GCN NTSC Rev 0 (GM8E01)");
 
-    if (!compact)
-        ImGui::SameLine(std::max(0.0f, ImGui::GetContentRegionAvail().x - scaled(214.0f)));
+    if (!compact) {
+        ImGui::SameLine();
+        const float button_x =
+            ImGui::GetWindowContentRegionMax().x - header_action_right_margin - start_stop_width;
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), button_x));
+    }
     ImGui::PushStyleColor(ImGuiCol_Button, app.active ? ImVec4(0.12f, 0.45f, 0.22f, 1.0f)
                                                       : ImVec4(0.48f, 0.14f, 0.12f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, app.active ? ImVec4(0.16f, 0.56f, 0.28f, 1.0f)
                                                              : ImVec4(0.60f, 0.19f, 0.16f, 1.0f));
-    if (ImGui::Button(app.active ? "Active - Stop" : "Inactive - Start", ImVec2(scaled(170.0f), scaled(34.0f)))) {
+    if (ImGui::Button(app.active ? "Active - Stop" : "Inactive - Start", ImVec2(start_stop_width, scaled(34.0f)))) {
         if (app.active) {
             app.active = false;
             app.manually_paused.store(true, std::memory_order_relaxed);
@@ -207,9 +225,11 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
     ImGui::PopStyleColor(2);
 
     ImGui::Spacing();
-    status_pill("Tracking", app.tracking_status.c_str(), app.tracking_ok);
+    status_pill("Tracking", app.tracking_status.c_str(), app.tracking_ok,
+                "Reconnect Dolphin", &app.reconnect_dolphin_requested);
     status_pill("Hook", app.hook_status.c_str(),
-                app.hook_status.find("attached") != std::string::npos);
+                app.hook_status.find("attached") != std::string::npos,
+                "Reconnect Hook", &app.reconnect_tracking_requested);
     status_pill("Game", app.game_status.c_str(), app.game_rev0_ok);
     ImGui::EndChild();
 
@@ -219,23 +239,14 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
 
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(scaled(10.0f), scaled(5.0f)));
     if (ImGui::BeginTabBar("##primedgun_tabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
-        if (ImGui::BeginTabItem("Game")) {
-            begin_panel("##game_panel", "Game Connection", 0.0f);
-            ImGui::Text("Target: Metroid Prime GCN NTSC Rev 0 (GM8E01)");
-            ImGui::TextColored(app.game_rev0_ok ? ok : warn, "%s", app.game_status.c_str());
-            ImGui::Spacing();
-            if (ImGui::Button("Reconnect Dolphin")) {
-                app.reconnect_dolphin_requested.store(true, std::memory_order_relaxed);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Reconnect Hook")) {
-                app.reconnect_tracking_requested.store(true, std::memory_order_relaxed);
-            }
-            ImGui::Spacing();
-            ImGui::TextDisabled("Runtime status");
-            ImGui::BulletText("%s", app.dolphin_status.c_str());
-            ImGui::BulletText("%s", app.hook_status.c_str());
-            ImGui::BulletText("Tracking: %s", app.tracking_status.c_str());
+        if (ImGui::BeginTabItem("Setup")) {
+            begin_panel("##game_panel", "Setup", 0.0f);
+            ImGui::TextDisabled("Setup notes");
+            ImGui::BulletText("Select your Metroid Prime GameCube game file.");
+            ImGui::BulletText("Transfer your memory card into core\\User\\GC if you want existing saves.");
+            ImGui::BulletText("Once in game, click the right stick to set your height.");
+            ImGui::BulletText("Try to face forward while playing; turning around is not ideal for interaction.");
+            ImGui::BulletText("Use Save Settings after changing PrimeGun options.");
             end_panel();
             ImGui::EndTabItem();
         }
@@ -317,6 +328,19 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
             slider_input("Target radius", &s.gun_targeting_radius, 0.5f, 8.0f, 0.1f, 0.5f, "%.1f");
             s.gun_targeting_distance = std::clamp(s.gun_targeting_distance, 10.0f, 120.0f);
             s.gun_targeting_radius = std::clamp(s.gun_targeting_radius, 0.5f, 8.0f);
+            ImGui::SeparatorText("Visor");
+            if (s.ensure_ar_code_toggle("Disable Visor Blur")) {
+                app.app_patches_apply_requested.store(true, std::memory_order_relaxed);
+            }
+            auto visor_blur_toggle = std::find_if(
+                s.ar_code_toggles.begin(), s.ar_code_toggles.end(),
+                [](const Settings::ArCodeToggle& toggle) {
+                    return toggle.name == "Disable Visor Blur";
+                });
+            if (visor_blur_toggle != s.ar_code_toggles.end() &&
+                ImGui::Checkbox("Disable visor blur", &visor_blur_toggle->enabled)) {
+                app.app_patches_apply_requested.store(true, std::memory_order_relaxed);
+            }
             ImGui::SeparatorText("Live Target");
             ImGui::Text("UID %04X  Object %08X  Write %s",
                         app.dbg_gun_target_uid, app.dbg_gun_target_obj,
@@ -373,14 +397,9 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
             };
 
             ImGui::SeparatorText("Position");
-            slider_input("Left / right", &s.offset_x, -2, 2, 0.01f, 0.1f, "%.3f");
-            slider_input("Up / down", &s.offset_y, -2, 2, 0.01f, 0.1f, "%.3f");
-            slider_input("Forward / back", &s.offset_z, -2, 2, 0.01f, 0.1f, "%.3f");
-
-            ImGui::SeparatorText("Model Offset");
-            slider_input("Model left / right", &s.model_offset_x, -2, 2, 0.01f, 0.1f, "%.3f");
-            slider_input("Model up / down", &s.model_offset_y, -2, 2, 0.01f, 0.1f, "%.3f");
-            slider_input("Model forward / back", &s.model_offset_z, -2, 2, 0.01f, 0.1f, "%.3f");
+            slider_input("Left / right", &s.model_offset_x, -2, 2, 0.01f, 0.1f, "%.3f");
+            slider_input("Up / down", &s.model_offset_y, -2, 2, 0.01f, 0.1f, "%.3f");
+            slider_input("Forward / back", &s.model_offset_z, -2, 2, 0.01f, 0.1f, "%.3f");
 
             ImGui::SeparatorText("Rotation");
             slider_input("Pitch offset", &s.rot_offset_x, -180, 180, 0.5f, 5.0f, "%.2f");
@@ -401,19 +420,13 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
                 apply_samus_arm_preset();
             }
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Samus arm preset: model up/down -0.300, yaw 20, roll -90");
+                ImGui::SetTooltip("Samus arm preset: position up/down -0.300, yaw 20, roll -90");
 
             ImGui::SeparatorText("Scale");
             slider_input("World scale", &s.world_scale, 1, 50, 0.5f, 5.0f, "%.2f");
             s.world_scale = std::clamp(s.world_scale, 1.0f, 50.0f);
 
             if (ImGui::Button("Reset Position")) {
-                s.offset_x = kDefaultOffsetX;
-                s.offset_y = kDefaultOffsetY;
-                s.offset_z = kDefaultOffsetZ;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Reset Model")) {
                 s.model_offset_x = kDefaultModelOffsetX;
                 s.model_offset_y = kDefaultModelOffsetY;
                 s.model_offset_z = kDefaultModelOffsetZ;
@@ -427,36 +440,6 @@ inline void draw_gui(Settings& s, AppState& app, DolphinMemory& dolphin)
             ImGui::SameLine();
             if (ImGui::Button("Reset Scale")) {
                 s.world_scale = kDefaultWorldScale;
-            }
-            end_panel();
-            ImGui::EndTabItem();
-        }
-
-        if (ImGui::BeginTabItem("AR Codes")) {
-            begin_panel("##ar_codes_panel", "App-Owned AR Codes");
-            if (ImGui::Button("Enable All")) {
-                for (Settings::ArCodeToggle& toggle : s.ar_code_toggles)
-                    toggle.enabled = true;
-                app.app_patches_apply_requested.store(true, std::memory_order_relaxed);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Disable All")) {
-                for (Settings::ArCodeToggle& toggle : s.ar_code_toggles)
-                    toggle.enabled = false;
-                app.app_patches_apply_requested.store(true, std::memory_order_relaxed);
-            }
-            ImGui::Spacing();
-
-            if (s.ar_code_toggles.empty()) {
-                ImGui::TextDisabled("No app-owned AR codes loaded.");
-            } else {
-                for (size_t i = 0; i < s.ar_code_toggles.size(); ++i) {
-                    Settings::ArCodeToggle& toggle = s.ar_code_toggles[i];
-                    ImGui::PushID(static_cast<int>(i));
-                    if (ImGui::Checkbox(toggle.name.c_str(), &toggle.enabled))
-                        app.app_patches_apply_requested.store(true, std::memory_order_relaxed);
-                    ImGui::PopID();
-                }
             }
             end_panel();
             ImGui::EndTabItem();

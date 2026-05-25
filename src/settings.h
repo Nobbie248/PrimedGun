@@ -123,8 +123,9 @@ struct Settings {
             name == "Disable Visor Screen Effects" ||
             name == "Disable Visor Filter A" ||
             name == "Disable Visor Filter B" ||
-            name == "Disable Visor Distortion")
-            return "Disable Visor Effects";
+            name == "Disable Visor Distortion" ||
+            name == "Disable Visor Effects")
+            return "Disable Visor Blur";
         return name;
     }
 

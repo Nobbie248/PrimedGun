@@ -41,6 +41,22 @@ public:
         return true;
     }
 
+    bool refresh_memory_base() {
+        if (!handle_) {
+            return connect();
+        }
+
+        DWORD exit_code = 0;
+        if (!GetExitCodeProcess(handle_, &exit_code) || exit_code != STILL_ACTIVE) {
+            disconnect();
+            return connect();
+        }
+
+        mem_base_ = find_emu_base();
+        status_ = mem_base_ ? "Connected" : "Could not find emulated RAM base (game not running?)";
+        return mem_base_ != 0;
+    }
+
     void disconnect() {
         if (handle_) { CloseHandle(handle_); handle_ = nullptr; }
         dolphin_pid_ = 0;
