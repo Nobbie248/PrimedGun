@@ -1,0 +1,57 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+        </intent>
+    </queries>
+
+    <uses-feature
+        android:name="android.hardware.vr.headtracking"
+        android:required="true"
+        android:version="1" />
+    <uses-feature
+        android:name="android.software.xr.api.openxr"
+        android:required="true" />
+
+    <application>
+        <uses-native-library
+            android:name="libopenxr.google.so"
+            android:required="false" />
+        <meta-data
+            android:name="com.oculus.supportedDevices"
+            android:value="${questSupportedDevices}" />
+        <meta-data
+            android:name="com.oculus.vr.focusaware"
+            android:value="true" />
+        <meta-data
+            android:name="com.oculus.trade_cpu_for_gpu_amount"
+            android:value="-1" />
+
+        <activity
+            android:name=".activities.EmulationActivity"
+            android:theme="@style/Theme.Dolphin.EmulationVR"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:exported="true"
+            tools:node="merge"
+            tools:replace="android:theme,android:exported">
+            <property
+                android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
+                android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

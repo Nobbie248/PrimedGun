@@ -1,3 +1,0 @@
-#include "resource.h"
-
-IDI_PRIMEDGUN ICON "../assets/PrimedGun.ico"

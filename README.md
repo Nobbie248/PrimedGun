@@ -1,32 +1,32 @@
 # PrimedGun
 
-PrimedGun is a Dolphin OpenXR-side VR enhancement app for Metroid Prime.
+PrimedGun is a Dolphin ReduX-based build focused on improving Metroid Prime's VR experience.
 
 ## Build
+
+Use a Visual Studio x64 developer environment, then build the fused PrimeGun/Dolphin executable:
 
 ```bat
 git clone --recurse-submodules https://github.com/Nobbie248/PrimedGun.git
 cd PrimedGun
-mkdir build
-cd build
-cmake .. -G Ninja
-cmake --build . --config Release
+cmake -S . -B build\Release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build\Release --target PrimedGun.exe
 ```
+
+The built app is written to `Binary\x64\PrimedGun.exe`.
 
 ## Runtime Files
 
-For distribution/share, the useful files are:
+For distribution, use the contents of `Binary\x64`. The important runtime pieces are:
 
 - `PrimedGun.exe`
-- `PrimedGun_DolphinHook.dll`
 - `assets/`
-- `core/`
-- `D3DCompiler_47.dll`
-- `libgcc_s_seh-1.dll`
-- `libstdc++-6.dll`
-- `libwinpthread-1.dll`
-- `primedgun_settings.ini`
-- `README.md`
+- `Sys/`
+- `QtPlugins/`
+- Qt DLLs copied by the build
+- `qt.conf`
+
+`build_info.txt` and the `Languages/` folder are not needed for the PrimeGun release build.
 
 ## Features
 
@@ -38,29 +38,6 @@ For distribution/share, the useful files are:
 - One-click height calibration.
 - Position, rotation, scale calibration.
 - In-headset settings menu.
-- Automatic Dolphin OpenXR controller binding setup.
-
-## Usage
-
-1. Launch `PrimedGun.exe`.
-2. Load Metroid Prime GCN NTSC Rev 0 (`GM8E01`) in Dolphin.
-3. PrimedGun detects the game when GM8E01 is loaded into memory.
-4. When in game click the right stick to set height.
-
-## VR Settings Menu
-
-- Click the left thumbstick to open or close the in-headset settings menu.
-- The menu is attached to the left controller.
-- Use A to change the pointed-at setting.
-- Use `Save Settings` to write `primedgun_settings.ini`.
-
-## Notes
-
-- Settings are saved to `primedgun_settings.ini`.
-- Dolphin controller bindings are applied automatically on startup.
-- The app reads controller tracking from Dolphin-side OpenXR and writes the cannon transform into Dolphin memory.
-- PrimedGun should be running before Metroid Prime is loaded so the Dolphin-side hook is ready as soon as GM8E01 memory appears.
-- For the best experience, try not to turn your body around. You can move in the game like this, but functionality is not ideal.
 
 ## Credits
 

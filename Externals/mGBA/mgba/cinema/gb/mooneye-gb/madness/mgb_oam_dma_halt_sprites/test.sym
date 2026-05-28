@@ -1,0 +1,38 @@
+; this file was created with wlalink by ville helin <vhelin@iki.fi>.
+; wla symbolic information for "/home/vicki/Scratch/mooneye-gb/tests/build/madness/mgb_oam_dma_halt_sprites.gb".
+
+[labels]
+01:481f clear_oam
+01:4829 clear_vram
+01:4804 disable_lcd_safe
+01:480a disable_lcd_safe@wait_ly_0
+01:4833 memcpy
+01:483c memset
+01:4813 print_load_font
+01:47f0 reset_screen
+01:4000 font
+00:0150 main
+00:019b main@wait_ly_5
+00:01a1 main@wait_ly_6
+00:01b6 hiram_test
+00:01bb hiram_test@wait_ly_7
+00:01c1 hiram_test@wait_ly_8
+00:01ce vram_checkerboard
+00:05ce vram_checkerboard_end
+00:05ce initial_data
+00:05d6 initial_data_end
+
+[definitions]
+0000000a _sizeof_clear_oam
+0000000a _sizeof_clear_vram
+0000000f _sizeof_disable_lcd_safe
+00000009 _sizeof_memcpy
+00000009 _sizeof_memset
+0000000c _sizeof_print_load_font
+00000014 _sizeof_reset_screen
+000007f0 _sizeof_font
+00000066 _sizeof_main
+00000018 _sizeof_hiram_test
+00000400 _sizeof_vram_checkerboard
+00000000 _sizeof_vram_checkerboard_end
+00000008 _sizeof_initial_data

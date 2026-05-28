@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="stereoscopyEntries">
+        <item>@string/stereoscopy_off</item>
+        <item>@string/stereoscopy_side_by_side</item>
+        <item>@string/stereoscopy_top_and_bottom</item>
+        <item>@string/stereoscopy_anaglyph</item>
+        <item>@string/stereoscopy_openxr</item>
+    </string-array>
+
+    <integer-array name="stereoscopyValues">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>6</item>
+    </integer-array>
+</resources>

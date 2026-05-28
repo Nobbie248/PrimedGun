@@ -1,0 +1,12 @@
+{
+    "name": "SvgWidgets",
+    "repository": "qtsvg",
+    "version": "6.5.1",
+    "built_with": {
+        "compiler_id": "MSVC",
+        "compiler_target": "",
+        "compiler_version": "19.36.32532.0",
+        "cross_compiled": true,
+        "target_system": "Windows"
+    }
+}

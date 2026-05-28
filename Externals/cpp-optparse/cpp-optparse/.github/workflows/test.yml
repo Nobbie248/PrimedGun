@@ -1,0 +1,24 @@
+name: Test
+on:
+  push:
+  schedule:
+    - cron: '0 0 1 * *'  # monthly
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        cpp11: [0, 1]
+    steps:
+      - uses: actions/checkout@v3
+      - run: make test WARN=1
+        env:
+          CC: ${{ matrix.compiler }}
+          CPP11: ${{ matrix.cpp11 }}
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: make test WARN=1

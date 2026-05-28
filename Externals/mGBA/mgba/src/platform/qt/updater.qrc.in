@@ -1,0 +1,5 @@
+<RCC>
+	<qresource>
+		<file alias="updater">$<TARGET_FILE:updater-stub></file>
+	</qresource>
+</RCC>

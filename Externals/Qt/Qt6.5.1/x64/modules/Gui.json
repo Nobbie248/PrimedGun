@@ -1,0 +1,13 @@
+{
+    "name": "Gui",
+    "repository": "qtbase",
+    "version": "6.5.1",
+    "plugin_types": ["accessiblebridge", "platforms", "platforms/darwin", "xcbglintegrations", "platformthemes", "platforminputcontexts", "generic", "iconengines", "imageformats", "egldeviceintegrations"],
+    "built_with": {
+        "compiler_id": "MSVC",
+        "compiler_target": "",
+        "compiler_version": "19.36.32532.0",
+        "cross_compiled": false,
+        "target_system": "Windows"
+    }
+}

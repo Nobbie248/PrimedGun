@@ -1,0 +1,180 @@
+[
+    {
+        "classes": [
+            {
+                "className": "QSvgRenderer",
+                "object": true,
+                "properties": [
+                    {
+                        "constant": false,
+                        "designable": true,
+                        "final": false,
+                        "index": 0,
+                        "name": "viewBox",
+                        "read": "viewBoxF",
+                        "required": false,
+                        "scriptable": true,
+                        "stored": true,
+                        "type": "QRectF",
+                        "user": false,
+                        "write": "setViewBox"
+                    },
+                    {
+                        "constant": false,
+                        "designable": true,
+                        "final": false,
+                        "index": 1,
+                        "name": "framesPerSecond",
+                        "read": "framesPerSecond",
+                        "required": false,
+                        "scriptable": true,
+                        "stored": true,
+                        "type": "int",
+                        "user": false,
+                        "write": "setFramesPerSecond"
+                    },
+                    {
+                        "constant": false,
+                        "designable": true,
+                        "final": false,
+                        "index": 2,
+                        "name": "currentFrame",
+                        "read": "currentFrame",
+                        "required": false,
+                        "scriptable": true,
+                        "stored": true,
+                        "type": "int",
+                        "user": false,
+                        "write": "setCurrentFrame"
+                    },
+                    {
+                        "constant": false,
+                        "designable": true,
+                        "final": false,
+                        "index": 3,
+                        "name": "aspectRatioMode",
+                        "read": "aspectRatioMode",
+                        "required": false,
+                        "scriptable": true,
+                        "stored": true,
+                        "type": "Qt::AspectRatioMode",
+                        "user": false,
+                        "write": "setAspectRatioMode"
+                    }
+                ],
+                "qualifiedClassName": "QSvgRenderer",
+                "signals": [
+                    {
+                        "access": "public",
+                        "name": "repaintNeeded",
+                        "returnType": "void"
+                    }
+                ],
+                "slots": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "filename",
+                                "type": "QString"
+                            }
+                        ],
+                        "name": "load",
+                        "returnType": "bool"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "contents",
+                                "type": "QByteArray"
+                            }
+                        ],
+                        "name": "load",
+                        "returnType": "bool"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "contents",
+                                "type": "QXmlStreamReader*"
+                            }
+                        ],
+                        "name": "load",
+                        "returnType": "bool"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "p",
+                                "type": "QPainter*"
+                            }
+                        ],
+                        "name": "render",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "p",
+                                "type": "QPainter*"
+                            },
+                            {
+                                "name": "bounds",
+                                "type": "QRectF"
+                            }
+                        ],
+                        "name": "render",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "p",
+                                "type": "QPainter*"
+                            },
+                            {
+                                "name": "elementId",
+                                "type": "QString"
+                            },
+                            {
+                                "name": "bounds",
+                                "type": "QRectF"
+                            }
+                        ],
+                        "name": "render",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "p",
+                                "type": "QPainter*"
+                            },
+                            {
+                                "name": "elementId",
+                                "type": "QString"
+                            }
+                        ],
+                        "isCloned": true,
+                        "name": "render",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "qsvgrenderer.h",
+        "outputRevision": 68
+    }
+]

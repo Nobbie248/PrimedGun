@@ -1,0 +1,140 @@
+[
+    {
+        "classes": [
+            {
+                "className": "QFbCursorDeviceListener",
+                "object": true,
+                "qualifiedClassName": "QFbCursorDeviceListener",
+                "slots": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "type",
+                                "type": "QInputDeviceManager::DeviceType"
+                            }
+                        ],
+                        "name": "onDeviceListChanged",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    }
+                ]
+            },
+            {
+                "className": "QFbCursor",
+                "object": true,
+                "qualifiedClassName": "QFbCursor",
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QPlatformCursor"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "qfbcursor_p.h",
+        "outputRevision": 68
+    },
+    {
+        "classes": [
+            {
+                "className": "QFbScreen",
+                "object": true,
+                "qualifiedClassName": "QFbScreen",
+                "slots": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "rect",
+                                "type": "QRect"
+                            }
+                        ],
+                        "name": "setDirty",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "size",
+                                "type": "QSize"
+                            }
+                        ],
+                        "name": "setPhysicalSize",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "rect",
+                                "type": "QRect"
+                            }
+                        ],
+                        "name": "setGeometry",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    },
+                    {
+                        "access": "public",
+                        "name": "QPlatformScreen"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "qfbscreen_p.h",
+        "outputRevision": 68
+    },
+    {
+        "classes": [
+            {
+                "className": "QFbVtHandler",
+                "object": true,
+                "qualifiedClassName": "QFbVtHandler",
+                "signals": [
+                    {
+                        "access": "public",
+                        "name": "interrupted",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "name": "aboutToSuspend",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "name": "resumed",
+                        "returnType": "void"
+                    }
+                ],
+                "slots": [
+                    {
+                        "access": "private",
+                        "name": "handleSignal",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "qfbvthandler_p.h",
+        "outputRevision": 68
+    }
+]

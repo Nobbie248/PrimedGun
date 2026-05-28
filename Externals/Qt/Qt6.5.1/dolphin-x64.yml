@@ -1,0 +1,101 @@
+release: 6.5.1
+platform: win32-msvc
+name: dolphin.x64
+
+compiler:
+    name: visual_studio
+    version: 2022
+    edition: Community
+    vcvarsall: x64
+
+configure:
+    additional_parameters: -c++std c++2b -debug-and-release -force-debug-info -ltcg -no-opengl -no-pch
+    nomake:
+        - examples
+        - tests
+    skip:
+        - qt3d
+        - qt5compat
+        - qtactiveqt
+        - qtcharts
+        - qtcoap
+        - qtconnectivity
+        - qtdatavis3d
+        - qtdeclarative
+        - qtdoc
+        - qtgrpc
+        - qthttpserver
+        - qtlanguageserver
+        - qtlocation
+        - qtlottie
+        - qtmqtt
+        - qtmultimedia
+        - qtnetworkauth
+        - qtopcua
+        - qtpositioning
+        - qtquick3d
+        - qtquick3dphysics
+        - qtquickeffectmaker
+        - qtquicktimeline
+        - qtremoteobjects
+        - qtscxml
+        - qtsensors
+        - qtserialbus
+        - qtserialport
+        - qtshadertools
+        - qtspeech
+        - qttools
+        - qttranslations
+        - qtvirtualkeyboard
+        - qtwayland
+        - qtwebchannel
+        - qtwebengine
+        - qtwebsockets
+        - qtwebview
+    feature:
+        concurrent: false
+        dbus: false
+        gif: false
+        ico: false
+        imageformat_bmp: false
+        jpeg: false
+        network: false
+        printsupport: false
+        qmake: false
+        sql: false
+        #style-windowsvista: false
+        testlib: false
+        textmarkdownreader: false
+        textmarkdownwriter: false
+        textodfwriter: false
+        tiff: false
+        webp: false
+
+postprocess:
+    delete:
+        - doc
+        - include/QtXml
+        - lib/cmake/Qt6Xml
+        - modules/Xml.json
+    delete_regex:
+        # needed if the outputs are to be used as cross compile host tools
+        #- bin\\android.*
+        - .*\.prl
+        - bin\\.*\.bat
+        - bin\\.*\.cmake
+        - bin\\.*\.pl
+        - bin\\Qt6Xml.*
+        - lib\\cmake\\Qt6Gui\\Qt6QICNSPlugin.*\.cmake
+        - lib\\cmake\\Qt6Gui\\Qt6QMinimalIntegrationPlugin.*\.cmake
+        - lib\\cmake\\Qt6Gui\\Qt6QOffscreenIntegrationPlugin.*\.cmake
+        - lib\\cmake\\Qt6Gui\\Qt6QTgaPlugin.*\.cmake
+        - lib\\cmake\\Qt6Gui\\Qt6QWbmpPlugin.*\.cmake
+        - lib\\Qt6Xml.*
+        - lib\\metatypes\\qt6xml_.*\.json
+        - mkspecs\\(?!win32-msvc).*
+        - plugins\\imageformats\\qicns.*
+        - plugins\\imageformats\\qtga.*
+        - plugins\\imageformats\\qwbmp.*
+        - plugins\\platforms\\qminimal.*
+        - plugins\\platforms\\qoffscreen.*
+    archive_pdbs: true
