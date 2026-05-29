@@ -514,7 +514,16 @@ static bool ApplyPrimeGunModernControls(GCPadStatus* pad)
   if (!left.connected && !right.connected)
     return false;
 
+  auto game_left = left;
   auto game_right = right;
+  if (!overlay.use_right_hand)
+  {
+    std::swap(game_left.trigger_button, game_right.trigger_button);
+    std::swap(game_left.trigger_value, game_right.trigger_value);
+    std::swap(game_left.squeeze_button, game_right.squeeze_button);
+    std::swap(game_left.squeeze_value, game_right.squeeze_value);
+  }
+
   if (overlay.menu_visible)
   {
     game_right.primary_button = false;
@@ -564,8 +573,7 @@ static bool ApplyPrimeGunModernControls(GCPadStatus* pad)
 
   if (!gameplay)
   {
-    ApplyPrimeGunClassicMenuControls(left, game_right, pad, suppress_left_stick,
-                                     false);
+    ApplyPrimeGunClassicMenuControls(game_left, game_right, pad, suppress_left_stick, false);
     if (pad->button & PAD_BUTTON_A)
       pad->analogA = 0xFF;
     if (pad->button & PAD_BUTTON_B)
@@ -573,7 +581,8 @@ static bool ApplyPrimeGunModernControls(GCPadStatus* pad)
     return true;
   }
 
-  const bool weapon_modifier = game_right.connected && game_right.secondary_button;
+  auto& weapon_hand = overlay.use_right_hand ? game_right : game_left;
+  const bool weapon_modifier = weapon_hand.connected && weapon_hand.secondary_button;
   const bool fire_pressed = game_right.connected && game_right.trigger_button;
   constexpr float stick_button_threshold = 0.55f;
 
@@ -589,27 +598,27 @@ static bool ApplyPrimeGunModernControls(GCPadStatus* pad)
           PrimeGunAxisToPadByte(left.thumbstick_y, GCPadStatus::MAIN_STICK_CENTER_Y) :
                        GCPadStatus::MAIN_STICK_CENTER_Y;
 
-  if (weapon_modifier && game_right.connected)
+  if (weapon_modifier && weapon_hand.connected)
   {
-    UpdatePrimeGunWeaponSelect(game_right, pad);
+    UpdatePrimeGunWeaponSelect(weapon_hand, pad);
   }
   else
   {
     pad->substickX = GCPadStatus::C_STICK_CENTER_X;
     pad->substickY = GCPadStatus::C_STICK_CENTER_Y;
-    if (game_right.connected)
-      UpdatePrimeGunWeaponSelect(game_right, pad);
+    if (weapon_hand.connected)
+      UpdatePrimeGunWeaponSelect(weapon_hand, pad);
   }
 
-  if (left.connected)
+  if (game_left.connected)
   {
-    if (left.primary_button)
+    if (game_left.primary_button)
       pad->button |= PAD_BUTTON_X;
-    if (left.secondary_button && !left_vr_menu_button)
+    if (game_left.secondary_button && !left_vr_menu_button && !weapon_modifier)
       pad->button |= PAD_BUTTON_START;
-    if (left.squeeze_button)
+    if (game_left.squeeze_button)
       pad->button |= PAD_TRIGGER_Z;
-    if (left.trigger_button)
+    if (game_left.trigger_button)
     {
       pad->button |= PAD_TRIGGER_L;
       pad->triggerLeft = 0xFF;
@@ -620,6 +629,8 @@ static bool ApplyPrimeGunModernControls(GCPadStatus* pad)
   {
     if ((!gameplay && game_right.primary_button) || fire_pressed)
       pad->button |= PAD_BUTTON_A;
+    if (!overlay.use_right_hand && game_right.secondary_button)
+      pad->button |= PAD_BUTTON_START;
     if (game_right.squeeze_button)
       pad->button |= PAD_BUTTON_Y;
     if (!weapon_modifier && game_right.thumbstick_y > stick_button_threshold)

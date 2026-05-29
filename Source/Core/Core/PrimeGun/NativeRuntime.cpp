@@ -1564,16 +1564,17 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
     return;
   }
 
-  const Common::VR::OpenXRControllerState& left = snapshot.controllers[0];
-  if (!left.connected || !left.aim_pose.valid || !snapshot.head_pose.valid)
+  const Common::VR::OpenXRControllerState& dpad_hand =
+      snapshot.controllers[settings.use_right_hand ? 0 : 1];
+  if (!dpad_hand.connected || !dpad_hand.aim_pose.valid || !snapshot.head_pose.valid)
   {
     disarm();
     return;
   }
 
-  const Pose left_pose = PoseFromOpenXR(left.aim_pose);
+  const Pose hand_pose = PoseFromOpenXR(dpad_hand.aim_pose);
   const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
-  bool in_head_zone = LeftControllerNearHead(left_pose, hmd_pose, settings);
+  bool in_head_zone = LeftControllerNearHead(hand_pose, hmd_pose, settings);
   if (in_head_zone)
   {
     s_last_near_head_frame = s_frame_counter;
@@ -1589,7 +1590,7 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
   }
 
   const float deadzone = std::min(settings.xr_dpad_deadzone, 0.25f);
-  DpadDir dir = StickToDpad(left.thumbstick_x, left.thumbstick_y, deadzone, s_last_dir);
+  DpadDir dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
   if (dir != DpadNone)
   {
     s_latched_dir = dir;
@@ -1696,7 +1697,10 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
 
   const Pose move_pose = PoseFromOpenXR(controller.aim_pose);
   const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
-  if (LeftControllerNearHead(move_pose, hmd_pose, settings))
+  const Common::VR::OpenXRControllerState& dpad_hand =
+      snapshot.controllers[settings.use_right_hand ? 0 : 1];
+  if (dpad_hand.connected && dpad_hand.aim_pose.valid &&
+      LeftControllerNearHead(PoseFromOpenXR(dpad_hand.aim_pose), hmd_pose, settings))
   {
     s_directional_move_speed = 0.0f;
     return;
