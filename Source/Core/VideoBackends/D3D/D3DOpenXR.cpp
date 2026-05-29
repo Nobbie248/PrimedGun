@@ -982,7 +982,7 @@ bool D3DOpenXR::AppendPrimeGunOverlayLayers(std::vector<XrCompositionLayerBaseHe
                                                  overlay.weapon_panel_orientation[2],
                                                  overlay.weapon_panel_orientation[3]};
     const XrVector3f offset =
-        RotateVector(m_primegun_overlay_layer.pose.orientation, {0.0f, 0.08f, -0.26f});
+        RotateVector(m_primegun_overlay_layer.pose.orientation, {0.0f, 0.055f, -0.26f});
     m_primegun_overlay_layer.pose.position = {
         overlay.weapon_panel_position[0] + snapshot.tracking_origin_position[0] + offset.x,
         overlay.weapon_panel_position[1] + snapshot.tracking_origin_position[1] + offset.y,

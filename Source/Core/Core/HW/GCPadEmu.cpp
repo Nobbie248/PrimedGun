@@ -329,6 +329,9 @@ static void UpdatePrimeGunWeaponSelect(const Common::VR::OpenXRControllerState& 
   static int s_pulse_frames = 0;
   static Common::VR::OpenXRPoseState s_anchor_pose = {};
   static PrimeGunQuat s_anchor_orientation = {};
+  static bool s_have_selection_center = false;
+  static float s_selection_center_x = 0.0f;
+  static float s_selection_center_y = 0.0f;
 
   if (s_pulse_frames > 0)
   {
@@ -351,6 +354,9 @@ static void UpdatePrimeGunWeaponSelect(const Common::VR::OpenXRControllerState& 
     s_gesture_active = false;
     s_selected_slot = PrimeGunBeamSlot::None;
     s_last_logged_slot = PrimeGunBeamSlot::None;
+    s_have_selection_center = false;
+    s_selection_center_x = 0.0f;
+    s_selection_center_y = 0.0f;
     PublishPrimeGunWeaponPanel(false, PrimeGunBeamSlot::None, nullptr);
     return;
   }
@@ -360,14 +366,17 @@ static void UpdatePrimeGunWeaponSelect(const Common::VR::OpenXRControllerState& 
     s_base_x = pose.position[0];
     s_base_y = pose.position[1];
     s_base_z = pose.position[2];
-    s_base_orientation = PrimeGunPoseQuat(pose);
-    s_anchor_orientation = PrimeGunRollFreeQuat(s_base_orientation);
+    s_base_orientation = PrimeGunRollFreeQuat(PrimeGunPoseQuat(pose));
+    s_anchor_orientation = s_base_orientation;
     s_anchor_pose = pose;
     s_anchor_pose.orientation = {s_anchor_orientation.x, s_anchor_orientation.y,
                                  s_anchor_orientation.z, s_anchor_orientation.w};
     s_gesture_active = true;
     s_selected_slot = PrimeGunBeamSlot::None;
     s_last_logged_slot = PrimeGunBeamSlot::None;
+    s_have_selection_center = false;
+    s_selection_center_x = 0.0f;
+    s_selection_center_y = 0.0f;
     NOTICE_LOG_FMT(CORE, "PrimeGun weapon select open");
   }
 
@@ -388,13 +397,13 @@ static void UpdatePrimeGunWeaponSelect(const Common::VR::OpenXRControllerState& 
   PrimeGunRotate(s_anchor_orientation, 0.0f, 1.0f, 0.0f, &panel_up_x, &panel_up_y, &panel_up_z);
   PrimeGunRotate(s_anchor_orientation, 0.0f, 0.0f, -1.0f, &panel_forward_x, &panel_forward_y,
                  &panel_forward_z);
-  PrimeGunRotate(s_anchor_orientation, 0.0f, 0.08f, -0.26f, &panel_offset_x, &panel_offset_y,
+  PrimeGunRotate(s_anchor_orientation, 0.0f, 0.055f, -0.26f, &panel_offset_x, &panel_offset_y,
                  &panel_offset_z);
 
   const float panel_x = s_base_x + panel_offset_x;
   const float panel_y = s_base_y + panel_offset_y;
   const float panel_z = s_base_z + panel_offset_z;
-  const PrimeGunQuat current_orientation = PrimeGunPoseQuat(pose);
+  const PrimeGunQuat current_orientation = PrimeGunRollFreeQuat(PrimeGunPoseQuat(pose));
   float ray_x = 0.0f;
   float ray_y = 0.0f;
   float ray_z = 0.0f;
@@ -439,6 +448,15 @@ static void UpdatePrimeGunWeaponSelect(const Common::VR::OpenXRControllerState& 
     x = local_x / 0.075f;
     y = local_y / 0.075f;
   }
+
+  if (!s_have_selection_center)
+  {
+    s_selection_center_x = x;
+    s_selection_center_y = y;
+    s_have_selection_center = true;
+  }
+  x -= s_selection_center_x;
+  y -= s_selection_center_y;
 
   x = std::clamp(x, -1.0f, 1.0f);
   y = std::clamp(y, -1.0f, 1.0f);
