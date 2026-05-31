@@ -1,18 +1,27 @@
-app-id: org.DolphinEmu.dolphin-emu
+app-id: org.PrimedGun.PrimedGun
 runtime: org.kde.Platform
 runtime-version: '6.10'
 sdk: org.kde.Sdk
-command: dolphin-emu-wrapper
+command: primedgun-wrapper
 rename-desktop-file: dolphin-emu.desktop
 rename-icon: dolphin-emu
 finish-args:
   - --device=all
   - --socket=pulseaudio
-  - --socket=x11
+  - --socket=wayland
+  - --socket=fallback-x11
   - --share=network
   - --share=ipc
   # required for the emulated bluetooth adapter feature to work.
   - --allow=bluetooth
+  # required for OpenXR runtime discovery and IPC with SteamVR/Monado.
+  - --filesystem=xdg-config/openxr:ro
+  - --filesystem=xdg-data/openxr:ro
+  - --filesystem=xdg-run/monado_comp_ipc
+  - --filesystem=xdg-run/monado_comp_ipc_server
+  - --filesystem=xdg-run/steam:ro
+  - --filesystem=~/.steam:ro
+  - --filesystem=~/.local/share/Steam:ro
   - --filesystem=xdg-run/app/com.discordapp.Discord:create
   - --filesystem=xdg-run/discord-ipc-0:create
   # required to disable the screensaver in various desktops
@@ -38,7 +47,7 @@ modules:
           project-id: 20540
           stable-only: true
           url-template: https://www.freedesktop.org/software/libevdev/libevdev-$version.tar.xz
-  - name: dolphin-emu
+  - name: primedgun
     buildsystem: cmake-ninja
     builddir: true
     build-options:
@@ -52,13 +61,20 @@ modules:
       - -DENABLE_ALSA=OFF
       - -DENABLE_SDL=ON
       - -DENABLE_EVDEV=ON
-      - -DDISTRIBUTOR=dolphin-emu.org
+      - -DENABLE_VULKAN=ON
+      - -DENABLE_VR=ON
+      - -DDISTRIBUTOR=PrimedGun
     cleanup:
       - /share/man
     post-install:
-      - install -Dm755 -t ${FLATPAK_DEST}/bin/ ../Flatpak/dolphin-emu-wrapper
-      - install -Dm644 -t ${FLATPAK_DEST}/share/metainfo/ Flatpak/org.DolphinEmu.dolphin-emu.metainfo.xml
-      - desktop-file-edit --set-key=Exec --set-value='/app/bin/dolphin-emu-wrapper'
+      - install -Dm755 ../Flatpak/dolphin-emu-wrapper ${FLATPAK_DEST}/bin/primedgun-wrapper
+      - install -Dm644 Flatpak/org.DolphinEmu.dolphin-emu.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/org.PrimedGun.PrimedGun.metainfo.xml
+      - desktop-file-edit --set-key=Exec --set-value='/app/bin/primedgun-wrapper'
+        --set-key=Name --set-value='PrimedGun'
+        --set-key=GenericName --set-value='Metroid Prime VR Launcher'
+        --set-key=Comment --set-value='A Dolphin ReduX-based VR launcher for Metroid Prime'
+        --set-key=Icon --set-value='org.PrimedGun.PrimedGun'
         /app/share/applications/dolphin-emu.desktop
     sources:
       - type: dir
