@@ -54,13 +54,15 @@ modules:
       # don't use any default flags provided by the SDK
       cflags: ""
       cflags-override: true
-      cxxflags: ""
+      cxxflags: "-DXRLOADER_DISABLE_EXCEPTION_HANDLING -DJSON_USE_EXCEPTION=0 -DJSON_USE_EXCEPTIONS=0"
       cxxflags-override: true
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DENABLE_ALSA=OFF
       - -DENABLE_SDL=ON
       - -DENABLE_EVDEV=ON
+      - -DLIBEVDEV_INCLUDE_DIR=/app/include/libevdev-1.0
+      - -DLIBEVDEV_LIBRARY=/app/lib64/libevdev.so
       - -DENABLE_VULKAN=ON
       - -DENABLE_VR=ON
       - -DDISTRIBUTOR=PrimedGun
@@ -68,8 +70,6 @@ modules:
       - /share/man
     post-install:
       - install -Dm755 ../Flatpak/dolphin-emu-wrapper ${FLATPAK_DEST}/bin/primedgun-wrapper
-      - install -Dm644 Flatpak/org.DolphinEmu.dolphin-emu.metainfo.xml
-        ${FLATPAK_DEST}/share/metainfo/org.PrimedGun.PrimedGun.metainfo.xml
       - desktop-file-edit --set-key=Exec --set-value='/app/bin/primedgun-wrapper'
         --set-key=Name --set-value='PrimedGun'
         --set-key=GenericName --set-value='Metroid Prime VR Launcher'
