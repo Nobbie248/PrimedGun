@@ -181,6 +181,29 @@ std::shared_ptr<HiresTexture> HiresTexture::Search(const TextureInfo& texture_in
   }
 }
 
+void HiresTexture::MarkDirty(std::string_view texture_id)
+{
+  auto& system = Core::System::GetInstance();
+  auto& custom_resource_manager = system.GetCustomResourceManager();
+  custom_resource_manager.MarkAssetDirty(std::string(texture_id));
+}
+
+void HiresTexture::RemoveAssetPath(std::string_view texture_id)
+{
+  const std::string id(texture_id);
+  s_hires_texture_cache.erase(id);
+  s_hires_texture_id_to_arbmipmap.erase(id);
+  s_file_library->SetAssetIDMapData(id, {});
+}
+
+void HiresTexture::SetAssetPath(std::string_view texture_id, const std::string& path)
+{
+  const std::string id(texture_id);
+  s_hires_texture_id_to_arbmipmap[id] = false;
+  s_file_library->SetAssetIDMapData(
+      id, std::map<std::string, std::filesystem::path>{{"texture", StringToPath(path)}});
+}
+
 HiresTexture::HiresTexture(bool has_arbitrary_mipmaps, std::string id)
     : m_has_arbitrary_mipmaps(has_arbitrary_mipmaps), m_id(std::move(id))
 {

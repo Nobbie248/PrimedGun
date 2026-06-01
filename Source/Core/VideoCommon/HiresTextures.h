@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "VideoCommon/TextureInfo.h"
@@ -27,6 +28,9 @@ public:
   static void Clear();
   static void Shutdown();
   static std::shared_ptr<HiresTexture> Search(const TextureInfo& texture_info);
+  static void MarkDirty(std::string_view texture_id);
+  static void RemoveAssetPath(std::string_view texture_id);
+  static void SetAssetPath(std::string_view texture_id, const std::string& path);
 
   HiresTexture(bool has_arbitrary_mipmaps, std::string id);
 

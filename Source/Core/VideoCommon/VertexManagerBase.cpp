@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,7 +15,9 @@
 #include "Common/CommonTypes.h"
 #include "Common/Contains.h"
 #include "Common/EnumMap.h"
+#include "Common/FileUtil.h"
 #include "Common/Hash.h"
+#include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
 #include "Common/SmallVector.h"
@@ -77,6 +80,11 @@ constexpr int METROID_PRIME1_THERMAL_HEAT_HFOV_X100 = 7;
 constexpr int METROID_PRIME1_THERMAL_HEAT_VFOV_X100 = 5;
 constexpr int METROID_PRIME1_THERMAL_HEAT_NEAR_X1000 = 200;
 constexpr int METROID_PRIME1_THERMAL_HEAT_FAR_X100 = 75;
+constexpr u64 PRIMEGUN_CANNON_PROBE_PS_HASH = 0x9e0b32f0;
+constexpr u32 PRIMEGUN_CANNON_PROBE_MAX_LOGS = 240;
+
+u32 s_primegun_cannon_probe_log_count = 0;
+bool s_primegun_cannon_probe_suppressed_notice = false;
 
 int GetFullscreenMonoPerEyeTextureLayer()
 {
@@ -109,6 +117,142 @@ const char* HandlingToDebugName(ShaderHunter::HandlingType handling)
     return "units_per_meter";
   default:
     return "unknown";
+  }
+}
+
+std::string PrimeGunCannonProbeLogPath()
+{
+  const std::string game_id = SConfig::GetInstance().GetGameID();
+  const std::string dump_dir = File::GetUserPath(D_DUMP_IDX) + "Shaders/" + game_id + "/";
+  if (!File::IsDirectory(dump_dir))
+    File::CreateFullPath(dump_dir);
+  return dump_dir + "primegun_cannon_probe.log";
+}
+
+void AppendPrimeGunCannonProbeLog(std::string_view text)
+{
+  const std::string path = PrimeGunCannonProbeLogPath();
+  File::IOFile file(path, "ab");
+  if (!file)
+  {
+    WARN_LOG_FMT(VIDEO, "PrimeGun cannon probe: failed to open '{}'", path);
+    return;
+  }
+  file.WriteString(text);
+}
+
+void LogPrimeGunCannonProbeDraw(u32 draw_sequence, u64 vs_hash, u64 ps_hash, u64 gs_hash,
+                                const std::array<u64, 8>& texture_hashes,
+                                const std::array<std::string, 8>& texture_names,
+                                const ShaderHunter::RuntimeElementSignature& signature)
+{
+  if (ps_hash != PRIMEGUN_CANNON_PROBE_PS_HASH)
+    return;
+
+  if (s_primegun_cannon_probe_log_count >= PRIMEGUN_CANNON_PROBE_MAX_LOGS)
+  {
+    if (!s_primegun_cannon_probe_suppressed_notice)
+    {
+      s_primegun_cannon_probe_suppressed_notice = true;
+      AppendPrimeGunCannonProbeLog(fmt::format(
+          "\nPrimeGun cannon probe: suppressing further draws after {} matches.\n",
+          PRIMEGUN_CANNON_PROBE_MAX_LOGS));
+      INFO_LOG_FMT(VIDEO,
+                   "PrimeGun cannon probe: suppressing further draws after {} matches. Log: {}",
+                   PRIMEGUN_CANNON_PROBE_MAX_LOGS, PrimeGunCannonProbeLogPath());
+    }
+    return;
+  }
+
+  ++s_primegun_cannon_probe_log_count;
+  std::string out;
+  out += fmt::format(
+      "\n[PrimeGun cannon probe #{:03}] draw={} VS={:08x} PS={:08x} GS={:08x}\n",
+      s_primegun_cannon_probe_log_count, draw_sequence, static_cast<u32>(vs_hash),
+      static_cast<u32>(ps_hash), static_cast<u32>(gs_hash));
+  out += fmt::format(
+      "projection={} hfov={} vfov={} near={} far={} ortho=({}, {}, {}, {}) viewport=({}, {}, "
+      "{}x{}) scissor=({}, {}, {}, {}) alpha={:08x} ztest={} zupdate={} zfunc={} blend_color={} "
+      "blend_alpha={}\n",
+      signature.perspective ? "perspective" : "ortho", signature.perspective_hfov_x100,
+      signature.perspective_vfov_x100, signature.perspective_near_x1000,
+      signature.perspective_far_x100, signature.ortho_left_x100, signature.ortho_right_x100,
+      signature.ortho_top_x100, signature.ortho_bottom_x100, signature.viewport_x,
+      signature.viewport_y, signature.viewport_width, signature.viewport_height,
+      signature.scissor_left, signature.scissor_top, signature.scissor_right,
+      signature.scissor_bottom, signature.alpha_test_hex, signature.ztest, signature.zupdate,
+      signature.zfunc, signature.blend_color_update, signature.blend_alpha_update);
+
+  out += fmt::format("genmode texgens={} tev_stages={} ind_stages={} cull={}\n",
+                     bpmem.genMode.numtexgens.Value(), bpmem.genMode.numtevstages.Value() + 1,
+                     bpmem.genMode.numindstages.Value(),
+                     static_cast<int>(bpmem.genMode.cull_mode.Value()));
+  out += fmt::format(
+      "zmode test={} update={} func={} alpha_test hex={:08x} ref0={} ref1={} comp0={} comp1={} "
+      "logic={}\n",
+      bpmem.zmode.test_enable.Value(), bpmem.zmode.update_enable.Value(),
+      bpmem.zmode.func.Value(), bpmem.alpha_test.hex, bpmem.alpha_test.ref0.Value(),
+      bpmem.alpha_test.ref1.Value(), bpmem.alpha_test.comp0.Value(),
+      bpmem.alpha_test.comp1.Value(), bpmem.alpha_test.logic.Value());
+  out += fmt::format(
+      "blend enable={} logic={} color_update={} alpha_update={} src={} dst={} subtract={} "
+      "logic_mode={} dstalpha enable={} alpha={}\n",
+      bpmem.blendmode.blend_enable.Value(), bpmem.blendmode.logic_op_enable.Value(),
+      bpmem.blendmode.color_update.Value(), bpmem.blendmode.alpha_update.Value(),
+      static_cast<int>(bpmem.blendmode.src_factor.Value()),
+      static_cast<int>(bpmem.blendmode.dst_factor.Value()), bpmem.blendmode.subtract.Value(),
+      static_cast<int>(bpmem.blendmode.logic_mode.Value()),
+      bpmem.dstalpha.enable.Value(), bpmem.dstalpha.alpha.Value());
+
+  out += "textures:\n";
+  for (u32 i = 0; i < texture_hashes.size(); ++i)
+  {
+    if (texture_hashes[i] == 0 && texture_names[i].empty())
+      continue;
+    out += fmt::format("  stage{} hash={:016x} name={}\n", i, texture_hashes[i],
+                       texture_names[i].empty() ? "(unknown)" : texture_names[i]);
+  }
+
+  out += "tev orders/selectors:\n";
+  const u32 tev_stage_count = bpmem.genMode.numtevstages.Value() + 1;
+  for (u32 stage = 0; stage < tev_stage_count; ++stage)
+  {
+    const auto& order = bpmem.tevorders[stage / 2];
+    out += fmt::format(
+        "  stage{} enabled={} texmap={} texcoord={} colorchan={} konst_color={} konst_alpha={} "
+        "color_hex={:06x} alpha_hex={:06x}\n",
+        stage, order.getEnable(stage & 1), order.getTexMap(stage & 1),
+        order.getTexCoord(stage & 1), static_cast<int>(order.getColorChan(stage & 1)),
+        bpmem.tevksel.GetKonstColor(stage), bpmem.tevksel.GetKonstAlpha(stage),
+        bpmem.combiners[stage].colorC.hex, bpmem.combiners[stage].alphaC.hex);
+  }
+
+  out += "tev regs / konst colors:\n";
+  for (u32 i = 0; i < 4; ++i)
+  {
+    const auto& reg = bpmem.tevregs[i];
+    out += fmt::format(
+        "  reg{} ra_type={} bg_type={} r={} g={} b={} a={} raw_ra={:06x} raw_bg={:06x}\n", i,
+        reg.ra.type.Value(), reg.bg.type.Value(), reg.ra.red.Value(), reg.bg.green.Value(),
+        reg.bg.blue.Value(), reg.ra.alpha.Value(), reg.ra.hex, reg.bg.hex);
+  }
+
+  out += "xf material/lighting:\n";
+  for (u32 i = 0; i < NUM_XF_COLOR_CHANNELS; ++i)
+  {
+    out += fmt::format(
+        "  chan{} amb={:08x} mat={:08x} color_hex={:08x} alpha_hex={:08x} color_lighting={} "
+        "alpha_lighting={} color_lights={:02x} alpha_lights={:02x}\n",
+        i, xfmem.ambColor[i], xfmem.matColor[i], xfmem.color[i].hex, xfmem.alpha[i].hex,
+        xfmem.color[i].enablelighting.Value(), xfmem.alpha[i].enablelighting.Value(),
+        xfmem.color[i].GetFullLightMask(), xfmem.alpha[i].GetFullLightMask());
+  }
+
+  AppendPrimeGunCannonProbeLog(out);
+  if (s_primegun_cannon_probe_log_count == 1)
+  {
+    INFO_LOG_FMT(VIDEO, "PrimeGun cannon probe logging PS {:08x} to {}",
+                 static_cast<u32>(PRIMEGUN_CANNON_PROBE_PS_HASH), PrimeGunCannonProbeLogPath());
   }
 }
 
@@ -1016,6 +1160,7 @@ void VertexManagerBase::Flush()
         bool elements_skip = false;
         auto& hunter = ShaderHunter::GetInstance();
         auto& elements = ElementsGroupManager::GetInstance();
+        const bool primegun_cannon_probe_enabled = true;
         const bool hunter_enabled = hunter.IsEnabled();
         const bool hunter_debug_logging = hunter.IsDebugLogging();
         const bool hunter_has_overrides = hunter.HasOverrides();
@@ -1025,7 +1170,8 @@ void VertexManagerBase::Flush()
         const bool hunter_needs_families = hunter.NeedsShaderFamilySignatures();
         const bool hunter_needs_textures = hunter.NeedsTextureHashes();
         const bool hunter_needs_counters = hunter.NeedsOverrideDrawCounters();
-        if (hunter_enabled || hunter_has_overrides || hunter_debug_logging || elements_runtime_active)
+        if (primegun_cannon_probe_enabled || hunter_enabled || hunter_has_overrides ||
+            hunter_debug_logging || elements_runtime_active)
         {
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
@@ -1040,8 +1186,10 @@ void VertexManagerBase::Flush()
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
           const bool needs_texture_hashes =
-              hunter_enabled || hunter_needs_textures || elements_runtime_active;
-          const bool needs_texture_names = hunter_enabled || elements_popup_open;
+              primegun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
+              elements_runtime_active;
+          const bool needs_texture_names =
+              primegun_cannon_probe_enabled || hunter_enabled || elements_popup_open;
           if (needs_texture_hashes || needs_texture_names)
           {
             for (u32 i = 0; i < 8; i++)
@@ -1071,12 +1219,18 @@ void VertexManagerBase::Flush()
           }
 
           ShaderHunter::RuntimeElementSignature draw_signature{};
-          if (hunter_enabled || elements_runtime_active)
+          if (primegun_cannon_probe_enabled || hunter_enabled || elements_runtime_active)
           {
             draw_signature = BuildRuntimeElementSignature(
                 xfmem, bpmem, system.GetGeometryShaderManager().vr_ortho_draw_counter);
             if (hunter_enabled)
               hunter.SetCurrentDrawSignature(draw_signature);
+          }
+
+          if (primegun_cannon_probe_enabled)
+          {
+            LogPrimeGunCannonProbeDraw(m_draw_counter + 1, vs_hash, ps_hash, gs_hash, tex_hashes,
+                                       tex_names, draw_signature);
           }
 
           if (hunter_enabled)
