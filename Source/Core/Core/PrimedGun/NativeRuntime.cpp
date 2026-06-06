@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -128,6 +129,9 @@ constexpr u32 DRAW_NEXT_LOCK_ON_GROUP = 0x800BD808u;
 constexpr u32 DRAW_CURR_LOCK_ON_GROUP = 0x800BE25Cu;
 constexpr u32 UPDATE_SCAN_OBJECT_INDICATORS = 0x80112508u;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS = 0x801122CCu;
+constexpr u32 DRAW_SCAN_INDICATOR_OBJECT_VISIBLE_BRANCH = 0x801121B8u;
+constexpr u32 SCAN_INDICATOR_VISIBLE_RESULT = 0x80112710u;
+constexpr u32 SCAN_INDICATOR_VISIBLE_STORE = 0x80112720u;
 
 constexpr u32 VR_MENU_TAB_COUNT = 6;
 constexpr u32 VR_MENU_CANNON_TAB = 5;
@@ -302,6 +306,12 @@ DynamicPpcPatch s_scan_indicator_update_trace_patch{
     UPDATE_SCAN_OBJECT_INDICATORS, 0, 0, SCAN_INDICATOR_UPDATE_TRACE_CAVE, false};
 DynamicPpcPatch s_scan_indicator_view_basis_patch{
     DRAW_SCAN_INDICATOR_MODEL_BASIS, 0xC0410074u, 0, SCAN_INDICATOR_VIEW_BASIS_CAVE, false};
+DynamicPpcPatch s_scan_indicator_draw_visible_branch_patch{
+    DRAW_SCAN_INDICATOR_OBJECT_VISIBLE_BRANCH, 0x4182028Cu, 0x60000000u, 0, false};
+DynamicPpcPatch s_scan_indicator_visible_result_patch{
+    SCAN_INDICATOR_VISIBLE_RESULT, 0x5464063Eu, 0x38800001u, 0, false};
+DynamicPpcPatch s_scan_indicator_visible_store_patch{
+    SCAN_INDICATOR_VISIBLE_STORE, 0x987E000Cu, 0x989E000Cu, 0, false};
 
 ProjectileTransformPatch s_projectile_transform_patches[] = {
     {0x800E0434u, 0, WAVE_PROJECTILE_TRANSFORM_CAVE, 6, false},
@@ -997,6 +1007,36 @@ void LogScanReticleTrace(const Core::CPUThreadGuard& guard, u32 player)
   }
 }
 
+void KeepScanIndicatorSlotsLoaded(const Core::CPUThreadGuard& guard, u32 player)
+{
+  if (player < 0x80000000u || !ScanVisorActive(guard, player))
+    return;
+
+  u32 visor = 0;
+  if (!TryReadU32(guard, SCAN_RETICLE_TRACE_SCRATCH + 0x20u, &visor) ||
+      visor < 0x80000000u)
+  {
+    return;
+  }
+
+  for (int i = 0; i < 8; ++i)
+  {
+    const u32 entry = visor + 0x140u + static_cast<u32>(i * 0x10);
+    u32 target_id_word = 0;
+    if (!TryReadU32(guard, entry, &target_id_word))
+      continue;
+
+    const u16 target_id = static_cast<u16>(target_id_word >> 16);
+    if (target_id == 0xffffu)
+      continue;
+
+    // Keep valid area indicators resident once the scan visor has populated them.
+    // The scanned-state fade stays under game control so scanned objects can dim normally.
+    TryWriteFloat(guard, entry + 0x04u, 1.0f);
+    TryWriteU8(guard, entry + 0x0Cu, 1);
+  }
+}
+
 void DumpScanIndicatorCodeOnce(const Core::CPUThreadGuard& guard)
 {
   if (s_have_dumped_scan_indicator_code)
@@ -1131,6 +1171,110 @@ bool ActorIsGrapplePoint(const Core::CPUThreadGuard& guard, u32 obj)
   u32 vtable = 0;
   return obj >= 0x80000000u && TryReadU32(guard, obj, &vtable) &&
          vtable >= 0x803E0D00u && vtable < 0x803E0D70u;
+}
+
+void PopulateScanIndicatorSlots(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player)
+{
+  if (state_manager < 0x80000000u || player < 0x80000000u || !ScanVisorActive(guard, player))
+    return;
+
+  u32 visor = 0;
+  u32 object_list = 0;
+  u32 player_uid_word = 0;
+  float px = 0.0f;
+  float py = 0.0f;
+  float pz = 0.0f;
+  if (!TryReadU32(guard, SCAN_RETICLE_TRACE_SCRATCH + 0x20u, &visor) ||
+      visor < 0x80000000u || !TryReadU32(guard, state_manager + 0x810u, &object_list) ||
+      object_list < 0x80000000u || !TryReadU32(guard, player + 0x8u, &player_uid_word) ||
+      !ReadTransformTranslation(guard, player + ADDRESS.transform_offset, &px, &py, &pz))
+  {
+    return;
+  }
+
+  const u16 player_uid = static_cast<u16>(player_uid_word >> 16);
+  struct Candidate
+  {
+    u16 uid = 0xffffu;
+    float dist_sq = std::numeric_limits<float>::infinity();
+  };
+  std::array<Candidate, 8> best{};
+
+  const auto insert_candidate = [&](u16 uid, float dist_sq) {
+    size_t slot = best.size();
+    float worst = -1.0f;
+    for (size_t i = 0; i < best.size(); ++i)
+    {
+      if (best[i].uid == uid)
+        return;
+      if (best[i].uid == 0xffffu)
+      {
+        slot = i;
+        break;
+      }
+      if (best[i].dist_sq > worst)
+      {
+        worst = best[i].dist_sq;
+        slot = i;
+      }
+    }
+
+    if (slot >= best.size() || (best[slot].uid != 0xffffu && dist_sq >= best[slot].dist_sq))
+      return;
+
+    best[slot].uid = uid;
+    best[slot].dist_sq = dist_sq;
+  };
+
+  constexpr float max_scan_indicator_dist_sq = 1000.0f * 1000.0f;
+  for (u32 i = 0; i < 1024u; ++i)
+  {
+    u32 obj = 0;
+    if (!TryReadU32(guard, object_list + (i << 3) + 4u, &obj) ||
+        obj < 0x80000000u || obj == player)
+    {
+      continue;
+    }
+
+    u32 uid_word = 0;
+    u32 owner_uid_word = 0;
+    if (!TryReadU32(guard, obj + 0x8u, &uid_word) || !TryReadU32(guard, obj + 0xecu, &owner_uid_word))
+      continue;
+
+    const u16 uid = static_cast<u16>(uid_word >> 16);
+    const u16 owner_uid = static_cast<u16>(owner_uid_word >> 16);
+    if (uid == 0xffffu || uid == player_uid || owner_uid == player_uid ||
+        !ActorHasMaterial(guard, obj, 39))
+    {
+      continue;
+    }
+
+    float ox = 0.0f;
+    float oy = 0.0f;
+    float oz = 0.0f;
+    if (!ReadTransformTranslation(guard, obj + ADDRESS.transform_offset, &ox, &oy, &oz))
+      continue;
+
+    const float dx = ox - px;
+    const float dy = oy - py;
+    const float dz = oz - pz;
+    const float dist_sq = dx * dx + dy * dy + dz * dz;
+    if (!std::isfinite(dist_sq) || dist_sq > max_scan_indicator_dist_sq)
+      continue;
+
+    insert_candidate(uid, dist_sq);
+  }
+
+  for (size_t i = 0; i < best.size(); ++i)
+  {
+    if (best[i].uid == 0xffffu)
+      continue;
+
+    const u32 entry = visor + 0x140u + static_cast<u32>(i * 0x10);
+    TryWriteU16(guard, entry, best[i].uid);
+    TryWriteFloat(guard, entry + 0x04u, 1.0f);
+    TryWriteU8(guard, entry + 0x0Cu, 1);
+  }
 }
 
 bool GunAimDirectionFromMatrix(const Matrix3x4& mat, float* x, float* y, float* z)
@@ -3333,6 +3477,28 @@ bool ApplyScanIndicatorViewBasisPatch(const Core::CPUThreadGuard& guard)
   return patch.applied;
 }
 
+bool ApplyDirectPpcPatch(const Core::CPUThreadGuard& guard, DynamicPpcPatch& patch)
+{
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current))
+    return false;
+
+  if (current == patch.replacement)
+  {
+    patch.applied = true;
+    return false;
+  }
+
+  if (current != patch.original)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  patch.applied = TryWriteInstruction(guard, patch.address, patch.replacement);
+  return patch.applied;
+}
+
 bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, ProjectileTransformPatch& patch)
 {
   u32 current = 0;
@@ -3550,6 +3716,9 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyRenderModelOffsetPatch(guard) || wrote;
   wrote = ApplyScanReticleTracePatch(guard) || wrote;
   wrote = ApplyScanIndicatorViewBasisPatch(guard) || wrote;
+  wrote = ApplyDirectPpcPatch(guard, s_scan_indicator_draw_visible_branch_patch) || wrote;
+  wrote = ApplyDirectPpcPatch(guard, s_scan_indicator_visible_result_patch) || wrote;
+  wrote = ApplyDirectPpcPatch(guard, s_scan_indicator_visible_store_patch) || wrote;
   wrote = ApplyFirstPersonPitchLoadPatch(guard) || wrote;
 
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
@@ -3647,7 +3816,11 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   {
     LogModeProbe(guard, player, gameplay_input_active != s_last_logged_gameplay_input_active);
     if (ScanVisorActive(guard, player))
+    {
       DumpScanIndicatorCodeOnce(guard);
+      PopulateScanIndicatorSlots(guard, ADDRESS.state_manager, player);
+      KeepScanIndicatorSlotsLoaded(guard, player);
+    }
     LogScanReticleTrace(guard, player);
   }
   if (!s_have_logged_gameplay_input_active ||
@@ -3761,7 +3934,10 @@ void ResetNativeRuntime()
   s_scan_indicator_update_trace_patch.applied = false;
   s_scan_indicator_update_trace_patch.original = 0;
   s_scan_indicator_view_basis_patch.applied = false;
-  s_scan_indicator_view_basis_patch.original = 0;
+  s_scan_indicator_view_basis_patch.original = 0xC0410074u;
+  s_scan_indicator_draw_visible_branch_patch.applied = false;
+  s_scan_indicator_visible_result_patch.applied = false;
+  s_scan_indicator_visible_store_patch.applied = false;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
     patch.applied = false;
   s_combat_elevation_pitch_patch.applied = false;
