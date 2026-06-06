@@ -1701,22 +1701,16 @@ void MainWindow::ConnectStack()
   setup_layout->addWidget(options_button);
   setup_layout->addSpacing(12);
   auto* notes = new QLabel(tr("Setup notes\n"
+                              "  * HMD refresh rate set to 120 Hz is recommended.\n"
+                              "  * Meta's own OpenXR environment is not recommended; try SteamVR or VD instead.\n"
                               "  * Select your Metroid Prime GameCube game file.\n"
                               "  * Transfer your memory card into User\\GC if you want existing saves.\n"
                               "  * Once in game, click the right stick to set your height.\n"
-                              "  * Try to stay in the centre of your play space.\n"
-                              "  * Try to face forward while playing; turning around is not ideal for interaction.\n"
-                              "  * Use Save Settings after changing PrimedGun options."), game_tab);
+                              "  * Click the left thumbstick to open or close the in-headset settings menu.\n"
+                              "  * Try to stay in the centre of your play space and face forward for the best interaction.\n"
+                              "  * Use Save Settings after changing PrimedGun options to apply them."), game_tab);
   notes->setObjectName(QStringLiteral("PrimeGunMuted"));
   setup_layout->addWidget(notes);
-  setup_layout->addSpacing(8);
-  auto* vr_notes = new QLabel(tr("VR Settings Menu\n"
-                                 "  * Click the left thumbstick to open or close the in-headset settings menu.\n"
-                                 "  * The menu is attached to the left controller.\n"
-                                 "  * Use A to change the pointed-at setting.\n"
-                                 "  * Use Save Settings to write User/Config/Qt.ini."), game_tab);
-  vr_notes->setObjectName(QStringLiteral("PrimeGunMuted"));
-  setup_layout->addWidget(vr_notes);
   setup_layout->addStretch();
   auto* setup_art = new QLabel(game_tab);
   setup_art->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
@@ -2406,8 +2400,8 @@ void MainWindow::ConnectStack()
     runtime->directional_movement_enabled = true;
     runtime->directional_movement_use_right_stick = false;
     runtime->directional_movement_use_hmd_direction = false;
-    runtime->xr_dpad_head_radius = 0.18f;
-    runtime->xr_dpad_head_y_below = 0.14f;
+    runtime->xr_dpad_head_radius = 0.28f;
+    runtime->xr_dpad_head_y_below = 0.02f;
     runtime->xr_dpad_deadzone = 0.45f;
     runtime->directional_movement_deadzone = 0.25f;
     runtime->directional_movement_speed = 14.0f;

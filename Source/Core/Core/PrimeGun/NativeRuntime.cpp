@@ -960,6 +960,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
   const u16 player_uid = static_cast<u16>(player_uid_word >> 16);
   const float max_along = settings.gun_targeting_distance;
   const float max_perp = settings.gun_targeting_radius;
+  const float grapple_max_perp = max_perp * 1.30f;
   const bool scan_mode = ScanVisorActive(guard, player);
   bool found = false;
 
@@ -992,7 +993,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
     const float dy = oy - nearest_y;
     const float dz = oz - nearest_z;
     const float perp_sq = dx * dx + dy * dy + dz * dz;
-    if (!std::isfinite(perp_sq) || perp_sq > max_perp * max_perp ||
+    if (!std::isfinite(perp_sq) || perp_sq > grapple_max_perp * grapple_max_perp ||
         !LooksLikeTransformMatrix(guard, obj + ADDRESS.transform_offset))
     {
       continue;
@@ -1022,10 +1023,15 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       continue;
 
     const float perp = std::sqrt(perp_sq);
-    float aim_cone_perp = max_perp;
+    const float candidate_max_perp = grapple_candidate ? grapple_max_perp : max_perp;
+    if (perp > candidate_max_perp)
+      continue;
+
+    float aim_cone_perp = candidate_max_perp;
     if (strict_lock_aim)
     {
-      aim_cone_perp = std::min(max_perp, 0.45f + along * (scan_mode ? 0.085f : 0.075f));
+      const float strict_cone = 0.45f + along * (scan_mode ? 0.085f : 0.075f);
+      aim_cone_perp = std::min(candidate_max_perp, grapple_candidate ? strict_cone * 1.30f : strict_cone);
       if (perp > aim_cone_perp)
         continue;
     }
@@ -1064,7 +1070,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       pick->along = along;
       pick->perp = perp;
       pick->score = score;
-      pick->suppress_orbit_hook = grapple_candidate;
+      pick->suppress_orbit_hook = false;
     }
   }
 
@@ -1141,7 +1147,7 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
 
   if (!found || pick.suppress_orbit_hook)
   {
-    WriteGunTargetScratch(guard, 0, 0xffffu);
+    WriteGunTargetScratch(guard, player, 0xffffu);
     return;
   }
 
@@ -2072,8 +2078,8 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->require_trigger = false;
   settings->trigger_threshold = 0.5f;
   settings->xr_dpad_enabled = true;
-  settings->xr_dpad_head_radius = 0.18f;
-  settings->xr_dpad_head_y_below = 0.14f;
+  settings->xr_dpad_head_radius = 0.28f;
+  settings->xr_dpad_head_y_below = 0.02f;
   settings->xr_dpad_deadzone = 0.45f;
 }
 
@@ -2415,39 +2421,11 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       }
     }
 
-    const bool up = right.thumbstick_y > 0.55f;
-    const bool down = right.thumbstick_y < -0.55f;
-    const bool left_tab = right.thumbstick_x < -0.65f;
-    const bool right_tab = right.thumbstick_x > 0.65f;
-    if (up && !s_last_vr_menu_stick_up && s_vr_menu_selected_index > 0)
-    {
-      --s_vr_menu_selected_index;
-      ++s_vr_menu_generation;
-    }
-    if (down && !s_last_vr_menu_stick_down)
-    {
-      ++s_vr_menu_selected_index;
-      ClampVrMenuSelection();
-      ++s_vr_menu_generation;
-    }
-    if (left_tab && !s_last_vr_menu_stick_left)
-    {
-      s_vr_menu_tab = s_vr_menu_tab == 0 ? VR_MENU_TAB_COUNT - 1 : s_vr_menu_tab - 1;
-      s_vr_menu_selected_index = 0;
-      ++s_vr_menu_generation;
-    }
-    if (right_tab && !s_last_vr_menu_stick_right)
-    {
-      s_vr_menu_tab = (s_vr_menu_tab + 1) % VR_MENU_TAB_COUNT;
-      s_vr_menu_selected_index = 0;
-      ++s_vr_menu_generation;
-    }
-    s_last_vr_menu_stick_up = up;
-    s_last_vr_menu_stick_down = down;
-    s_last_vr_menu_stick_left = left_tab;
-    s_last_vr_menu_stick_right = right_tab;
+    s_last_vr_menu_stick_up = false;
+    s_last_vr_menu_stick_down = false;
+    s_last_vr_menu_stick_left = false;
+    s_last_vr_menu_stick_right = false;
 
-    const bool trigger = right.connected && right.trigger_button;
     const bool primary = right.connected && right.primary_button;
     const bool secondary = right.connected && right.secondary_button;
     if (primary && !s_last_vr_menu_primary)
@@ -2506,30 +2484,7 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       // B is suppressed from gameplay while the VR menu is open, but it does not close or
       // change the menu. The old menu only changed settings through laser hits.
     }
-    if (trigger && !s_last_vr_menu_trigger)
-    {
-      const float texture_x = std::clamp(pointer_x, 0.0f, 1.0f) * 1024.0f;
-      const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * 512.0f;
-      constexpr float row_x = 52.0f;
-      constexpr float row_width = 920.0f;
-      constexpr float value_width = 170.0f;
-      constexpr float value_box_x = row_x + row_width - 190.0f;
-      if (pointer_active && texture_y >= 154.0f && texture_x >= value_box_x &&
-          texture_x <= value_box_x + value_width)
-      {
-        if (VrMenuRowIsNumeric(s_vr_menu_tab, s_vr_menu_selected_index))
-          AdjustVrMenuSetting(settings, texture_x >= value_box_x + value_width * 0.5f ? 1 : -1);
-        else
-          ActivateVrMenuSelection(settings);
-        ++s_vr_menu_generation;
-      }
-    }
-    else if (!trigger && std::abs(right.thumbstick_x) > 0.25f)
-    {
-      AdjustVrMenuSetting(settings, right.thumbstick_x < 0.0f ? -1 : 1);
-      ++s_vr_menu_generation;
-    }
-    s_last_vr_menu_trigger = trigger;
+    s_last_vr_menu_trigger = false;
     s_last_vr_menu_primary = primary;
     s_last_vr_menu_secondary = secondary;
   }

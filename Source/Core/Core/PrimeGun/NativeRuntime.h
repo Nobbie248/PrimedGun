@@ -41,8 +41,8 @@ struct RuntimeSettings
   float gun_targeting_radius = 4.0f;
   bool vr_overlays_enabled = true;
   bool xr_dpad_enabled = true;
-  float xr_dpad_head_radius = 0.18f;
-  float xr_dpad_head_y_below = 0.14f;
+  float xr_dpad_head_radius = 0.28f;
+  float xr_dpad_head_y_below = 0.02f;
   float xr_dpad_deadzone = 0.45f;
   bool directional_movement_enabled = true;
   bool directional_movement_use_right_stick = false;
