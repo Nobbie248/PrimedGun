@@ -195,12 +195,11 @@ static void ApplyPrimedGunClassicMenuControls(const Common::VR::OpenXRController
       left.connected && !suppress_left_stick ?
           PrimedGunAxisToPadByte(left.thumbstick_y, GCPadStatus::MAIN_STICK_CENTER_Y) :
           GCPadStatus::MAIN_STICK_CENTER_Y;
-  pad->substickX =
-      right.connected ? PrimedGunAxisToPadByte(right.thumbstick_x, GCPadStatus::C_STICK_CENTER_X) :
-                        GCPadStatus::C_STICK_CENTER_X;
-  pad->substickY =
-      right.connected ? PrimedGunAxisToPadByte(right.thumbstick_y, GCPadStatus::C_STICK_CENTER_Y) :
-                        GCPadStatus::C_STICK_CENTER_Y;
+  // PrimeGun owns beam selection through the explicit B-held weapon selector.  Do not let
+  // transient classic/menu fallback states pass the right stick through as C-stick, because visor
+  // transitions can briefly report non-gameplay and accidentally change beams.
+  pad->substickX = GCPadStatus::C_STICK_CENTER_X;
+  pad->substickY = GCPadStatus::C_STICK_CENTER_Y;
 
   if (left.connected)
   {
