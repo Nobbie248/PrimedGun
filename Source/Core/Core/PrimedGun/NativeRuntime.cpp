@@ -139,6 +139,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
+constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;
@@ -164,6 +165,11 @@ constexpr u32 PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET = 0x3ECu;
 constexpr u32 PLAYER_VISOR_STATE_OFFSET = 0x330u;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
+
+bool RuntimeLoggingEnabled()
+{
+  return ENABLE_PRIMEDGUN_RUNTIME_LOGGING;
+}
 
 enum PatchGroup : u32
 {
@@ -729,6 +735,9 @@ bool PlayerIsFirstPersonGunReady(const Core::CPUThreadGuard& guard, u32 player)
 
 void LogModeProbe(const Core::CPUThreadGuard& guard, u32 player, bool force)
 {
+  if (!RuntimeLoggingEnabled())
+    return;
+
   u32 camera_state = 0xffffffffu;
   u32 morph_state = 0xffffffffu;
   u32 movement_state = 0xffffffffu;
@@ -843,6 +852,9 @@ void LogModeProbe(const Core::CPUThreadGuard& guard, u32 player, bool force)
 
 void LogScanReticleTrace(const Core::CPUThreadGuard& guard, u32 player)
 {
+  if (!RuntimeLoggingEnabled())
+    return;
+
   if (player < 0x80000000u || !ScanVisorActive(guard, player))
     return;
 
@@ -999,6 +1011,9 @@ void LogScanReticleTrace(const Core::CPUThreadGuard& guard, u32 player)
 
 void DumpScanIndicatorCodeOnce(const Core::CPUThreadGuard& guard)
 {
+  if (!RuntimeLoggingEnabled())
+    return;
+
   if (s_have_dumped_scan_indicator_code)
     return;
 
@@ -3650,33 +3665,36 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
       DumpScanIndicatorCodeOnce(guard);
     LogScanReticleTrace(guard, player);
   }
-  if (!s_have_logged_gameplay_input_active ||
-      gameplay_input_active != s_last_logged_gameplay_input_active)
+  if (RuntimeLoggingEnabled())
   {
-    u32 camera_state = 0xffffffffu;
-    u32 morph_state = 0xffffffffu;
-    u32 movement_state = 0xffffffffu;
-    u32 visor_state = 0xffffffffu;
-    u32 holster_state = 0xffffffffu;
-    u8 input_flags = 0xffu;
-    float gun_alpha = -1.0f;
-    if (have_player)
+    if (!s_have_logged_gameplay_input_active ||
+        gameplay_input_active != s_last_logged_gameplay_input_active)
     {
-      TryReadU32(guard, player + 0x2F4u, &camera_state);
-      TryReadU32(guard, player + 0x2F8u, &morph_state);
-      TryReadU32(guard, player + PLAYER_MOVEMENT_STATE_OFFSET, &movement_state);
-      TryReadU32(guard, player + PLAYER_VISOR_STATE_OFFSET, &visor_state);
-      TryReadU32(guard, player + 0x498u, &holster_state);
-      TryReadU8(guard, player + PLAYER_DISABLE_INPUT_FLAGS_OFFSET, &input_flags);
-      TryReadFloat(guard, player + 0x494u, &gun_alpha);
+      u32 camera_state = 0xffffffffu;
+      u32 morph_state = 0xffffffffu;
+      u32 movement_state = 0xffffffffu;
+      u32 visor_state = 0xffffffffu;
+      u32 holster_state = 0xffffffffu;
+      u8 input_flags = 0xffu;
+      float gun_alpha = -1.0f;
+      if (have_player)
+      {
+        TryReadU32(guard, player + 0x2F4u, &camera_state);
+        TryReadU32(guard, player + 0x2F8u, &morph_state);
+        TryReadU32(guard, player + PLAYER_MOVEMENT_STATE_OFFSET, &movement_state);
+        TryReadU32(guard, player + PLAYER_VISOR_STATE_OFFSET, &visor_state);
+        TryReadU32(guard, player + 0x498u, &holster_state);
+        TryReadU8(guard, player + PLAYER_DISABLE_INPUT_FLAGS_OFFSET, &input_flags);
+        TryReadFloat(guard, player + 0x494u, &gun_alpha);
+      }
+      NOTICE_LOG_FMT(CORE,
+                     "PrimedGun gameplay_input={} player={:08X} camera={} morph={} "
+                     "input_flags={:02X} move={} visor={} gun_alpha={:.3f} holster={}",
+                     gameplay_input_active, player, camera_state, morph_state, input_flags,
+                     movement_state, visor_state, gun_alpha, holster_state);
+      s_have_logged_gameplay_input_active = true;
+      s_last_logged_gameplay_input_active = gameplay_input_active;
     }
-    NOTICE_LOG_FMT(CORE,
-                   "PrimedGun gameplay_input={} player={:08X} camera={} morph={} "
-                   "input_flags={:02X} move={} visor={} gun_alpha={:.3f} holster={}",
-                   gameplay_input_active, player, camera_state, morph_state, input_flags,
-                   movement_state, visor_state, gun_alpha, holster_state);
-    s_have_logged_gameplay_input_active = true;
-    s_last_logged_gameplay_input_active = gameplay_input_active;
   }
 
   UpdateCannonTracking(guard);
