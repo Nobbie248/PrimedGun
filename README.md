@@ -6,6 +6,8 @@ PrimedGun is a Dolphin ReduX-based build focused on improving Metroid Prime's VR
 
 ## Build - Windows
 
+Open a Visual Studio x64 Native Tools Command Prompt, then run:
+
 ```bat
 git clone --recurse-submodules https://github.com/Nobbie248/PrimedGun.git
 cd PrimedGun
@@ -18,7 +20,7 @@ The built app is written to `Binary\x64\PrimedGun.exe`.
 
 ## Build - Linux
 
-Install the usual C++/Qt/Vulkan development packages for your distro first.
+Requires GCC 12+ or Clang 15+.
 
 ```bash
 git clone --recurse-submodules https://github.com/Nobbie248/PrimedGun.git
