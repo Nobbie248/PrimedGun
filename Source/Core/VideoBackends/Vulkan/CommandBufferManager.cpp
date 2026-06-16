@@ -491,7 +491,8 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
       const double frames = static_cast<double>(std::max<u32>(s_perf_window_frames, 1));
       WARN_LOG_FMT(VIDEO,
                    "VKPERF: frames={} wall={:.2f}ms/f submit={:.2f}ms/f (n={:.1f}/f) "
-                   "fence_wait={:.2f}ms/f xr_swapchain={:.2f}ms/f uniforms={:.2f}ms/f "
+                   "fence_wait={:.2f}ms/f xr_swapchain={:.2f}ms/f xr_release={:.2f}ms/f "
+                   "overlay_upload={:.2f}ms/f uniforms={:.2f}ms/f "
                    "vtx_commit={:.2f}ms/f draw_bind={:.2f}ms/f draws={:.0f}/f "
                    "pipelines_created={}",
                    s_perf_window_frames, elapsed_us / 1000.0 / frames,
@@ -499,6 +500,8 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    perf.submit_count.exchange(0, std::memory_order_relaxed) / frames,
                    perf.fence_wait_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.xr_swapchain_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
+                   perf.xr_release_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
+                   perf.overlay_upload_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.uniform_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.vertex_commit_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,
                    perf.draw_us.exchange(0, std::memory_order_relaxed) / 1000.0 / frames,

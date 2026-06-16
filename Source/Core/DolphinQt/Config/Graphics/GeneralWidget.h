@@ -50,6 +50,7 @@ private:
   ConfigInteger* m_custom_aspect_height;
   ConfigBool* m_enable_vsync;
   ConfigBool* m_enable_fullscreen;
+  ConfigBool* m_frame_skip;
 
   // Options
   ConfigBool* m_autoadjust_window_size;

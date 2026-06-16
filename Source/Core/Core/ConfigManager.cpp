@@ -97,7 +97,7 @@ ForceProgressive = True
 EFBCopyEnable = False
 EFBCopyClearDisable = False
 ImmediateXFBEnable = True
-VISkip = False
+VISkip = True
 EFBAccessDeferInvalidation = False
 FastTextureSampling = True
 [Settings]
@@ -299,6 +299,7 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
 
   auto* hacks = game_ini->GetOrCreateSection("Video_Hacks");
   hacks->Set("EFBScaledCopy", "True");
+  hacks->Set("VISkip", "True");
 }
 
 template <typename T>

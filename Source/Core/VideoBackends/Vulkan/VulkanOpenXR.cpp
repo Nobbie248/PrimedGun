@@ -1257,6 +1257,7 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
   const std::vector<uint32_t> upload_pixels =
       ConvertPrimedGunOverlayPixelsForVkFormat(pixels.data(), pixels.size(), vk_format);
 
+  const uint64_t perf_upload_start_us = Common::Timer::NowUs();
   for (uint32_t i = 0; i < image_count; ++i)
   {
     uint32_t acquired = 0;
@@ -1295,6 +1296,8 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
       return false;
     }
   }
+  g_vulkan_context->GetPerfCounters().overlay_upload_us.fetch_add(
+      Common::Timer::NowUs() - perf_upload_start_us, std::memory_order_relaxed);
 
   laser.texture_ready = true;
   return true;
@@ -1376,6 +1379,7 @@ bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(uint32_t content_kind, uint32
   const std::vector<uint32_t> upload_pixels =
       ConvertPrimedGunOverlayPixelsForVkFormat(pixels.data(), pixels.size(), vk_format);
 
+  const uint64_t perf_upload_start_us = Common::Timer::NowUs();
   for (uint32_t i = 0; i < image_count; ++i)
   {
     uint32_t acquired = 0;
@@ -1414,6 +1418,8 @@ bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(uint32_t content_kind, uint32
       return false;
     }
   }
+  g_vulkan_context->GetPerfCounters().overlay_upload_us.fetch_add(
+      Common::Timer::NowUs() - perf_upload_start_us, std::memory_order_relaxed);
 
   overlay.content_kind = content_kind;
   overlay.generation = generation;
@@ -1696,28 +1702,6 @@ void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
   // the runtime's strictness, not of which projection path is active (SteamVR never
   // needed it).
   StateTracker::GetInstance()->EndRenderPass();
-  const bool wait_for_completion =
-      !g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
-      VR::g_openxr->IsQuestOrVirtualDesktopRuntime();
-  g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
-  StateTracker::GetInstance()->InvalidateCachedState();
-
-  XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-  XrResult result = XR_SUCCESS;
-  const uint64_t perf_release_start_us = Common::Timer::NowUs();
-  {
-    auto queue_lock = AcquireGraphicsQueueLock();
-    result = xrReleaseSwapchainImage(m_eye_swapchains[eye_index].swapchain, &release_info);
-  }
-  g_vulkan_context->GetPerfCounters().xr_swapchain_us.fetch_add(
-      Common::Timer::NowUs() - perf_release_start_us, std::memory_order_relaxed);
-  if (XR_FAILED(result))
-  {
-    WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for eye {} ({}).", eye_index,
-                 static_cast<int>(result));
-  }
-
-  m_image_acquired[eye_index] = false;
 #endif
 }
 
@@ -1732,25 +1716,6 @@ void VulkanOpenXR::ReleaseLayeredTexture()
   // Same contract as ReleaseEyeTexture: submit before release; only drain the GPU as a
   // fallback for VD/Quest-class runtimes when timeline semaphores could not be enabled.
   StateTracker::GetInstance()->EndRenderPass();
-  const bool wait_for_completion =
-      !g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
-      VR::g_openxr->IsQuestOrVirtualDesktopRuntime();
-  g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
-  StateTracker::GetInstance()->InvalidateCachedState();
-
-  XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-  XrResult result = XR_SUCCESS;
-  {
-    auto queue_lock = AcquireGraphicsQueueLock();
-    result = xrReleaseSwapchainImage(m_layered_swapchain.swapchain, &release_info);
-  }
-  if (XR_FAILED(result))
-  {
-    WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for layered swapchain ({}).",
-                 static_cast<int>(result));
-  }
-
-  m_layered_image_acquired = false;
 #endif
 }
 
@@ -1872,6 +1837,63 @@ bool VulkanOpenXR::SubmitFrame()
     StateTracker::GetInstance()->InvalidateCachedState();
 
     return true;
+  }
+#endif
+
+#if !defined(ANDROID)
+  bool desktop_has_acquired_images = m_layered_image_acquired;
+  for (bool acquired : m_image_acquired)
+    desktop_has_acquired_images |= acquired;
+
+  if (desktop_has_acquired_images)
+  {
+    StateTracker::GetInstance()->EndRenderPass();
+
+    // Submit all eye rendering once per frame before releasing OpenXR swapchain images.
+    const bool wait_for_completion =
+        !g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
+        VR::g_openxr->IsQuestOrVirtualDesktopRuntime();
+    g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
+    StateTracker::GetInstance()->InvalidateCachedState();
+
+    const uint64_t perf_release_start_us = Common::Timer::NowUs();
+    XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+
+    if (m_layered_image_acquired)
+    {
+      XrResult release_result = XR_SUCCESS;
+      {
+        auto queue_lock = AcquireGraphicsQueueLock();
+        release_result = xrReleaseSwapchainImage(m_layered_swapchain.swapchain, &release_info);
+      }
+      if (XR_FAILED(release_result))
+      {
+        WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for layered swapchain ({}).",
+                     static_cast<int>(release_result));
+      }
+      m_layered_image_acquired = false;
+    }
+
+    for (uint32_t eye = 0; eye < 2; ++eye)
+    {
+      if (!m_image_acquired[eye])
+        continue;
+
+      XrResult release_result = XR_SUCCESS;
+      {
+        auto queue_lock = AcquireGraphicsQueueLock();
+        release_result = xrReleaseSwapchainImage(m_eye_swapchains[eye].swapchain, &release_info);
+      }
+      if (XR_FAILED(release_result))
+      {
+        WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage failed for eye {} ({}).", eye,
+                     static_cast<int>(release_result));
+      }
+      m_image_acquired[eye] = false;
+    }
+
+    g_vulkan_context->GetPerfCounters().xr_release_us.fetch_add(
+        Common::Timer::NowUs() - perf_release_start_us, std::memory_order_relaxed);
   }
 #endif
 

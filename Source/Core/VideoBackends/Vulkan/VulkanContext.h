@@ -132,6 +132,8 @@ public:
     std::atomic<u64> submit_us{0};
     std::atomic<u64> fence_wait_us{0};
     std::atomic<u64> xr_swapchain_us{0};
+    std::atomic<u64> xr_release_us{0};
+    std::atomic<u64> overlay_upload_us{0};
     std::atomic<u64> uniform_us{0};
     std::atomic<u64> vertex_commit_us{0};
     std::atomic<u64> draw_us{0};

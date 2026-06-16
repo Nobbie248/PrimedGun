@@ -77,6 +77,7 @@ void GeneralWidget::CreateWidgets()
   m_enable_vsync = new ConfigBool(tr("V-Sync"), Config::GFX_VSYNC, m_game_layer);
   m_enable_fullscreen =
       new ConfigBool(tr("Start in Fullscreen"), Config::MAIN_FULLSCREEN, m_game_layer);
+  m_frame_skip = new ConfigBool(tr("Frame Skip"), Config::GFX_HACK_VI_SKIP, m_game_layer);
 
   video_layout->addWidget(new QLabel(tr("Backend:")), 0, 0);
   video_layout->addWidget(m_backend_combo, 0, 1, 1, -1);
@@ -103,6 +104,7 @@ void GeneralWidget::CreateWidgets()
          "<br><br>This will marginally increase power usage."
          "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>"));
   basic_grid->addWidget(precision_timing, 1, 0);
+  basic_grid->addWidget(m_frame_skip, 1, 1);
 
   // Other
   auto* m_options_box = new QGroupBox(tr("Other"));
