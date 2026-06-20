@@ -209,7 +209,7 @@ const Info<OpenXROpcodeReplayMode> GFX_VR_OPCODE_REPLAY{
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
-    {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::Local};
+    {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::Stage};
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},
                                                     OpenXRTrackingMode::Full6DoF};
 const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER{

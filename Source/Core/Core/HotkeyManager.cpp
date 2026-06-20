@@ -427,6 +427,7 @@ int HotkeyManager::GetIndexForGroup(int group, int id) const
 void HotkeyManager::LoadDefaults(const ControllerInterface& ciface)
 {
   EmulatedController::LoadDefaults(ciface);
+  SetDefaultDevice("OpenXR/0/OpenXR Controller");
 
   auto set_key_expression = [this](int index, const std::string& expression) {
     m_keys[FindGroupByID(index)]
@@ -505,4 +506,7 @@ void HotkeyManager::LoadDefaults(const ControllerInterface& ciface)
 
   set_key_expression(HK_SKYLANDERS_PORTAL, hotkey_string({"Ctrl", "P"}));
   set_key_expression(HK_INFINITY_BASE, hotkey_string({"Ctrl", "I"}));
+
+  // VR
+  set_key_expression(HK_VR_RESET_POSITION, "`Right Button Thumbstick`");
 }
