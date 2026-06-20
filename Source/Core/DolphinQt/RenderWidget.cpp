@@ -3,6 +3,8 @@
 
 #include "DolphinQt/RenderWidget.h"
 
+#include "Common/Version.h"
+
 #include <QApplication>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -39,7 +41,8 @@
 
 RenderWidget::RenderWidget(QWidget* parent) : QWidget(parent)
 {
-  setWindowTitle(QStringLiteral("PrimedGun"));
+  setWindowTitle(
+      QStringLiteral("PrimedGun v%1").arg(QString::fromStdString(Common::GetScmDescStr())));
   setWindowIcon(Resources::GetAppIcon());
   setWindowRole(QStringLiteral("renderer"));
   setAcceptDrops(true);
