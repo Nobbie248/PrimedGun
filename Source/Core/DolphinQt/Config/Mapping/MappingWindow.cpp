@@ -565,13 +565,6 @@ void MappingWindow::PopulateProfileSelection()
     SplitPath(filename, nullptr, &basename, nullptr);
     if (!basename.empty())
     {
-      if (m_config->GetProfileDirectoryName() == "Hotkeys" && basename == "default")
-      {
-        m_profiles_combo->addItem(QString::fromStdString(basename),
-                                  QString::fromStdString(filename));
-        continue;
-      }
-
       // i18n: "Stock" refers to input profiles included with Dolphin
       m_profiles_combo->addItem(tr("%1 (Stock)").arg(QString::fromStdString(basename)),
                                 QString::fromStdString(filename));
@@ -579,8 +572,6 @@ void MappingWindow::PopulateProfileSelection()
   }
 
   m_profiles_combo->setCurrentIndex(-1);
-  if (m_config->GetProfileDirectoryName() == "Hotkeys")
-    m_profiles_combo->setCurrentIndex(m_profiles_combo->findText(QStringLiteral("default")));
 }
 
 QWidget* MappingWindow::AddWidget(const QString& name, QWidget* widget)

@@ -22,6 +22,7 @@
 #include "Common/MathUtil.h"
 #ifdef ENABLE_VR
 #include "Common/VR/OpenXRInputState.h"
+#include "VideoCommon/VR/OpenXRManager.h"
 #endif
 
 #include "Core/Config/GraphicsSettings.h"
@@ -2893,10 +2894,8 @@ void UpdateHeightOnlyReset(const Common::VR::OpenXRInputSnapshot& snapshot,
                        snapshot.head_pose.valid && !left_in_visor_zone;
   if (pressed && !s_last_height_reset_thumbstick)
   {
-    // Height calibration intentionally changes only Prime's vertical axis.
-    // The horizontal baseline remains untouched so the play-space center is not re-zeroed sideways.
-    s_controller_base_z = snapshot.head_pose.position[1] * settings.world_scale;
-    s_translation_base_valid = true;
+    if (VR::g_openxr)
+      VR::g_openxr->RequestRecenter();
     s_height_prompt_until_frame = 0;
   }
   s_last_height_reset_thumbstick = pressed;
