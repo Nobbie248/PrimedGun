@@ -27,7 +27,8 @@ git clone --recurse-submodules https://github.com/Nobbie248/PrimedGun.git
 cd PrimedGun
 git submodule update --init --recursive
 cmake -S . -B build -G Ninja \
-  -DLINUX_LOCAL_DEV=ON
+  -DLINUX_LOCAL_DEV=ON \
+  -DUSE_SYSTEM_FMT=OFF
 cmake --build build --parallel
 ln -sfn ../../Data/Sys build/Binaries/Sys
 ```
