@@ -61,6 +61,17 @@ For Windows distribution, use the contents of `Binary\x64`. The important runtim
 - Easy cannon texture swapping tool.
 - In-headset settings menu.
 
+## Setup Notes
+
+- HMD refresh rate set to 120 Hz is recommended.
+- Meta's own OpenXR environment is not recommended; try SteamVR or VD instead.
+- Select your Metroid Prime GameCube game file.
+- Transfer your memory card into `User\GC` if you want existing saves.
+- Once in game, click the right stick to set your height.
+- Click the left thumbstick to open or close the in-headset settings menu.
+- Try to stay in the centre of your play space and face forward for the best interaction.
+- Use Save Settings after changing PrimedGun options to apply them.
+
 ## Credits
 
 - Created by Nobbie.
