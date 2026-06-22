@@ -228,6 +228,13 @@ private:
   // (XR_EXT_performance_settings). No-op unless the extension was enabled (Android/Quest only).
   void ApplyPerformanceLevelHints();
 
+  // Request a fixed HMD panel refresh rate (XR_FB_display_refresh_rate) from GFX_VR_DISPLAY_REFRESH_
+  // RATE: enumerate the runtime's supported rates and request the closest one to the configured
+  // target (or leave it alone on Auto). Records the active rate into m_native_display_period_ms.
+  // No-op unless the extension was enabled (Android/Quest). Requires a running session, so it's
+  // called from HandleSessionStateChange right after xrBeginSession.
+  void ApplyDisplayRefreshRate();
+
   // Recreate m_reference_space so its origin sits at the current head's levelled pose (play-space
   // X/Z + yaw, height left to m_home_position). Measures the head against the immutable
   // m_recenter_base_space and resets the software height home. Called on the render thread.

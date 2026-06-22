@@ -141,7 +141,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
-constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
+constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = true;  // re-enabled for hang diagnosis (debug build)
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;

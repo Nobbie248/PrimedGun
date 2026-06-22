@@ -899,6 +899,18 @@ bool OpenXRManager::PollEvents()
       ResetInputActionsState();
       return false;
 
+    case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB:
+    {
+      // The runtime changed the panel rate (our request, or a system/thermal decision). Keep the
+      // recorded display period in sync so anything reading GetNativeDisplayPeriodMs stays accurate.
+      const auto& ev = *reinterpret_cast<const XrEventDataDisplayRefreshRateChangedFB*>(&event);
+      if (ev.toDisplayRefreshRate > 0.0f)
+        m_native_display_period_ms = 1000.0 / ev.toDisplayRefreshRate;
+      INFO_LOG_FMT(OPENXR, "OpenXR: display refresh rate changed {:g} Hz → {:g} Hz.",
+                   ev.fromDisplayRefreshRate, ev.toDisplayRefreshRate);
+      break;
+    }
+
     case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
     {
       // The runtime is moving a reference space's origin — this is what the Quest "Reset View"
@@ -939,6 +951,9 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
       INFO_LOG_FMT(OPENXR, "OpenXR: Session running.");
       // Re-applied on every transition to READY (levels can reset across focus loss).
       ApplyPerformanceLevelHints();
+      // Request the configured HMD panel refresh rate now that the session is running
+      // (xrRequestDisplayRefreshRateFB requires a running session).
+      ApplyDisplayRefreshRate();
     }
     else
     {
@@ -1000,6 +1015,103 @@ void OpenXRManager::ApplyPerformanceLevelHints()
                "OpenXR: performance levels set (CPU={} [{}], GPU=SUSTAINED_HIGH [{}]).",
                cpu_boost ? "BOOST" : "SUSTAINED_HIGH", static_cast<int>(cpu_result),
                static_cast<int>(gpu_result));
+}
+
+void OpenXRManager::ApplyDisplayRefreshRate()
+{
+  // Only meaningful when XR_FB_display_refresh_rate was enabled at instance creation (the
+  // Android/Quest path). No-op everywhere else (desktop runtimes usually lack it).
+  if (m_session == XR_NULL_HANDLE ||
+      !IsExtensionEnabled(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME))
+  {
+    return;
+  }
+
+  PFN_xrEnumerateDisplayRefreshRatesFB enumerate = nullptr;
+  PFN_xrGetDisplayRefreshRateFB get_rate = nullptr;
+  PFN_xrRequestDisplayRefreshRateFB request_rate = nullptr;
+  if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrEnumerateDisplayRefreshRatesFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&enumerate))) ||
+      XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrGetDisplayRefreshRateFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&get_rate))) ||
+      XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrRequestDisplayRefreshRateFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&request_rate))) ||
+      enumerate == nullptr || get_rate == nullptr || request_rate == nullptr)
+  {
+    WARN_LOG_FMT(OPENXR,
+                 "OpenXR: XR_FB_display_refresh_rate functions not exposed by the loader.");
+    return;
+  }
+
+  // Enumerate the rates the runtime/panel actually supports (two-call idiom).
+  uint32_t count = 0;
+  if (XR_FAILED(enumerate(m_session, 0, &count, nullptr)) || count == 0)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: no supported display refresh rates reported.");
+    return;
+  }
+  std::vector<float> rates(count);
+  if (XR_FAILED(enumerate(m_session, count, &count, rates.data())))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrEnumerateDisplayRefreshRatesFB failed.");
+    return;
+  }
+
+  // Current/active rate, for logging and to seed m_native_display_period_ms even on Auto.
+  float current_rate = 0.0f;
+  get_rate(m_session, &current_rate);
+  if (current_rate > 0.0f)
+    m_native_display_period_ms = 1000.0 / current_rate;
+
+  std::string rate_list;
+  for (size_t i = 0; i < rates.size(); ++i)
+  {
+    if (i != 0)
+      rate_list += ", ";
+    rate_list += std::to_string(static_cast<int>(std::lround(rates[i])));
+  }
+
+  const int configured =
+      Config::NormalizeVRDisplayRefreshRate(Config::Get(Config::GFX_VR_DISPLAY_REFRESH_RATE));
+  if (configured == Config::GFX_VR_DISPLAY_REFRESH_RATE_AUTO)
+  {
+    INFO_LOG_FMT(OPENXR,
+                 "OpenXR: display refresh rate Auto — leaving runtime default {:g} Hz "
+                 "(supported: {}).",
+                 current_rate, rate_list);
+    return;
+  }
+
+  // Pick the supported rate closest to the configured target (exact match if available), so a
+  // request for an unsupported rate degrades to the nearest the panel actually offers.
+  const float target = static_cast<float>(configured);
+  float chosen = rates[0];
+  float best_delta = std::abs(rates[0] - target);
+  for (const float rate : rates)
+  {
+    const float delta = std::abs(rate - target);
+    if (delta < best_delta)
+    {
+      best_delta = delta;
+      chosen = rate;
+    }
+  }
+
+  const XrResult result = request_rate(m_session, chosen);
+  if (XR_SUCCEEDED(result))
+  {
+    m_native_display_period_ms = 1000.0 / chosen;
+    INFO_LOG_FMT(OPENXR,
+                 "OpenXR: requested display refresh rate {:g} Hz (target {} Hz; was {:g} Hz; "
+                 "supported: {}).",
+                 chosen, configured, current_rate, rate_list);
+  }
+  else
+  {
+    WARN_LOG_FMT(OPENXR,
+                 "OpenXR: xrRequestDisplayRefreshRateFB({:g}) failed [{}] (supported: {}).",
+                 chosen, static_cast<int>(result), rate_list);
+  }
 }
 
 bool OpenXRManager::RegisterCurrentAndroidThread(AndroidThreadType thread_type,

@@ -285,6 +285,19 @@ const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
 const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
                                        GFX_VR_FOVEATION_LEVEL_OFF};
 #endif
+#if defined(ANDROID)
+// Standalone Quest: request a fixed HMD panel refresh rate via XR_FB_display_refresh_rate. This is
+// the *hardware* refresh (independent of the emulated 60 fps game speed and of the ~34 fps the app
+// actually renders -- the compositor reprojects). The workload is GPU/fragment bound, so the lowest
+// supported rate (72 Hz) frees the most compositor/GPU/thermal headroom for the eye render. Applied
+// on the OpenXR render thread when the session goes READY (OpenXRManager::ApplyDisplayRefreshRate).
+const Info<int> GFX_VR_DISPLAY_REFRESH_RATE{{System::GFX, "VR", "DisplayRefreshRate"},
+                                            GFX_VR_DISPLAY_REFRESH_RATE_72};
+#else
+// Desktop/PCVR: leave the runtime's chosen rate alone (the extension is usually absent anyway).
+const Info<int> GFX_VR_DISPLAY_REFRESH_RATE{{System::GFX, "VR", "DisplayRefreshRate"},
+                                            GFX_VR_DISPLAY_REFRESH_RATE_AUTO};
+#endif
 // Graphics.Hacks
 
 const Info<bool> GFX_HACK_EFB_ACCESS_ENABLE{{System::GFX, "Hacks", "EFBAccessEnable"}, false};

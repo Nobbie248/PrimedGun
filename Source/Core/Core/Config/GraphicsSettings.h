@@ -227,6 +227,7 @@ extern const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW;
 extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
 extern const Info<int> GFX_VR_FOVEATION_LEVEL;
+extern const Info<int> GFX_VR_DISPLAY_REFRESH_RATE;
 
 // Fixed Foveated Rendering level (XR_FB_foveation). Off/Low/Medium/High map to the FB foveation
 // levels; higher levels reclaim more GPU fill at the cost of more peripheral blur.
@@ -234,6 +235,13 @@ static constexpr int GFX_VR_FOVEATION_LEVEL_OFF = 0;
 static constexpr int GFX_VR_FOVEATION_LEVEL_LOW = 1;
 static constexpr int GFX_VR_FOVEATION_LEVEL_MEDIUM = 2;
 static constexpr int GFX_VR_FOVEATION_LEVEL_HIGH = 3;
+
+// HMD panel refresh rate requested via XR_FB_display_refresh_rate. Auto = leave the runtime's
+// choice. The others are the rates a Quest 3 panel supports (60 Hz is NOT a panel rate).
+static constexpr int GFX_VR_DISPLAY_REFRESH_RATE_AUTO = 0;
+static constexpr int GFX_VR_DISPLAY_REFRESH_RATE_72 = 72;
+static constexpr int GFX_VR_DISPLAY_REFRESH_RATE_90 = 90;
+static constexpr int GFX_VR_DISPLAY_REFRESH_RATE_120 = 120;
 
 static constexpr float GFX_VR_SCREEN_DISTANCE_MIN = 0.5f;
 static constexpr float GFX_VR_SCREEN_DISTANCE_MAX = 10.0f;
@@ -293,6 +301,19 @@ inline int NormalizeVROpcodeReplayTargetRefreshRate(int refresh_rate)
     return refresh_rate;
   default:
     return GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE_90;
+  }
+}
+
+inline int NormalizeVRDisplayRefreshRate(int refresh_rate)
+{
+  switch (refresh_rate)
+  {
+  case GFX_VR_DISPLAY_REFRESH_RATE_72:
+  case GFX_VR_DISPLAY_REFRESH_RATE_90:
+  case GFX_VR_DISPLAY_REFRESH_RATE_120:
+    return refresh_rate;
+  default:
+    return GFX_VR_DISPLAY_REFRESH_RATE_AUTO;
   }
 }
 
