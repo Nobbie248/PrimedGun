@@ -146,12 +146,19 @@ private:
     AddInput(new DigitalInput(this, hand, DigitalControl::Trigger));
     AddInput(new DigitalInput(this, hand, DigitalControl::Squeeze));
     AddInput(new DigitalInput(this, hand, DigitalControl::Thumbstick));
+    AddInput(new DigitalInput(this, hand, DigitalControl::Trackpad));
+    AddInput(new DigitalInput(this, hand, DigitalControl::TrackpadTouch));
     AddInput(new AnalogInput(this, hand, AnalogControl::Trigger));
     AddInput(new AnalogInput(this, hand, AnalogControl::Squeeze));
+    AddInput(new AnalogInput(this, hand, AnalogControl::TrackpadForce));
     AddInput(new AxisInput(this, hand, AxisControl::ThumbstickX, false));
     AddInput(new AxisInput(this, hand, AxisControl::ThumbstickX, true));
     AddInput(new AxisInput(this, hand, AxisControl::ThumbstickY, false));
     AddInput(new AxisInput(this, hand, AxisControl::ThumbstickY, true));
+    AddInput(new AxisInput(this, hand, AxisControl::TrackpadX, false));
+    AddInput(new AxisInput(this, hand, AxisControl::TrackpadX, true));
+    AddInput(new AxisInput(this, hand, AxisControl::TrackpadY, false));
+    AddInput(new AxisInput(this, hand, AxisControl::TrackpadY, true));
     AddMotionInputs(hand);
   }
 
@@ -163,18 +170,23 @@ private:
     Trigger,
     Squeeze,
     Thumbstick,
+    Trackpad,
+    TrackpadTouch,
   };
 
   enum class AnalogControl
   {
     Trigger,
     Squeeze,
+    TrackpadForce,
   };
 
   enum class AxisControl
   {
     ThumbstickX,
     ThumbstickY,
+    TrackpadX,
+    TrackpadY,
   };
 
   enum class MotionControl
@@ -218,6 +230,10 @@ private:
         return prefix + " Button Squeeze";
       case DigitalControl::Thumbstick:
         return prefix + " Button Thumbstick";
+      case DigitalControl::Trackpad:
+        return prefix + " Button Trackpad Press";
+      case DigitalControl::TrackpadTouch:
+        return prefix + " Button Trackpad Touch";
       }
 
       return "";
@@ -251,6 +267,10 @@ private:
         return state.squeeze_button ? 1.0 : 0.0;
       case DigitalControl::Thumbstick:
         return state.thumbstick_button ? 1.0 : 0.0;
+      case DigitalControl::Trackpad:
+        return state.trackpad_button ? 1.0 : 0.0;
+      case DigitalControl::TrackpadTouch:
+        return state.trackpad_touch ? 1.0 : 0.0;
       }
 
       return 0.0;
@@ -279,6 +299,8 @@ private:
         return prefix + " Trigger";
       case AnalogControl::Squeeze:
         return prefix + " Squeeze";
+      case AnalogControl::TrackpadForce:
+        return prefix + " Trackpad Force";
       }
 
       return "";
@@ -300,6 +322,8 @@ private:
         return state.trigger_value;
       case AnalogControl::Squeeze:
         return state.squeeze_value;
+      case AnalogControl::TrackpadForce:
+        return state.trackpad_force;
       }
 
       return 0.0;
@@ -322,8 +346,12 @@ private:
     std::string GetName() const override
     {
       const std::string prefix = m_device.GetHandPrefix(m_hand);
-      const char axis_char = m_axis == AxisControl::ThumbstickX ? 'X' : 'Y';
-      return prefix + " Thumbstick " + axis_char + (m_positive ? '+' : '-');
+      const bool trackpad =
+          m_axis == AxisControl::TrackpadX || m_axis == AxisControl::TrackpadY;
+      const char axis_char =
+          (m_axis == AxisControl::ThumbstickX || m_axis == AxisControl::TrackpadX) ? 'X' : 'Y';
+      return prefix + (trackpad ? " Trackpad " : " Thumbstick ") + axis_char +
+             (m_positive ? '+' : '-');
     }
 
     ControlState GetState() const override
@@ -332,8 +360,22 @@ private:
       if (!state.connected)
         return 0.0;
 
-      const float value =
-          m_axis == AxisControl::ThumbstickX ? state.thumbstick_x : state.thumbstick_y;
+      float value = 0.0f;
+      switch (m_axis)
+      {
+      case AxisControl::ThumbstickX:
+        value = state.thumbstick_x;
+        break;
+      case AxisControl::ThumbstickY:
+        value = state.thumbstick_y;
+        break;
+      case AxisControl::TrackpadX:
+        value = state.trackpad_x;
+        break;
+      case AxisControl::TrackpadY:
+        value = state.trackpad_y;
+        break;
+      }
       return m_positive ? std::max<float>(0.0f, value) : std::max<float>(0.0f, -value);
     }
 

@@ -383,6 +383,16 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_thumbstick_y, "thumbstick_y", "Thumbstick Y",
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
+      !create_action(&m_action_trackpad_click, "trackpad_click", "Trackpad Click",
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_trackpad_touch, "trackpad_touch", "Trackpad Touch",
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_trackpad_x, "trackpad_x", "Trackpad X",
+                     XR_ACTION_TYPE_FLOAT_INPUT) ||
+      !create_action(&m_action_trackpad_y, "trackpad_y", "Trackpad Y",
+                     XR_ACTION_TYPE_FLOAT_INPUT) ||
+      !create_action(&m_action_trackpad_force, "trackpad_force", "Trackpad Force",
+                     XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_aim_pose, "aim_pose", "Aim Pose", XR_ACTION_TYPE_POSE_INPUT) ||
       !create_action(&m_action_grip_pose, "grip_pose", "Grip Pose", XR_ACTION_TYPE_POSE_INPUT) ||
       !create_action(&m_action_haptic, "haptic", "Haptic Output",
@@ -454,6 +464,10 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_thumbstick_click, "/user/hand/left/input/thumbstick/click"},
                        {m_action_thumbstick_x, "/user/hand/left/input/thumbstick/x"},
                        {m_action_thumbstick_y, "/user/hand/left/input/thumbstick/y"},
+                       {m_action_trackpad_touch, "/user/hand/left/input/trackpad/touch"},
+                       {m_action_trackpad_x, "/user/hand/left/input/trackpad/x"},
+                       {m_action_trackpad_y, "/user/hand/left/input/trackpad/y"},
+                       {m_action_trackpad_force, "/user/hand/left/input/trackpad/force"},
                        {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/left/input/squeeze/value"},
                        {m_action_aim_pose, "/user/hand/left/input/aim/pose"},
@@ -463,6 +477,10 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_thumbstick_click, "/user/hand/right/input/thumbstick/click"},
                        {m_action_thumbstick_x, "/user/hand/right/input/thumbstick/x"},
                        {m_action_thumbstick_y, "/user/hand/right/input/thumbstick/y"},
+                       {m_action_trackpad_touch, "/user/hand/right/input/trackpad/touch"},
+                       {m_action_trackpad_x, "/user/hand/right/input/trackpad/x"},
+                       {m_action_trackpad_y, "/user/hand/right/input/trackpad/y"},
+                       {m_action_trackpad_force, "/user/hand/right/input/trackpad/force"},
                        {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/right/input/squeeze/value"},
                        {m_action_aim_pose, "/user/hand/right/input/aim/pose"},
@@ -520,17 +538,19 @@ bool OpenXRManager::InitializeInputActions()
   suggest_bindings("/interaction_profiles/htc/vive_controller",
                    {
                        {m_action_menu_click, "/user/hand/left/input/menu/click"},
-                       {m_action_thumbstick_click, "/user/hand/left/input/trackpad/click"},
-                       {m_action_thumbstick_x, "/user/hand/left/input/trackpad/x"},
-                       {m_action_thumbstick_y, "/user/hand/left/input/trackpad/y"},
+                       {m_action_trackpad_click, "/user/hand/left/input/trackpad/click"},
+                       {m_action_trackpad_touch, "/user/hand/left/input/trackpad/touch"},
+                       {m_action_trackpad_x, "/user/hand/left/input/trackpad/x"},
+                       {m_action_trackpad_y, "/user/hand/left/input/trackpad/y"},
                        {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
                        {m_action_squeeze_click, "/user/hand/left/input/squeeze/click"},
                        {m_action_aim_pose, "/user/hand/left/input/aim/pose"},
                        {m_action_grip_pose, "/user/hand/left/input/grip/pose"},
                        {m_action_menu_click, "/user/hand/right/input/menu/click"},
-                       {m_action_thumbstick_click, "/user/hand/right/input/trackpad/click"},
-                       {m_action_thumbstick_x, "/user/hand/right/input/trackpad/x"},
-                       {m_action_thumbstick_y, "/user/hand/right/input/trackpad/y"},
+                       {m_action_trackpad_click, "/user/hand/right/input/trackpad/click"},
+                       {m_action_trackpad_touch, "/user/hand/right/input/trackpad/touch"},
+                       {m_action_trackpad_x, "/user/hand/right/input/trackpad/x"},
+                       {m_action_trackpad_y, "/user/hand/right/input/trackpad/y"},
                        {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
                        {m_action_squeeze_click, "/user/hand/right/input/squeeze/click"},
                        {m_action_aim_pose, "/user/hand/right/input/aim/pose"},
@@ -610,6 +630,11 @@ void OpenXRManager::DestroyInputActions()
   m_action_squeeze_value = XR_NULL_HANDLE;
   m_action_thumbstick_x = XR_NULL_HANDLE;
   m_action_thumbstick_y = XR_NULL_HANDLE;
+  m_action_trackpad_click = XR_NULL_HANDLE;
+  m_action_trackpad_touch = XR_NULL_HANDLE;
+  m_action_trackpad_x = XR_NULL_HANDLE;
+  m_action_trackpad_y = XR_NULL_HANDLE;
+  m_action_trackpad_force = XR_NULL_HANDLE;
   m_action_aim_pose = XR_NULL_HANDLE;
   m_action_grip_pose = XR_NULL_HANDLE;
   m_action_haptic = XR_NULL_HANDLE;
@@ -762,6 +787,8 @@ void OpenXRManager::UpdateInputActions()
     controller.secondary_button = get_boolean(m_action_secondary_click);
     controller.menu_button = get_boolean(m_action_menu_click);
     controller.thumbstick_button = get_boolean(m_action_thumbstick_click);
+    const bool trackpad_click = get_boolean(m_action_trackpad_click);
+    controller.trackpad_touch = get_boolean(m_action_trackpad_touch);
 
     const bool trigger_click = get_boolean(m_action_trigger_click);
     const bool squeeze_click = get_boolean(m_action_squeeze_click);
@@ -770,6 +797,10 @@ void OpenXRManager::UpdateInputActions()
     controller.squeeze_value = std::clamp(get_float(m_action_squeeze_value), 0.0f, 1.0f);
     controller.thumbstick_x = std::clamp(get_float(m_action_thumbstick_x), -1.0f, 1.0f);
     controller.thumbstick_y = std::clamp(get_float(m_action_thumbstick_y), -1.0f, 1.0f);
+    controller.trackpad_x = std::clamp(get_float(m_action_trackpad_x), -1.0f, 1.0f);
+    controller.trackpad_y = std::clamp(get_float(m_action_trackpad_y), -1.0f, 1.0f);
+    controller.trackpad_force = std::clamp(get_float(m_action_trackpad_force), 0.0f, 1.0f);
+    controller.trackpad_button = trackpad_click || controller.trackpad_force > 0.5f;
 
     locate_space_state(m_aim_spaces[hand], &controller.aim_pose, nullptr);
     locate_space_state(m_grip_spaces[hand], &controller.grip_pose, &controller.grip_velocity);
