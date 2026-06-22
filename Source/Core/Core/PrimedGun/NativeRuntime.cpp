@@ -141,7 +141,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
-constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
+constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false; 
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;
@@ -2774,7 +2774,11 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
 
   const auto& left = snapshot.controllers[0];
   const auto& right = snapshot.controllers[1];
-  const bool menu_toggle = left.connected && (left.thumbstick_button || left.menu_button);
+  // Toggle the VR menu with the dedicated left menu (☰) button only. The left thumbstick click
+  // (L3) was intentionally removed: the left stick is the movement stick, so pressing it in to move
+  // (common in combat) clicked L3 and silently opened the menu, which clears the fire button in
+  // GCPadEmu — "can move but can't shoot". The ☰ button can't be hit while moving.
+  const bool menu_toggle = left.connected && left.menu_button;
   if (menu_toggle && !s_last_vr_menu_thumbstick)
   {
     s_vr_menu_visible = !s_vr_menu_visible;

@@ -533,7 +533,10 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
   *pad = {};
   pad->isConnected = true;
 
-  const bool left_vr_menu_button = left.connected && (left.thumbstick_button || left.menu_button);
+  // Mirrors the VR menu gesture in NativeRuntime (left ☰ button only). The left thumbstick click
+  // (L3) was removed from the menu binding because the left stick is the movement stick — an
+  // accidental L3 while moving opened the menu and suppressed fire below.
+  const bool left_vr_menu_button = left.connected && left.menu_button;
   const bool suppress_left_stick = false;
 
   const bool gameplay = PrimedGun::IsGameplayInputActive();
