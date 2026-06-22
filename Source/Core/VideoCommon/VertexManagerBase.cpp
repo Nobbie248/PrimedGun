@@ -1475,8 +1475,14 @@ void VertexManagerBase::Flush()
           // VR Draw Debug Logging: log every draw call's projection, viewport, scissor, and
           // shader hashes so we can identify how specific visual elements (e.g. cinematic bars)
           // are drawn.
-          if (hunter.IsDebugLogging()) [[unlikely]]
+          if (hunter.IsDebugLogging() || g_ActiveConfig.vr_draw_debug_logging) [[unlikely]]
           {
+            // Classified Metroid element layer for this draw (when a profile is active), so the
+            // log directly names what each 2D element is bucketed as (e.g. a double-vision overlay
+            // showing up as "Screen Overlay" -> fullscreen_mono).
+            const std::string_view layer_name =
+                element_draw ? MetroidElementLayerToDisplayName(element_draw->profile_layer) :
+                               std::string_view("-");
             const auto& proj = xfmem.projection;
             const auto& vp = xfmem.viewport;
             const auto& scTL = bpmem.scissorTL;
@@ -1501,11 +1507,12 @@ void VertexManagerBase::Flush()
                            "VR_DRAW #{}: ORTHO l={:.1f} r={:.1f} t={:.1f} b={:.1f} n={:.1f} "
                            "f={:.1f} | VP({:.0f},{:.0f} {:.0f}x{:.0f}) | SC({},{} {},{})"
                            " | VS={:08x} PS={:08x} GS={:08x} | idx={} col={} alpha={} zt={} "
-                           "z={} zf={} | layer_ctr={} layer_ovr={} | skip={}",
+                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | skip={}",
                            m_draw_counter, left, right, top, bottom, znear, zfar, vp.xOrig,
                            vp.yOrig, vp.wd, vp.ht, scTL.x, scTL.y, scBR.x, scBR.y, vs_hash,
                            ps_hash, gs_hash, nidx, color_update, alpha_update, z_test, z_update,
-                           bpmem.zmode.func, ortho_layer_counter, ortho_layer_override, hunter_skip);
+                           bpmem.zmode.func, ortho_layer_counter, ortho_layer_override, layer_name,
+                           hunter_skip);
             }
             else
             {
@@ -1518,11 +1525,11 @@ void VertexManagerBase::Flush()
                            "VR_DRAW #{}: PERSP hfov={:.2f} vfov={:.2f} n={:.2f} f={:.2f}"
                            " | VP({:.0f},{:.0f} {:.0f}x{:.0f}) | SC({},{} {},{})"
                            " | VS={:08x} PS={:08x} GS={:08x} | idx={} col={} alpha={} zt={} "
-                           "z={} zf={} | layer_ctr={} layer_ovr={} | skip={}",
+                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | skip={}",
                            m_draw_counter, hfov, vfov, n, f, vp.xOrig, vp.yOrig, vp.wd, vp.ht,
                            scTL.x, scTL.y, scBR.x, scBR.y, vs_hash, ps_hash, gs_hash, nidx,
                            color_update, alpha_update, z_test, z_update, bpmem.zmode.func,
-                           ortho_layer_counter, ortho_layer_override, hunter_skip);
+                           ortho_layer_counter, ortho_layer_override, layer_name, hunter_skip);
             }
           }
         }

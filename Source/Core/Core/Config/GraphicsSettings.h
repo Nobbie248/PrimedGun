@@ -228,6 +228,7 @@ extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
 extern const Info<int> GFX_VR_FOVEATION_LEVEL;
 extern const Info<int> GFX_VR_DISPLAY_REFRESH_RATE;
+extern const Info<bool> GFX_VR_DRAW_DEBUG_LOGGING;
 
 // Fixed Foveated Rendering level (XR_FB_foveation). Off/Low/Medium/High map to the FB foveation
 // levels; higher levels reclaim more GPU fill at the cost of more peripheral blur.

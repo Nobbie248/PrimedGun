@@ -369,6 +369,7 @@ struct VideoConfig final
   int vr_opcode_replay_target_refresh_rate = -1;
   bool vr_use_openxr_play_space_center = false;
   bool vr_auto_layer_spread = true;
+  bool vr_draw_debug_logging = false;  // Per-draw VR diagnostic logging (default off; very verbose)
   bool vr_remove_bars = true;       // Expand scissor/viewport to remove cinematic letterbox bars
   bool vr_ortho_scissor_fix = true;  // Expand scissor for orthographic VR draws
   // Metroid Prime visor fix bundle: layered palette conversion + thermal source

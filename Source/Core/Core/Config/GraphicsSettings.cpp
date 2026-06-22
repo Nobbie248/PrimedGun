@@ -298,6 +298,13 @@ const Info<int> GFX_VR_DISPLAY_REFRESH_RATE{{System::GFX, "VR", "DisplayRefreshR
 const Info<int> GFX_VR_DISPLAY_REFRESH_RATE{{System::GFX, "VR", "DisplayRefreshRate"},
                                             GFX_VR_DISPLAY_REFRESH_RATE_AUTO};
 #endif
+// Diagnostic only (default off everywhere): when true, every VR draw call logs its projection
+// metrics, viewport/scissor, shader hashes, and classified Metroid element layer under the VIDEO
+// log category (VertexManagerBase). Lets the standalone Quest build surface the per-draw signatures
+// that the desktop-only ShaderHunter widget would otherwise be needed for -- e.g. to identify which
+// draw a mis-stereo'd 2D element (double-vision area text) actually is. Very verbose; enable briefly
+// via [VR] DrawDebugLogging=True in GFX.ini, reproduce, then turn back off.
+const Info<bool> GFX_VR_DRAW_DEBUG_LOGGING{{System::GFX, "VR", "DrawDebugLogging"}, false};
 // Graphics.Hacks
 
 const Info<bool> GFX_HACK_EFB_ACCESS_ENABLE{{System::GFX, "Hacks", "EFBAccessEnable"}, false};

@@ -222,6 +222,7 @@ void VideoConfig::Refresh()
     vr_reference_space_mode = OpenXRReferenceSpaceMode::Stage;
   }
   vr_auto_layer_spread = Config::Get(Config::GFX_VR_AUTO_LAYER_SPREAD);
+  vr_draw_debug_logging = Config::Get(Config::GFX_VR_DRAW_DEBUG_LOGGING);
   vr_remove_bars = Config::Get(Config::GFX_VR_REMOVE_BARS);
   vr_ortho_scissor_fix = Config::Get(Config::GFX_VR_ORTHO_SCISSOR_FIX);
   vr_metroid_visor_fix = Config::Get(Config::GFX_VR_METROID_VISOR_FIX);
