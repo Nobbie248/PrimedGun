@@ -78,6 +78,8 @@ For Windows distribution, use the contents of `Binary\x64`. The important runtim
 
 PrimedGun sets up the recommended controls automatically, but you can disable parts of that setup from the Controller tab. Turn off auto controller bindings, visor gesture input, or PrimedGun grip inputs there if you want to bind those controls manually.
 
+By default, PrimedGun maps GameCube `Z` to the map and GameCube `Y` to missiles.
+
 To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then choose Configure. Select `OpenXR Controller` at the top of the mapping window. Right-click any input you want to change, choose Clear, then assign the new input. When finished, name the profile and save it.
 
 ## Credits

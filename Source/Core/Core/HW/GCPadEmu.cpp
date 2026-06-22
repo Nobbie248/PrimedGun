@@ -522,6 +522,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
     std::swap(game_left.trigger_value, game_right.trigger_value);
     std::swap(game_left.squeeze_button, game_right.squeeze_button);
     std::swap(game_left.squeeze_value, game_right.squeeze_value);
+    std::swap(game_left.trackpad_button, game_right.trackpad_button);
   }
 
   if (overlay.menu_visible)
@@ -623,7 +624,10 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
       pad->button |= PAD_BUTTON_X;
     if (game_left.secondary_button && !left_vr_menu_button && !weapon_modifier)
       pad->button |= PAD_BUTTON_START;
-    if (overlay.primegun_grip_inputs_enabled && game_left.squeeze_button)
+    const bool left_grip_action = overlay.primegun_grip_inputs_use_trackpad ?
+                                      game_left.trackpad_button :
+                                      game_left.squeeze_button;
+    if (overlay.primegun_grip_inputs_enabled && left_grip_action)
       pad->button |= PAD_TRIGGER_Z;
     if (game_left.trigger_button)
     {
@@ -638,7 +642,10 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
       pad->button |= PAD_BUTTON_A;
     if (!overlay.use_right_hand && game_right.secondary_button)
       pad->button |= PAD_BUTTON_START;
-    if (overlay.primegun_grip_inputs_enabled && game_right.squeeze_button)
+    const bool right_grip_action = overlay.primegun_grip_inputs_use_trackpad ?
+                                       game_right.trackpad_button :
+                                       game_right.squeeze_button;
+    if (overlay.primegun_grip_inputs_enabled && right_grip_action)
       pad->button |= PAD_BUTTON_Y;
     if (!weapon_modifier && look_stick.connected && look_stick.thumbstick_y > stick_button_threshold)
       pad->button |= PAD_BUTTON_B;

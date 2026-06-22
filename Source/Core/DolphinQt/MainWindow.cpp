@@ -1464,6 +1464,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
                        runtime.primegun_grip_inputs_enabled)
             .toBool();
+    runtime.primegun_grip_inputs_use_trackpad =
+        settings.value(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
+                       runtime.primegun_grip_inputs_use_trackpad)
+            .toBool();
     runtime.gun_targeting_enabled =
         settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
@@ -1562,6 +1566,8 @@ void MainWindow::ConnectStack()
     settings.setValue(QStringLiteral("primegun/trigger_threshold"), runtime.trigger_threshold);
     settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
                       runtime.primegun_grip_inputs_enabled);
+    settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
+                      runtime.primegun_grip_inputs_use_trackpad);
     settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
@@ -1854,6 +1860,10 @@ void MainWindow::ConnectStack()
       new QCheckBox(tr("Use PrimedGun grip inputs"), game_tab);
   primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
   controller_layout->addWidget(primegun_grip_inputs_enabled);
+  auto* primegun_grip_inputs_use_trackpad =
+      new QCheckBox(tr("Use touchpad press for PrimedGun grip inputs (Index users)"), game_tab);
+  primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
+  controller_layout->addWidget(primegun_grip_inputs_use_trackpad);
 
   auto float_rows = std::make_shared<std::vector<std::pair<QDoubleSpinBox*, QSlider*>>>();
   const auto add_float_row = [this, game_tab, apply_runtime, float_rows](
@@ -2453,6 +2463,8 @@ void MainWindow::ConnectStack()
     const QSignalBlocker vr_overlays_enabled_blocker{vr_overlays_enabled};
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
     const QSignalBlocker primegun_grip_inputs_enabled_blocker{primegun_grip_inputs_enabled};
+    const QSignalBlocker primegun_grip_inputs_use_trackpad_blocker{
+        primegun_grip_inputs_use_trackpad};
     const QSignalBlocker movement_enabled_blocker{movement_enabled};
     const QSignalBlocker left_stick_blocker{left_stick};
     const QSignalBlocker right_stick_blocker{right_stick};
@@ -2485,6 +2497,7 @@ void MainWindow::ConnectStack()
     vr_overlays_enabled->setChecked(runtime->vr_overlays_enabled);
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
     primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
+    primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
     movement_enabled->setChecked(runtime->directional_movement_enabled);
     left_stick->setChecked(!runtime->directional_movement_use_right_stick);
     right_stick->setChecked(runtime->directional_movement_use_right_stick);
@@ -2526,6 +2539,7 @@ void MainWindow::ConnectStack()
     runtime->vr_overlays_enabled = true;
     runtime->xr_dpad_enabled = true;
     runtime->primegun_grip_inputs_enabled = true;
+    runtime->primegun_grip_inputs_use_trackpad = false;
     runtime->directional_movement_enabled = true;
     runtime->directional_movement_use_right_stick = false;
     runtime->directional_movement_use_hmd_direction = false;
@@ -2575,6 +2589,11 @@ void MainWindow::ConnectStack()
   connect(primegun_grip_inputs_enabled, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
     runtime->primegun_grip_inputs_enabled = checked;
+    apply_runtime();
+  });
+  connect(primegun_grip_inputs_use_trackpad, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->primegun_grip_inputs_use_trackpad = checked;
     apply_runtime();
   });
   connect(movement_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {

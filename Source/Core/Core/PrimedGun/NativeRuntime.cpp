@@ -2679,7 +2679,7 @@ u32 VrMenuItemCountForTab(u32 tab)
   case 1:
     return 7;
   case 2:
-    return 10;
+    return 11;
   case 3:
     return 9;
   case 4:
@@ -2700,7 +2700,7 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
   case 1:
     return index <= 5;
   case 2:
-    return index == 2 || index == 6 || index == 7 || index == 8;
+    return index == 2 || index == 7 || index == 8 || index == 9;
   case 3:
     return index >= 3 && index <= 7;
   default:
@@ -2807,6 +2807,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->require_trigger = false;
   settings->trigger_threshold = 0.5f;
   settings->primegun_grip_inputs_enabled = true;
+  settings->primegun_grip_inputs_use_trackpad = false;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -2887,15 +2888,15 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->trigger_threshold =
           std::clamp(settings->trigger_threshold + sign * 0.05f, 0.0f, 1.0f);
       break;
-    case 6:
+    case 7:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 7:
+    case 8:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 8:
+    case 9:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -2985,10 +2986,12 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (s_vr_menu_selected_index == 3)
       settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
     else if (s_vr_menu_selected_index == 4)
-      settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
+      settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
     else if (s_vr_menu_selected_index == 5)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (s_vr_menu_selected_index == 9)
+    else if (s_vr_menu_selected_index == 6)
+      settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
+    else if (s_vr_menu_selected_index == 10)
       ResetControllerSettings(settings);
     return;
   }
@@ -3080,6 +3083,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.require_trigger = settings.require_trigger;
   overlay.trigger_threshold = settings.trigger_threshold;
   overlay.primegun_grip_inputs_enabled = settings.primegun_grip_inputs_enabled;
+  overlay.primegun_grip_inputs_use_trackpad = settings.primegun_grip_inputs_use_trackpad;
   overlay.gun_targeting_enabled = settings.gun_targeting_enabled;
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
