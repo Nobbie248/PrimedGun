@@ -52,6 +52,8 @@ android {
 
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
         buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
+        // This is the Quest-targeted APK; QuestVrSettings gates VR behaviour on this.
+        buildConfigField("boolean", "IS_QUEST", "true")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
