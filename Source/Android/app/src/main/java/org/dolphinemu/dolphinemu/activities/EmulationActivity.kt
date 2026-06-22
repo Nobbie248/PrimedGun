@@ -4,6 +4,7 @@ package org.dolphinemu.dolphinemu.activities
 
 import android.content.DialogInterface
 import android.content.Intent
+import org.dolphinemu.dolphinemu.BuildConfig
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
@@ -1114,7 +1115,26 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             val launcher = Intent(activity, EmulationActivity::class.java)
             launcher.putExtra(EXTRA_SELECTED_GAMES, filePaths)
             launcher.putExtra(EXTRA_RIIVOLUTION, riivolution)
-            activity.startActivity(launcher)
+            startEmulationActivity(activity, launcher)
+        }
+
+        // Quest 2D-panel -> immersive handoff, this is required for Quest 3 Navigator UI (HorizonOS v85+). The
+        // package is declares a hybrid VR app (oculus.software.vr.app.hybrid in the manifest) and
+        // EmulationActivity carries the VR + IMMERSIVE_HMD categories, so firing an explicit intent
+        // at it in a fresh task and then tearing down the 2D panel drops the headset into immersive
+        // mode. (No setLaunchDisplayId / baseContext gymnastics needed once the hybrid flag is set.)
+        private fun startEmulationActivity(activity: FragmentActivity, launcher: Intent) {
+            if (BuildConfig.IS_QUEST) {
+                launcher.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK
+                )
+                activity.startActivity(launcher)
+                // Remove the 2D panel + its task so the immersive activity owns the headset alone.
+                activity.finishAndRemoveTask()
+            } else {
+                activity.startActivity(launcher)
+            }
         }
 
         private fun performLaunchChecks(activity: FragmentActivity, fromIntent: Boolean, continueCallback: Runnable) {
@@ -1167,7 +1187,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             ignoreLaunchRequests = true
             val launcher = Intent(activity, EmulationActivity::class.java)
             launcher.putExtra(EXTRA_SYSTEM_MENU, true)
-            activity.startActivity(launcher)
+            startEmulationActivity(activity, launcher)
         }
 
         @JvmStatic

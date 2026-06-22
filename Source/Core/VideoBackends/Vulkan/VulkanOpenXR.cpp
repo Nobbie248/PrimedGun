@@ -39,6 +39,8 @@
 
 #if defined(ANDROID)
 #include <android/log.h>
+
+#include "jni/AndroidCommon/IDCache.h"
 #endif
 
 namespace Vulkan
@@ -47,6 +49,90 @@ std::unique_ptr<VulkanOpenXR> g_openxr_vk;
 
 namespace
 {
+#if defined(ANDROID)
+// The JavaVM + application Context captured for OpenXR Android bootstrapping. Both the loader
+// init (xrInitializeLoaderKHR) and instance creation (XR_KHR_android_create_instance) need
+// them. The context is held as a global ref so it stays valid across call frames.
+JavaVM* s_android_vm = nullptr;
+jobject s_android_context = nullptr;
+
+// Android requires xrInitializeLoaderKHR (with the JavaVM + an application Context) to be
+// called before ANY other OpenXR function, so the loader can locate the system runtime.
+// Without it the loader logs "xrInitializeLoaderKHR was not successfully called" and every
+// xrEnumerate*/xrCreateInstance call fails — which makes Dolphin fall back to rendering
+// stereo to the flat Android surface instead of entering immersive VR. Runs once per process.
+void EnsureAndroidOpenXRLoaderInitialized()
+{
+  static bool s_initialized = false;
+  if (s_initialized)
+    return;
+
+  JNIEnv* env = IDCache::GetEnvForThread();
+  if (!env)
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: no JNIEnv available for Android loader init.");
+    return;
+  }
+
+  // Meta's runtime needs the REAL immersive Activity (EmulationActivity), NOT the Application
+  // context. Passing the Application makes xrCreateSession report "Activity is not yet in the
+  // ready state" and leaves the session stuck at XR_SESSION_STATE_IDLE (rendering falls back to
+  // the flat 2D surface). Dolphin tracks the activity via NativeLibrary.getEmulationActivity().
+  if (jclass native_library = IDCache::GetNativeLibraryClass())
+  {
+    if (jmethodID get_activity = env->GetStaticMethodID(
+            native_library, "getEmulationActivity",
+            "()Lorg/dolphinemu/dolphinemu/activities/EmulationActivity;"))
+    {
+      jobject local_activity = env->CallStaticObjectMethod(native_library, get_activity);
+      if (local_activity)
+        s_android_context = env->NewGlobalRef(local_activity);
+    }
+  }
+  if (env->ExceptionCheck())
+    env->ExceptionClear();
+
+  if (s_android_context == nullptr)
+  {
+    // EmulationActivity not registered yet; leave s_initialized=false so we retry on the next
+    // call (VR init normally runs after EmulationActivity.onCreate has registered it).
+    ERROR_LOG_FMT(VIDEO, "OpenXR: EmulationActivity not available yet for loader init; retrying.");
+    return;
+  }
+
+  s_initialized = true;
+  env->GetJavaVM(&s_android_vm);
+
+  PFN_xrInitializeLoaderKHR pfnInitializeLoader = nullptr;
+  if (XR_FAILED(xrGetInstanceProcAddr(
+          XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+          reinterpret_cast<PFN_xrVoidFunction*>(&pfnInitializeLoader))) ||
+      pfnInitializeLoader == nullptr)
+  {
+    ERROR_LOG_FMT(VIDEO, "OpenXR: xrInitializeLoaderKHR not exposed by the loader.");
+    return;
+  }
+
+  XrLoaderInitInfoAndroidKHR init_info{XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
+  init_info.applicationVM = s_android_vm;
+  init_info.applicationContext = s_android_context;
+  const XrResult result =
+      pfnInitializeLoader(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&init_info));
+  INFO_LOG_FMT(VIDEO, "OpenXR: xrInitializeLoaderKHR result={}.", static_cast<int>(result));
+}
+
+// Returns a persistent XrInstanceCreateInfoAndroidKHR to chain into XrInstanceCreateInfo::next.
+// Required because XR_KHR_android_create_instance is enabled, which mandates this struct
+// (VM + activity/context); without it xrCreateInstance fails with "invalid parameters supplied".
+const void* GetAndroidInstanceCreateInfoChain()
+{
+  static XrInstanceCreateInfoAndroidKHR android_info{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
+  android_info.applicationVM = s_android_vm;
+  android_info.applicationActivity = s_android_context;
+  return &android_info;
+}
+#endif
+
 bool SelectPrimedGunOverlaySwapchainFormat(XrSession session, int64_t* out_format)
 {
   uint32_t format_count = 0;
@@ -130,6 +216,23 @@ static void AppendOptionalOpenXRExtensions(std::vector<const char*>* extensions)
   {
     extensions->push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     INFO_LOG_FMT(VIDEO, "OpenXR: Enabling XR_FB_display_refresh_rate.");
+  }
+
+  // Fixed Foveated Rendering needs all three: the foveation profile extension, its level/dynamic
+  // configuration, and the swapchain-state-update mechanism used to apply the profile. Enable them
+  // together (and only when all are present) so OpenXRManager::ApplyFoveationProfile can shade the
+  // periphery at a lower rate on fragment-bound Quest scenes. (Quest-only in practice; PCVR
+  // runtimes that also expose them honor GFX_VR_FoveationLevel, which defaults Off on desktop.)
+  if (VR::OpenXRManager::IsRuntimeExtensionSupported(XR_FB_FOVEATION_EXTENSION_NAME) &&
+      VR::OpenXRManager::IsRuntimeExtensionSupported(
+          XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME) &&
+      VR::OpenXRManager::IsRuntimeExtensionSupported(
+          XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME))
+  {
+    extensions->push_back(XR_FB_FOVEATION_EXTENSION_NAME);
+    extensions->push_back(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME);
+    extensions->push_back(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME);
+    INFO_LOG_FMT(VIDEO, "OpenXR: Enabling XR_FB_foveation (Fixed Foveated Rendering).");
   }
 }
 }  // namespace
@@ -450,6 +553,10 @@ bool VulkanOpenXR::PreQueryVulkanExtensions(VulkanExtensionRequirements& out)
 {
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Pre-querying required Vulkan extensions...");
 
+#if defined(ANDROID)
+  EnsureAndroidOpenXRLoaderInitialized();
+#endif
+
   auto mgr = std::make_unique<VR::OpenXRManager>();
 
   std::vector<const char*> extensions = {XR_KHR_VULKAN_ENABLE_EXTENSION_NAME};
@@ -467,7 +574,11 @@ bool VulkanOpenXR::PreQueryVulkanExtensions(VulkanExtensionRequirements& out)
   }
   const auto controller_exts = VR::OpenXRManager::GetAvailableControllerExtensions();
   extensions.insert(extensions.end(), controller_exts.begin(), controller_exts.end());
-  if (!mgr->CreateInstance(extensions))
+  const void* platform_next = nullptr;
+#if defined(ANDROID)
+  platform_next = GetAndroidInstanceCreateInfoChain();
+#endif
+  if (!mgr->CreateInstance(extensions, platform_next))
     return false;
 
   if (!mgr->InitializeSystem())
@@ -571,6 +682,10 @@ bool VulkanOpenXR::Initialize()
 {
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Starting initialization...");
 
+#if defined(ANDROID)
+  EnsureAndroidOpenXRLoaderInitialized();
+#endif
+
   // If PreQueryVulkanExtensions() was called, VR::g_openxr already exists.
   if (!VR::g_openxr)
   {
@@ -589,7 +704,11 @@ bool VulkanOpenXR::Initialize()
     }
     const auto controller_exts = VR::OpenXRManager::GetAvailableControllerExtensions();
     extensions.insert(extensions.end(), controller_exts.begin(), controller_exts.end());
-    if (!mgr->CreateInstance(extensions))
+    const void* platform_next = nullptr;
+#if defined(ANDROID)
+    platform_next = GetAndroidInstanceCreateInfoChain();
+#endif
+    if (!mgr->CreateInstance(extensions, platform_next))
       return false;
 
     if (!mgr->InitializeSystem())
@@ -844,6 +963,17 @@ bool VulkanOpenXR::CreateSwapchains()
   {
     DestroySwapchains();
     return false;
+  }
+
+  // Apply Fixed Foveated Rendering to the swapchains the compositor samples. No-op unless the FB
+  // foveation extensions were enabled (Quest) and a level is configured; harmless on the unused
+  // fallback swapchain. Foveation is a persistent per-swapchain state, so this only runs once here.
+  if (m_use_layered_swapchain && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
+    VR::g_openxr->ApplyFoveationProfile(m_layered_swapchain.swapchain);
+  for (const auto& sc : m_eye_swapchains)
+  {
+    if (sc.swapchain != XR_NULL_HANDLE)
+      VR::g_openxr->ApplyFoveationProfile(sc.swapchain);
   }
 
   return true;
@@ -1551,6 +1681,31 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
   });
   auto& sc = m_eye_swapchains[eye_index];
   m_frame_uses_layered_swapchain = false;
+
+#if defined(ANDROID)
+  // The previous frame's swapchain release happens in the async XR submit finalization. It must
+  // complete before we acquire again, or the runtime warns "Index has already been acquired and
+  // not yet released" and the eye layer is never validly submitted — causing massive amounts of 
+  // tearing and visual artifacts.
+  WaitForPendingFrameFinalization("before acquiring eye swapchain image");
+
+  // If this eye image is still marked acquired from a previous frame, SubmitFrame's release was
+  // skipped — e.g. its early-return on invalid submitted eye-views, or the frame loop's acquire
+  // gate (ShouldRender()) diverging from its submit gate (vr_frame_started). Re-acquiring without
+  // releasing makes the runtime return "Index has already been acquired and not yet released"
+  // every frame; the eye layer then never presents cleanly, so Horizon OS never promotes the app
+  // to an immersive (topImmersive) view. Release the stale acquisition first so each acquire is
+  // balanced by exactly one release.
+  if (m_image_acquired[eye_index])
+  {
+    XrSwapchainImageReleaseInfo stale_release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    {
+      auto queue_lock = AcquireGraphicsQueueLock();
+      xrReleaseSwapchainImage(sc.swapchain, &stale_release);
+    }
+    m_image_acquired[eye_index] = false;
+  }
+#endif
 
   XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrResult acquire_result = XR_SUCCESS;
