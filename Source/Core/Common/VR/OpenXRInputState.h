@@ -37,11 +37,16 @@ struct OpenXRControllerState
   bool trigger_button = false;
   bool squeeze_button = false;
   bool thumbstick_button = false;
+  bool trackpad_button = false;
+  bool trackpad_touch = false;
   float trigger_value = 0.0f;
   float squeeze_value = 0.0f;
   float squeeze_force = 0.0f;
   float thumbstick_x = 0.0f;
   float thumbstick_y = 0.0f;
+  float trackpad_x = 0.0f;
+  float trackpad_y = 0.0f;
+  float trackpad_force = 0.0f;
   OpenXRPoseState aim_pose;
   OpenXRPoseState grip_pose;
   OpenXRVelocityState grip_velocity;
