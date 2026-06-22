@@ -268,8 +268,8 @@ bool CommandBufferManager::CreateSubmitThread()
     static thread_local bool registered_with_openxr = false;
     if (!registered_with_openxr && VR::g_openxr)
     {
-      const bool registered = VR::g_openxr->RegisterCurrentAndroidThread(
-          VR::OpenXRManager::AndroidThreadType::RendererWorker, "VK submission thread");
+      const bool registered =
+          VR::g_openxr->RegisterCurrentAndroidThread("VK submission thread");
       INFO_LOG_FMT(VIDEO,
                    "Vulkan submit worker: OpenXR RendererWorker registration result={} for "
                    "'VK submission thread'.",
