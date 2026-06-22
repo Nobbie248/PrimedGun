@@ -27,7 +27,8 @@ git clone --recurse-submodules https://github.com/Nobbie248/PrimedGun.git
 cd PrimedGun
 git submodule update --init --recursive
 cmake -S . -B build -G Ninja \
-  -DLINUX_LOCAL_DEV=ON
+  -DLINUX_LOCAL_DEV=ON \
+  -DUSE_SYSTEM_FMT=OFF
 cmake --build build --parallel
 ln -sfn ../../Data/Sys build/Binaries/Sys
 ```
@@ -60,6 +61,26 @@ For Windows distribution, use the contents of `Binary\x64`. The important runtim
 - Cannon position, rotation calibration.
 - Easy cannon texture swapping tool.
 - In-headset settings menu.
+
+## Setup Notes
+
+- HMD refresh rate set to 120 Hz is recommended.
+- Meta's own OpenXR environment is not recommended; try SteamVR or VD instead.
+- Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.
+- Checkout the Layout tab for controller bindings.
+- Transfer your memory card into `User\GC` then select the save in dolphin settings if you want existing saves.
+- Once in game, click the right stick to set your height.
+- Click the left thumbstick to open or close the in-headset settings menu.
+- Try to stay in the centre of your play space and face forward for the best interaction.
+- Use Save Settings after changing PrimedGun options to apply them.
+
+## Change Controller Bindings
+
+PrimedGun sets up the recommended controls automatically, but you can disable parts of that setup from the Controller tab. Turn off auto controller bindings, visor gesture input, or PrimedGun grip inputs there if you want to bind those controls manually.
+
+By default, PrimedGun maps GameCube `Z` to the map and GameCube `Y` to missiles.
+
+To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then choose Configure. Select `OpenXR Controller` at the top of the mapping window. Right-click any input you want to change, choose Clear, then assign the new input. When finished, name the profile and save it.
 
 ## Credits
 

@@ -37,11 +37,16 @@ struct OpenXRControllerState
   bool trigger_button = false;
   bool squeeze_button = false;
   bool thumbstick_button = false;
+  bool trackpad_button = false;
+  bool trackpad_touch = false;
   float trigger_value = 0.0f;
   float squeeze_value = 0.0f;
   float squeeze_force = 0.0f;
   float thumbstick_x = 0.0f;
   float thumbstick_y = 0.0f;
+  float trackpad_x = 0.0f;
+  float trackpad_y = 0.0f;
+  float trackpad_force = 0.0f;
   OpenXRPoseState aim_pose;
   OpenXRPoseState grip_pose;
   OpenXRVelocityState grip_velocity;
@@ -85,9 +90,12 @@ struct PrimedGunVrOverlayState
   bool use_right_hand = true;
   bool require_trigger = false;
   float trigger_threshold = 0.5f;
+  bool primegun_grip_inputs_enabled = true;
+  bool primegun_grip_inputs_use_trackpad = false;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
   float gun_targeting_radius = 4.0f;
+  bool visor_helmet_enabled = false;
   bool xr_dpad_enabled = true;
   float xr_dpad_head_radius = 0.18f;
   float xr_dpad_head_y_below = 0.14f;
@@ -99,6 +107,7 @@ struct PrimedGunVrOverlayState
   float directional_movement_speed = 14.0f;
   float directional_movement_accel = 45.0f;
   float directional_movement_air_accel = 8.0f;
+  float look_yaw_sensitivity = 1.0f;
   float offset_x = 0.0f;
   float offset_y = 0.0f;
   float offset_z = 0.0f;

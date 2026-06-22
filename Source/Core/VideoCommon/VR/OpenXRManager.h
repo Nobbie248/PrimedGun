@@ -278,6 +278,11 @@ private:
   XrAction m_action_squeeze_value = XR_NULL_HANDLE;
   XrAction m_action_thumbstick_x = XR_NULL_HANDLE;
   XrAction m_action_thumbstick_y = XR_NULL_HANDLE;
+  XrAction m_action_trackpad_click = XR_NULL_HANDLE;
+  XrAction m_action_trackpad_touch = XR_NULL_HANDLE;
+  XrAction m_action_trackpad_x = XR_NULL_HANDLE;
+  XrAction m_action_trackpad_y = XR_NULL_HANDLE;
+  XrAction m_action_trackpad_force = XR_NULL_HANDLE;
   XrAction m_action_aim_pose = XR_NULL_HANDLE;
   XrAction m_action_grip_pose = XR_NULL_HANDLE;
   XrAction m_action_haptic = XR_NULL_HANDLE;
