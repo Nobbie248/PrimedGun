@@ -1772,6 +1772,31 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
   if (!m_use_layered_swapchain || sc.swapchain == XR_NULL_HANDLE)
     return nullptr;
 
+#if defined(ANDROID)
+  // The previous frame's swapchain release happens asynchronously in the XR submit finalization
+  // (FinalizePendingXRFrame, on the command-buffer completion callback). It must complete before we
+  // acquire this swapchain's image again, or the runtime returns "Index has already been acquired
+  // and not yet released" → "xrAcquireSwapchainImage failed for layered swapchain", the layered eye
+  // layer is never validly submitted, and the result is massive tearing/visual artifacts. The
+  // per-eye AcquireEyeFramebuffer path already does this; the layered (multiview) path is the active
+  // one on Quest, so it needs the same gate.
+  WaitForPendingFrameFinalization("before acquiring layered swapchain image");
+
+  // Self-correct a still-acquired image left over from a previous frame whose release was skipped
+  // (e.g. SubmitFrame's invalid-eye-views early-return, or the acquire/submit gates diverging).
+  // Re-acquiring without releasing makes every subsequent acquire fail with "already acquired", so
+  // release the stale acquisition first to keep each acquire balanced by exactly one release.
+  if (m_layered_image_acquired)
+  {
+    XrSwapchainImageReleaseInfo stale_release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    {
+      auto queue_lock = AcquireGraphicsQueueLock();
+      xrReleaseSwapchainImage(sc.swapchain, &stale_release);
+    }
+    m_layered_image_acquired = false;
+  }
+#endif
+
   XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrResult acquire_result = XR_SUCCESS;
   {

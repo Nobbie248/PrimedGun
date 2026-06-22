@@ -135,6 +135,12 @@ object QuestVrSettings {
         // the GFX_EFB_SCALE Android code default). 4x is too heavy for a steady framerate here.
         IntSetting.GFX_EFB_SCALE.setInt(settings, 2)
         BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, false)
+        // Async "skip-drawing" shader compilation (mode 3): compile new pipelines on background
+        // worker threads instead of stalling the emulation thread on room load. Mirrors the
+        // GFX_SHADER_COMPILATION_MODE Android code default; a handful of geometry pop-in frames on
+        // first encounter beats a 130-305 ms hard freeze in VR. The worker-thread count is set by
+        // the Android code default (no IntSetting for ShaderCompilerThreads on the Java side).
+        IntSetting.GFX_SHADER_COMPILATION_MODE.setInt(settings, 3)
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(settings, false)
         lockHeadPoseSetting().setBoolean(settings, false)
         autoLayerSpreadSetting().setBoolean(settings, true)
@@ -163,8 +169,11 @@ object QuestVrSettings {
         }
 
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
-        // GPU (compute-shader) texture decoding crashes the Quest's Adreno Vulkan driver in
-        // vkUpdateDescriptorSets; force CPU texture decoding on every Quest launch.
+        // GPU (compute-shader) texture decoding SIGSEGVs the Adreno driver in vkUpdateDescriptorSets
+        // (VK_EXT_robustness2 nullDescriptor was tried and is insufficient -- crash repro 2026-06-22,
+        // see quest-gpu-shader-plan.md). Force CPU texture decoding on every Quest launch. The native
+        // bSupportsGPUTextureDecoding=false gate (VulkanContext::PopulateBackendInfoFeatures) is the
+        // real safety net; this is defense in depth.
         BooleanSetting.GFX_ENABLE_GPU_TEXTURE_DECODING.setBoolean(settings, false)
 
         val launchInVr = isLaunchInVrEnabled()
