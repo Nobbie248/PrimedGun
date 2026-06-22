@@ -51,6 +51,7 @@
 #include <array>
 #include <future>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -72,6 +73,7 @@
 
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/ScopeGuard.h"
 #include "Common/Version.h"
 #include "Common/WindowSystemInfo.h"
@@ -91,6 +93,7 @@
 #include "Core/HW/DVD/DVDInterface.h"
 #include "Core/HW/EXI/EXI_Device.h"
 #include "Core/HW/GBAPad.h"
+#include "Core/HW/AddressSpace.h"
 #include "Core/HW/GCKeyboard.h"
 #include "Core/HW/GCPad.h"
 #include "Core/HW/ProcessorInterface.h"
@@ -659,6 +662,41 @@ void PrimedGunRefreshCustomTextureConfig(bool use_active_overrides)
     if (g_texture_cache)
       g_texture_cache->Invalidate();
   });
+}
+
+void PrimedGunDumpMem1(QWidget* parent)
+{
+  AddressSpace::Accessors* accessors = AddressSpace::GetAccessors(AddressSpace::Type::Mem1);
+  if (!accessors || !accessors->begin())
+  {
+    ModalMessageBox::critical(parent, QObject::tr("RAM Dump"),
+                              QObject::tr("Failed to dump RAM: memory is not available."));
+    return;
+  }
+
+  const std::string path = File::GetUserPath(F_MEM1DUMP_IDX);
+  File::CreateFullPath(path);
+  File::IOFile file(path, "wb");
+  if (!file)
+  {
+    ModalMessageBox::critical(
+        parent, QObject::tr("RAM Dump"),
+        QObject::tr("Failed to dump RAM: could not open %1").arg(QString::fromStdString(path)));
+    return;
+  }
+
+  const size_t size = static_cast<size_t>(std::distance(accessors->begin(), accessors->end()));
+  if (!file.WriteBytes(accessors->begin(), size))
+  {
+    ModalMessageBox::critical(
+        parent, QObject::tr("RAM Dump"),
+        QObject::tr("Failed to dump RAM: could not write %1").arg(QString::fromStdString(path)));
+    return;
+  }
+
+  ModalMessageBox::information(
+      parent, QObject::tr("RAM Dump"),
+      QObject::tr("RAM dumped to:\n%1").arg(QString::fromStdString(path)));
 }
 }  // namespace
 
@@ -1422,6 +1460,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/require_trigger"), runtime.require_trigger).toBool();
     runtime.trigger_threshold =
         settings.value(QStringLiteral("primegun/trigger_threshold"), runtime.trigger_threshold).toFloat();
+    runtime.primegun_grip_inputs_enabled =
+        settings.value(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
+                       runtime.primegun_grip_inputs_enabled)
+            .toBool();
     runtime.gun_targeting_enabled =
         settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
@@ -1434,6 +1476,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/gun_targeting_radius"),
                        runtime.gun_targeting_radius)
             .toFloat();
+    runtime.visor_helmet_enabled =
+        settings.value(QStringLiteral("primegun/visor_helmet_enabled"),
+                       runtime.visor_helmet_enabled)
+            .toBool();
     runtime.vr_overlays_enabled =
         settings.value(QStringLiteral("primegun/vr_overlays_enabled"),
                        runtime.vr_overlays_enabled)
@@ -1479,6 +1525,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/directional_movement_air_accel"),
                        runtime.directional_movement_air_accel)
             .toFloat();
+    runtime.look_yaw_sensitivity =
+        settings.value(QStringLiteral("primegun/look_yaw_sensitivity"),
+                       runtime.look_yaw_sensitivity)
+            .toFloat();
     PrimedGun::SetRuntimeSettings(runtime);
   };
   const auto save_primegun_runtime_settings = [&settings](const PrimedGun::RuntimeSettings& runtime) {
@@ -1510,11 +1560,15 @@ void MainWindow::ConnectStack()
     settings.setValue(QStringLiteral("primegun/world_scale"), runtime.world_scale);
     settings.setValue(QStringLiteral("primegun/require_trigger"), runtime.require_trigger);
     settings.setValue(QStringLiteral("primegun/trigger_threshold"), runtime.trigger_threshold);
+    settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
+                      runtime.primegun_grip_inputs_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
                       runtime.gun_targeting_distance);
     settings.setValue(QStringLiteral("primegun/gun_targeting_radius"), runtime.gun_targeting_radius);
+    settings.setValue(QStringLiteral("primegun/visor_helmet_enabled"),
+                      runtime.visor_helmet_enabled);
     settings.setValue(QStringLiteral("primegun/vr_overlays_enabled"), runtime.vr_overlays_enabled);
     settings.setValue(QStringLiteral("primegun/xr_dpad_enabled"), runtime.xr_dpad_enabled);
     settings.setValue(QStringLiteral("primegun/xr_dpad_head_radius"), runtime.xr_dpad_head_radius);
@@ -1535,6 +1589,8 @@ void MainWindow::ConnectStack()
                       runtime.directional_movement_accel);
     settings.setValue(QStringLiteral("primegun/directional_movement_air_accel"),
                       runtime.directional_movement_air_accel);
+    settings.setValue(QStringLiteral("primegun/look_yaw_sensitivity"),
+                      runtime.look_yaw_sensitivity);
   };
   load_primegun_runtime_settings();
   auto* primegun_vr_save_timer = new QTimer(this);
@@ -1794,9 +1850,13 @@ void MainWindow::ConnectStack()
   auto* dpad_enabled = new QCheckBox(tr("Enable visor gesture input"), game_tab);
   dpad_enabled->setChecked(runtime->xr_dpad_enabled);
   controller_layout->addWidget(dpad_enabled);
+  auto* primegun_grip_inputs_enabled =
+      new QCheckBox(tr("Use PrimedGun grip inputs"), game_tab);
+  primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
+  controller_layout->addWidget(primegun_grip_inputs_enabled);
 
   auto float_rows = std::make_shared<std::vector<std::pair<QDoubleSpinBox*, QSlider*>>>();
-  const auto add_float_row = [game_tab, apply_runtime, float_rows](
+  const auto add_float_row = [this, game_tab, apply_runtime, float_rows](
                                  QVBoxLayout* parent_layout, const QString& label_text,
                                  double min, double max, double step, double value,
                                  const std::function<void(float)>& setter) {
@@ -1807,6 +1867,8 @@ void MainWindow::ConnectStack()
     label->setMaximumWidth(170);
     auto* slider = new QSlider(Qt::Horizontal, game_tab);
     auto* spin = new QDoubleSpinBox(game_tab);
+    slider->installEventFilter(this);
+    spin->installEventFilter(this);
     spin->setRange(min, max);
     spin->setSingleStep(step);
     spin->setDecimals(step < 0.1 ? 3 : 2);
@@ -1905,6 +1967,10 @@ void MainWindow::ConnectStack()
       add_float_row(controller_layout, tr("Air acceleration"), 0.0, 60.0, 0.5,
                     runtime->directional_movement_air_accel,
                     [runtime](float v) { runtime->directional_movement_air_accel = v; });
+  auto* look_yaw_sensitivity_spin =
+      add_float_row(controller_layout, tr("Look yaw sensitivity"), 0.20, 3.00, 0.05,
+                    runtime->look_yaw_sensitivity,
+                    [runtime](float v) { runtime->look_yaw_sensitivity = v; });
   controller_layout->addStretch();
 
   auto* aiming_layout = make_scroll_tab(tr("Aiming"));
@@ -1922,6 +1988,16 @@ void MainWindow::ConnectStack()
       add_float_row(aiming_layout, tr("Target radius"), 0.5, 8.0, 0.1,
                     runtime->gun_targeting_radius,
                     [runtime](float v) { runtime->gun_targeting_radius = v; });
+  auto* visor_helmet_enabled = new QCheckBox(tr("Enable visor helmet"), game_tab);
+  visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
+  auto* visor_helmet_row = new QHBoxLayout;
+  visor_helmet_row->addWidget(visor_helmet_enabled);
+  auto* visor_helmet_note =
+      new QLabel(tr("Allows user to turn helmet back on in the pause menu"), game_tab);
+  visor_helmet_note->setObjectName(QStringLiteral("PrimedGunMuted"));
+  visor_helmet_row->addWidget(visor_helmet_note);
+  visor_helmet_row->addStretch();
+  aiming_layout->addLayout(visor_helmet_row);
   aiming_layout->addStretch();
 
   auto* calibration_layout = make_scroll_tab(tr("Calibration"));
@@ -2338,17 +2414,23 @@ void MainWindow::ConnectStack()
   auto* open_memcards = new QPushButton(tr("Memory Card Manager"), game_tab);
   auto* open_cheats = new QPushButton(tr("Cheat Manager"), game_tab);
   auto* open_texture_packs = new QPushButton(tr("Resource Pack Manager"), game_tab);
+  auto* debug_label = section_label(tr("Debug (send dump to dev upon crash)"), game_tab);
+  auto* dump_ram = new QPushButton(tr("Dump RAM"), game_tab);
   dolphin_layout->addWidget(open_general);
   dolphin_layout->addWidget(open_hotkeys);
   dolphin_layout->addWidget(open_memcards);
   dolphin_layout->addWidget(open_cheats);
   dolphin_layout->addWidget(open_texture_packs);
+  dolphin_layout->addSpacing(16);
+  dolphin_layout->addWidget(debug_label);
+  dolphin_layout->addWidget(dump_ram);
   dolphin_layout->addStretch();
   connect(open_general, &QPushButton::clicked, this, &MainWindow::ShowGeneralWindow);
   connect(open_hotkeys, &QPushButton::clicked, this, &MainWindow::ShowHotkeyDialog);
   connect(open_memcards, &QPushButton::clicked, this, &MainWindow::ShowMemcardManager);
   connect(open_cheats, &QPushButton::clicked, this, &MainWindow::ShowCheatsManager);
   connect(open_texture_packs, &QPushButton::clicked, this, &MainWindow::ShowResourcePackManager);
+  connect(dump_ram, &QPushButton::clicked, this, [this] { PrimedGunDumpMem1(this); });
 
   game_layout->addWidget(tabs, 1);
   auto* footer_line = new QFrame(game_tab);
@@ -2370,12 +2452,14 @@ void MainWindow::ConnectStack()
     const QSignalBlocker left_hand_blocker{left_hand};
     const QSignalBlocker vr_overlays_enabled_blocker{vr_overlays_enabled};
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
+    const QSignalBlocker primegun_grip_inputs_enabled_blocker{primegun_grip_inputs_enabled};
     const QSignalBlocker movement_enabled_blocker{movement_enabled};
     const QSignalBlocker left_stick_blocker{left_stick};
     const QSignalBlocker right_stick_blocker{right_stick};
     const QSignalBlocker controller_direction_blocker{controller_direction};
     const QSignalBlocker hmd_direction_blocker{hmd_direction};
     const QSignalBlocker targeting_enabled_blocker{targeting_enabled};
+    const QSignalBlocker visor_helmet_enabled_blocker{visor_helmet_enabled};
     const auto set_float = [float_rows](QDoubleSpinBox* spin, double value) {
       QSlider* linked_slider = nullptr;
       for (const auto& [row_spin, row_slider] : *float_rows)
@@ -2400,12 +2484,14 @@ void MainWindow::ConnectStack()
     left_hand->setChecked(!runtime->use_right_hand);
     vr_overlays_enabled->setChecked(runtime->vr_overlays_enabled);
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
+    primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
     movement_enabled->setChecked(runtime->directional_movement_enabled);
     left_stick->setChecked(!runtime->directional_movement_use_right_stick);
     right_stick->setChecked(runtime->directional_movement_use_right_stick);
     controller_direction->setChecked(!runtime->directional_movement_use_hmd_direction);
     hmd_direction->setChecked(runtime->directional_movement_use_hmd_direction);
     targeting_enabled->setChecked(runtime->gun_targeting_enabled);
+    visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
     set_float(dpad_radius_spin, runtime->xr_dpad_head_radius);
     set_float(dpad_below_spin, runtime->xr_dpad_head_y_below);
     set_float(dpad_deadzone_spin, runtime->xr_dpad_deadzone);
@@ -2413,6 +2499,7 @@ void MainWindow::ConnectStack()
     set_float(movement_speed_spin, runtime->directional_movement_speed);
     set_float(movement_accel_spin, runtime->directional_movement_accel);
     set_float(movement_air_accel_spin, runtime->directional_movement_air_accel);
+    set_float(look_yaw_sensitivity_spin, runtime->look_yaw_sensitivity);
     set_float(target_distance_spin, runtime->gun_targeting_distance);
     set_float(target_radius_spin, runtime->gun_targeting_radius);
     set_float(model_x_spin, runtime->model_offset_x);
@@ -2438,6 +2525,7 @@ void MainWindow::ConnectStack()
     runtime->use_right_hand = true;
     runtime->vr_overlays_enabled = true;
     runtime->xr_dpad_enabled = true;
+    runtime->primegun_grip_inputs_enabled = true;
     runtime->directional_movement_enabled = true;
     runtime->directional_movement_use_right_stick = false;
     runtime->directional_movement_use_hmd_direction = false;
@@ -2448,6 +2536,7 @@ void MainWindow::ConnectStack()
     runtime->directional_movement_speed = 14.0f;
     runtime->directional_movement_accel = 45.0f;
     runtime->directional_movement_air_accel = 8.0f;
+    runtime->look_yaw_sensitivity = 1.0f;
     refresh_visible_settings();
     apply_runtime();
   });
@@ -2456,6 +2545,7 @@ void MainWindow::ConnectStack()
     runtime->gun_targeting_enabled = true;
     runtime->gun_targeting_distance = 60.0f;
     runtime->gun_targeting_radius = 4.0f;
+    runtime->visor_helmet_enabled = false;
     refresh_visible_settings();
     apply_runtime();
   });
@@ -2480,6 +2570,11 @@ void MainWindow::ConnectStack()
   });
   connect(dpad_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
     runtime->xr_dpad_enabled = checked;
+    apply_runtime();
+  });
+  connect(primegun_grip_inputs_enabled, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->primegun_grip_inputs_enabled = checked;
     apply_runtime();
   });
   connect(movement_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
@@ -2517,6 +2612,11 @@ void MainWindow::ConnectStack()
   });
   connect(targeting_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
     runtime->gun_targeting_enabled = checked;
+    apply_runtime();
+  });
+  connect(visor_helmet_enabled, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->visor_helmet_enabled = checked;
     apply_runtime();
   });
   connect(default_preset, &QPushButton::clicked, this, reset_calibration_values);
@@ -3492,6 +3592,12 @@ void MainWindow::UpdateScreenSaverInhibition()
 
 bool MainWindow::eventFilter(QObject* object, QEvent* event)
 {
+  if (event->type() == QEvent::Wheel &&
+      (qobject_cast<QSlider*>(object) || qobject_cast<QDoubleSpinBox*>(object)))
+  {
+    return true;
+  }
+
   if (event->type() == QEvent::KeyPress)
   {
     const QKeyEvent* key_event = static_cast<const QKeyEvent*>(event);

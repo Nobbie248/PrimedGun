@@ -273,9 +273,9 @@ bool MenuRowIsNumeric(uint32_t tab, int index)
   case 1:
     return index >= 0 && index <= 5;
   case 2:
-    return index == 2 || index == 5 || index == 6 || index == 7;
+    return index == 2 || index == 6 || index == 7 || index == 8;
   case 3:
-    return index >= 3 && index <= 6;
+    return index >= 3 && index <= 7;
   default:
     return false;
   }
@@ -297,6 +297,7 @@ std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlayState& s)
     return {{"RIGHT HAND", s.use_right_hand ? "ON" : "OFF"},
             {"REQUIRE TRIGGER", s.require_trigger ? "ON" : "OFF"},
             {"TRIGGER", FloatText(s.trigger_threshold, 2)},
+            {"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"},
             {"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"},
             {"D-PAD ENABLED", s.xr_dpad_enabled ? "ON" : "OFF"},
             {"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)},
@@ -311,6 +312,7 @@ std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlayState& s)
             {"MOVE SPEED", FloatText(s.directional_movement_speed, 1)},
             {"MOVE ACCEL", FloatText(s.directional_movement_accel, 1)},
             {"AIR ACCEL", FloatText(s.directional_movement_air_accel, 1)},
+            {"LOOK YAW SENSITIVITY", FloatText(s.look_yaw_sensitivity, 2)},
             {"RESET MOVEMENT", "PRESS"}};
   case 4:
     return {{"DEFAULT ARM PRESET", "APPLY"}, {"SAMUS ARM PRESET", "APPLY"}};
@@ -327,6 +329,7 @@ std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlayState& s)
     return {{"TARGETING", s.gun_targeting_enabled ? "ON" : "OFF"},
             {"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)},
             {"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)},
+            {"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"},
             {"RESET TARGETING", "PRESS"}};
   }
 }

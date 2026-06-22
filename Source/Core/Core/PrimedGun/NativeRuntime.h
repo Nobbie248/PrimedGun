@@ -36,9 +36,11 @@ struct RuntimeSettings
   float world_scale = 1.50f;
   bool require_trigger = false;
   float trigger_threshold = 0.5f;
+  bool primegun_grip_inputs_enabled = true;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
   float gun_targeting_radius = 4.0f;
+  bool visor_helmet_enabled = false;
   bool vr_overlays_enabled = true;
   bool xr_dpad_enabled = true;
   float xr_dpad_head_radius = 0.28f;
@@ -51,6 +53,7 @@ struct RuntimeSettings
   float directional_movement_speed = 14.0f;
   float directional_movement_accel = 45.0f;
   float directional_movement_air_accel = 8.0f;
+  float look_yaw_sensitivity = 1.0f;
 };
 
 RuntimeSettings GetRuntimeSettings();

@@ -66,13 +66,19 @@ For Windows distribution, use the contents of `Binary\x64`. The important runtim
 
 - HMD refresh rate set to 120 Hz is recommended.
 - Meta's own OpenXR environment is not recommended; try SteamVR or VD instead.
-- Run the app and select your Metroid Prime NTSC Revision 0 GameCube game file.
+- Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.
 - Checkout the Layout tab for controller bindings.
 - Transfer your memory card into `User\GC` if you want existing saves.
 - Once in game, click the right stick to set your height.
 - Click the left thumbstick to open or close the in-headset settings menu.
 - Try to stay in the centre of your play space and face forward for the best interaction.
 - Use Save Settings after changing PrimedGun options to apply them.
+
+## Change Controller Bindings
+
+PrimedGun sets up the recommended controls automatically, but you can disable parts of that setup from the Controller tab. Turn off auto controller bindings, visor gesture input, or PrimedGun grip inputs there if you want to bind those controls manually.
+
+To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then choose Configure. Select `OpenXR Controller` at the top of the mapping window. Right-click any input you want to change, choose Clear, then assign the new input. When finished, name the profile and save it.
 
 ## Credits
 

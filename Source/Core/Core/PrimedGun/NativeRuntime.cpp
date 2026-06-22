@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cmath>
 #include <filesystem>
+#include <initializer_list>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -49,6 +50,12 @@ struct PatchWrite
   u32 address = 0;
   u32 value = 0;
   u32 group = 0;
+};
+
+struct HookWrite
+{
+  u32 offset = 0;
+  u32 value = 0;
 };
 
 struct Pose
@@ -95,6 +102,7 @@ constexpr float DEFAULT_ROT_OFFSET_X = 0.0f;
 constexpr float DEFAULT_ROT_OFFSET_Y = 0.0f;
 constexpr float DEFAULT_ROT_OFFSET_Z = 0.0f;
 
+constexpr u32 PATCH_CODE_ARENA_BASE = 0x817F8000u;
 constexpr u32 SCRATCH_BASE = 0x817FE000u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
 constexpr u32 CANNON_EXPECTED_GUN_SCRATCH = SCRATCH_BASE + 0x038u;
@@ -107,25 +115,25 @@ constexpr u32 PITCH_ZERO_ENABLE_SCRATCH = SCRATCH_BASE + 0x5A0u;
 constexpr u32 DPAD_PRESS_SCRATCH = SCRATCH_BASE + 0x680u;
 constexpr u32 GAMEFLOW_MENU_SCRATCH = SCRATCH_BASE + 0x690u;
 
-constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = 0x80001B70u;
-constexpr u32 RENDER_MODEL_OFFSET_CAVE = 0x80001C00u;
-constexpr u32 FIRST_PERSON_ELEVATION_PITCH_CAVE = 0x80001C80u;
-constexpr u32 COMBAT_PITCH_CAVE_0 = 0x80001E00u;
-constexpr u32 COMBAT_PITCH_CAVE_1 = 0x80001E40u;
-constexpr u32 COMBAT_PITCH_CAVE_2 = 0x80001E80u;
-constexpr u32 COMBAT_ELEVATION_PITCH_CAVE = 0x80001EC0u;
-constexpr u32 WAVE_PROJECTILE_TRANSFORM_CAVE = 0x80001F00u;
-constexpr u32 MISSILE_PROJECTILE_TRANSFORM_CAVE = 0x80001FA0u;
-constexpr u32 GAMEFLOW_UNPAUSE_CAVE = 0x80002040u;
-constexpr u32 GAMEFLOW_MESSAGE_CAVE = 0x80002070u;
-constexpr u32 GAMEFLOW_SAVE_CAVE = 0x800020A0u;
-constexpr u32 GAMEFLOW_LOGBOOK_CAVE = 0x800020D0u;
-constexpr u32 GAMEFLOW_PAUSE_CAVE = 0x80002100u;
-constexpr u32 GAMEFLOW_MAP_CAVE = 0x80002130u;
-constexpr u32 SCAN_RETICLE_TRACE_CAVE = 0x80002180u;
-constexpr u32 SCAN_RETICLE_TRACE_CURR_CAVE = 0x800021C0u;
-constexpr u32 SCAN_INDICATOR_UPDATE_TRACE_CAVE = 0x80002200u;
-constexpr u32 SCAN_INDICATOR_VIEW_BASIS_CAVE = 0x80002240u;
+constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
+constexpr u32 RENDER_MODEL_OFFSET_CAVE = PATCH_CODE_ARENA_BASE + 0x080u;
+constexpr u32 FIRST_PERSON_ELEVATION_PITCH_CAVE = PATCH_CODE_ARENA_BASE + 0x100u;
+constexpr u32 COMBAT_PITCH_CAVE_0 = PATCH_CODE_ARENA_BASE + 0x140u;
+constexpr u32 COMBAT_PITCH_CAVE_1 = PATCH_CODE_ARENA_BASE + 0x180u;
+constexpr u32 COMBAT_PITCH_CAVE_2 = PATCH_CODE_ARENA_BASE + 0x1C0u;
+constexpr u32 COMBAT_ELEVATION_PITCH_CAVE = PATCH_CODE_ARENA_BASE + 0x200u;
+constexpr u32 WAVE_PROJECTILE_TRANSFORM_CAVE = PATCH_CODE_ARENA_BASE + 0x280u;
+constexpr u32 MISSILE_PROJECTILE_TRANSFORM_CAVE = PATCH_CODE_ARENA_BASE + 0x340u;
+constexpr u32 GAMEFLOW_UNPAUSE_CAVE = PATCH_CODE_ARENA_BASE + 0x400u;
+constexpr u32 GAMEFLOW_MESSAGE_CAVE = PATCH_CODE_ARENA_BASE + 0x430u;
+constexpr u32 GAMEFLOW_SAVE_CAVE = PATCH_CODE_ARENA_BASE + 0x460u;
+constexpr u32 GAMEFLOW_LOGBOOK_CAVE = PATCH_CODE_ARENA_BASE + 0x490u;
+constexpr u32 GAMEFLOW_PAUSE_CAVE = PATCH_CODE_ARENA_BASE + 0x4C0u;
+constexpr u32 GAMEFLOW_MAP_CAVE = PATCH_CODE_ARENA_BASE + 0x4F0u;
+constexpr u32 SCAN_RETICLE_TRACE_CAVE = PATCH_CODE_ARENA_BASE + 0x540u;
+constexpr u32 SCAN_RETICLE_TRACE_CURR_CAVE = PATCH_CODE_ARENA_BASE + 0x580u;
+constexpr u32 SCAN_INDICATOR_UPDATE_TRACE_CAVE = PATCH_CODE_ARENA_BASE + 0x5C0u;
+constexpr u32 SCAN_INDICATOR_VIEW_BASIS_CAVE = PATCH_CODE_ARENA_BASE + 0x600u;
 constexpr u32 LOAD_ZERO_TO_F1 = 0xC02280B0u;
 constexpr u32 LOAD_ZERO_TO_F31 = 0xC3E280B0u;
 constexpr u32 DRAW_NEXT_LOCK_ON_GROUP = 0x800BD808u;
@@ -179,6 +187,9 @@ bool RuntimeLoggingEnabled()
 
 void AppendScanDebugLine(std::string_view line)
 {
+  if (!RuntimeLoggingEnabled())
+    return;
+
   File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
   File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunScan.log", "ab");
   if (!file)
@@ -267,6 +278,8 @@ bool s_have_dumped_scan_indicator_code = false;
 u32 s_last_validated_gun = 0;
 u32 s_last_patch_player = 0;
 u64 s_patch_reapply_until_frame = 0;
+u64 s_last_cannon_feed_watchdog_frame = 0;
+u32 s_cannon_feed_stall_frames = 0;
 bool s_cannon_hand_pose_ready = false;
 bool s_smooth_matrix_valid = false;
 float s_smooth_matrix[12] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
@@ -458,8 +471,10 @@ void ParseBuiltinPatches()
       continue;
     }
 
-    // PrimedGun's built-in patch block currently uses AR 04 dword writes only.
-    if (static_cast<u8>(command >> 24) != 0x04)
+    // PrimedGun's built-in patch block uses AR-style dword writes. Accept both 04 and 05
+    // command pages so hook caves can live in high MEM1 instead of low game code space.
+    const u8 command_page = static_cast<u8>(command >> 24);
+    if (command_page != 0x04 && command_page != 0x05)
       continue;
 
     s_builtin_patches.push_back({0x80000000u | (command & 0x01ff'ffffu), value, current_group});
@@ -574,29 +589,96 @@ bool TryReadFloat(const Core::CPUThreadGuard& guard, u32 address, float* out)
   return true;
 }
 
-void TryWriteFloat(const Core::CPUThreadGuard& guard, u32 address, float value)
+bool IsWritablePrimeMem1Address(u32 address, u32 size)
 {
-  PowerPC::MMU::HostTryWrite<float>(guard, value, address);
+  constexpr u32 mem1_start = 0x80000000u;
+  constexpr u32 mem1_end = 0x81800000u;
+  return address >= mem1_start && address < mem1_end && size <= (mem1_end - address);
 }
 
-void TryWriteU32(const Core::CPUThreadGuard& guard, u32 address, u32 value)
+bool TryWriteFloat(const Core::CPUThreadGuard& guard, u32 address, float value)
 {
-  PowerPC::MMU::HostTryWrite<u32>(guard, value, address);
+  return IsWritablePrimeMem1Address(address, sizeof(value)) &&
+         PowerPC::MMU::HostTryWrite<float>(guard, value, address).has_value();
 }
 
-void TryWriteU16(const Core::CPUThreadGuard& guard, u32 address, u16 value)
+bool TryWriteU32(const Core::CPUThreadGuard& guard, u32 address, u32 value)
 {
-  PowerPC::MMU::HostTryWrite<u16>(guard, value, address);
+  return IsWritablePrimeMem1Address(address, sizeof(value)) &&
+         PowerPC::MMU::HostTryWrite<u32>(guard, value, address).has_value();
 }
 
-void TryWriteU8(const Core::CPUThreadGuard& guard, u32 address, u8 value)
+bool TryWriteU16(const Core::CPUThreadGuard& guard, u32 address, u16 value)
 {
-  PowerPC::MMU::HostTryWrite<u8>(guard, value, address);
+  return IsWritablePrimeMem1Address(address, sizeof(value)) &&
+         PowerPC::MMU::HostTryWrite<u16>(guard, value, address).has_value();
+}
+
+bool TryWriteU8(const Core::CPUThreadGuard& guard, u32 address, u8 value)
+{
+  return IsWritablePrimeMem1Address(address, sizeof(value)) &&
+         PowerPC::MMU::HostTryWrite<u8>(guard, value, address).has_value();
 }
 
 bool TryWriteInstruction(const Core::CPUThreadGuard& guard, u32 address, u32 value)
 {
-  return PowerPC::MMU::HostTryWrite<u32>(guard, value, address).has_value();
+  return IsWritablePrimeMem1Address(address, sizeof(value)) &&
+         PowerPC::MMU::HostTryWrite<u32>(guard, value, address).has_value();
+}
+
+u32 PpcBranch(u32 from, u32 to);
+
+bool TryWriteInstructionBlock(const Core::CPUThreadGuard& guard, u32 base,
+                              std::initializer_list<HookWrite> writes)
+{
+  for (const HookWrite& write : writes)
+  {
+    if (!TryWriteInstruction(guard, base + write.offset, write.value))
+      return false;
+  }
+  return true;
+}
+
+bool InstructionBlockMatches(const Core::CPUThreadGuard& guard, u32 base,
+                             std::initializer_list<HookWrite> writes);
+
+bool RefreshInstructionBlock(const Core::CPUThreadGuard& guard, u32 base,
+                             std::initializer_list<HookWrite> writes)
+{
+  if (InstructionBlockMatches(guard, base, writes))
+    return true;
+  return TryWriteInstructionBlock(guard, base, writes);
+}
+
+bool InstructionBlockMatches(const Core::CPUThreadGuard& guard, u32 base,
+                             std::initializer_list<HookWrite> writes)
+{
+  for (const HookWrite& write : writes)
+  {
+    u32 current = 0;
+    if (!TryReadU32(guard, base + write.offset, &current) || current != write.value)
+      return false;
+  }
+  return true;
+}
+
+bool InstallBranchAfterCaveWrite(const Core::CPUThreadGuard& guard, u32 patch_address,
+                                 u32 cave_address, std::initializer_list<HookWrite> cave_writes)
+{
+  const u32 branch = PpcBranch(patch_address, cave_address);
+  u32 current = 0;
+  const bool branch_installed = TryReadU32(guard, patch_address, &current) && current == branch;
+  if (branch_installed && InstructionBlockMatches(guard, cave_address, cave_writes))
+    return false;
+
+  const bool cave_matches = InstructionBlockMatches(guard, cave_address, cave_writes);
+  if (!cave_matches && !TryWriteInstructionBlock(guard, cave_address, cave_writes))
+    return false;
+
+  if (branch_installed)
+    return !cave_matches;
+
+  return TryWriteInstruction(guard, patch_address, branch);
 }
 
 u32 PpcBranch(u32 from, u32 to)
@@ -1060,8 +1142,11 @@ void DumpScanIndicatorCodeOnce(const Core::CPUThreadGuard& guard)
   dump_range("UpdateScanWindow_head", 0x80112948u, 0x80112B00u);
 }
 
-void ApplyHelmetOpacityZero(const Core::CPUThreadGuard& guard)
+void ApplyHelmetOpacityZero(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings)
 {
+  if (settings.visor_helmet_enabled)
+    return;
+
   u32 game_state = 0;
   if (!TryReadU32(guard, GP_GAME_STATE, &game_state) || game_state < 0x80000000u)
     return;
@@ -1702,6 +1787,65 @@ void RotatePrimeXY(float& x, float& y, float yaw_deg)
   y = s * old_x + c * old_y;
 }
 
+bool RotateTransformYaw2D(const Core::CPUThreadGuard& guard, u32 transform, float yaw_delta_rad)
+{
+  if (std::fabs(yaw_delta_rad) < 0.000001f)
+    return false;
+
+  float m00 = 0.0f;
+  float m01 = 0.0f;
+  float m10 = 0.0f;
+  float m11 = 0.0f;
+  if (!TryReadFloat(guard, transform + 0x00u, &m00) ||
+      !TryReadFloat(guard, transform + 0x04u, &m01) ||
+      !TryReadFloat(guard, transform + 0x10u, &m10) ||
+      !TryReadFloat(guard, transform + 0x14u, &m11))
+  {
+    return false;
+  }
+
+  if (!std::isfinite(m00) || !std::isfinite(m01) || !std::isfinite(m10) || !std::isfinite(m11))
+    return false;
+
+  const float c = std::cos(yaw_delta_rad);
+  const float s = std::sin(yaw_delta_rad);
+  const float new_m00 = c * m00 - s * m01;
+  const float new_m01 = s * m00 + c * m01;
+  const float new_m10 = c * m10 - s * m11;
+  const float new_m11 = s * m10 + c * m11;
+  return TryWriteFloat(guard, transform + 0x00u, new_m00) &&
+         TryWriteFloat(guard, transform + 0x04u, new_m01) &&
+         TryWriteFloat(guard, transform + 0x10u, new_m10) &&
+         TryWriteFloat(guard, transform + 0x14u, new_m11);
+}
+
+void ApplyLookYawSensitivityBoost(const Core::CPUThreadGuard& guard,
+                                  const Common::VR::OpenXRInputSnapshot& snapshot,
+                                  const RuntimeSettings& settings, u32 player)
+{
+  if (settings.look_yaw_sensitivity <= 1.0f || player < 0x80000000u ||
+      !PlayerIsFirstPersonUnmorphed(guard, player))
+  {
+    return;
+  }
+
+  const int look_hand = settings.directional_movement_use_right_stick ? 0 : 1;
+  const Common::VR::OpenXRControllerState& look = snapshot.controllers[look_hand];
+  if (!look.connected)
+    return;
+
+  const float stick_x = std::clamp(look.thumbstick_x, -1.0f, 1.0f);
+  if (std::fabs(stick_x) < 0.05f)
+    return;
+
+  constexpr float max_extra_yaw_deg_per_second = 125.0f;
+  constexpr float frame_dt = 1.0f / 60.0f;
+  const float extra_scale = std::clamp(settings.look_yaw_sensitivity - 1.0f, 0.0f, 2.0f);
+  const float yaw_delta_rad = stick_x * extra_scale * max_extra_yaw_deg_per_second * frame_dt *
+                              (static_cast<float>(MathUtil::PI) / 180.0f);
+  RotateTransformYaw2D(guard, player + ADDRESS.transform_offset, yaw_delta_rad);
+}
+
 DpadDir StickToDpad(float x, float y, float deadzone, DpadDir last_dir)
 {
   const float mag = std::sqrt(x * x + y * y);
@@ -1790,6 +1934,16 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
   if (!TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) ||
       player < 0x80000000u)
   {
+    if (s_dpad_forced_input_disabled && !s_dpad_input_was_disabled &&
+        s_dpad_input_flags_addr >= 0x80000000u)
+    {
+      u8 old_flags = 0;
+      if (TryReadU8(guard, s_dpad_input_flags_addr, &old_flags))
+      {
+        TryWriteU8(guard, s_dpad_input_flags_addr,
+                   old_flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
+      }
+    }
     s_dpad_forced_input_disabled = false;
     s_dpad_input_was_disabled = false;
     s_dpad_input_flags_addr = 0;
@@ -1804,6 +1958,18 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
 
   if (disabled)
   {
+    if (s_dpad_forced_input_disabled && s_dpad_input_flags_addr != flags_addr &&
+        !s_dpad_input_was_disabled && s_dpad_input_flags_addr >= 0x80000000u)
+    {
+      u8 old_flags = 0;
+      if (TryReadU8(guard, s_dpad_input_flags_addr, &old_flags))
+      {
+        TryWriteU8(guard, s_dpad_input_flags_addr,
+                   old_flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
+      }
+      s_dpad_forced_input_disabled = false;
+    }
+
     if (!s_dpad_forced_input_disabled)
     {
       s_dpad_input_was_disabled = (flags & PLAYER_DISABLE_INPUT_MASK) != 0;
@@ -1913,6 +2079,36 @@ bool MatrixFromHmdSnapshot(const Common::VR::OpenXRInputSnapshot& snapshot, floa
   return true;
 }
 
+bool ScanPitchFieldsWritable(const Core::CPUThreadGuard& guard, u32 player)
+{
+  if (player < 0x80000000u)
+    return false;
+
+  float pitch = 0.0f;
+  float pitch_vel = 0.0f;
+  u8 free_look_state = 0;
+  u8 free_look_pitch_state = 0;
+  return TryReadFloat(guard, player + PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET, &pitch) &&
+         TryReadFloat(guard, player + 0x3F0u, &pitch_vel) &&
+         TryReadU8(guard, player + PLAYER_FREE_LOOK_STATE_OFFSET, &free_look_state) &&
+         TryReadU8(guard, player + 0x3DEu, &free_look_pitch_state);
+}
+
+void ClearScanPitchState(const Core::CPUThreadGuard& guard, u32 player)
+{
+  if (player < 0x80000000u)
+    return;
+
+  TryWriteU8(guard, player + PLAYER_FREE_LOOK_STATE_OFFSET, 0);
+  TryWriteU8(guard, player + PLAYER_FREE_LOOK_STATE_OFFSET + 1, 0);
+  TryWriteU8(guard, player + PLAYER_FREE_LOOK_STATE_OFFSET + 2, 0);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_CENTER_TIME_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_YAW_ANGLE_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_YAW_VEL_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + 0x3F0u, 0.0f);
+}
+
 void UpdateScanPitch(const Core::CPUThreadGuard& guard,
                      const Common::VR::OpenXRInputSnapshot& snapshot, u32 player,
                      float yaw_delta_deg)
@@ -1929,6 +2125,12 @@ void UpdateScanPitch(const Core::CPUThreadGuard& guard,
   if (scan_active)
   {
     s_scan_normal_frames = 0;
+    if (!ScanPitchFieldsWritable(guard, player))
+    {
+      s_scan_was_active = true;
+      return;
+    }
+
     const Common::VR::OpenXRControllerState& right = snapshot.controllers[1];
     if (!right.connected)
       return;
@@ -1960,20 +2162,17 @@ void UpdateScanPitch(const Core::CPUThreadGuard& guard,
   {
     s_scan_normal_frames = 1;
     s_smooth_scan_pitch = 0.0f;
-    TryWriteFloat(guard, player + PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET, 0.0f);
-    TryWriteFloat(guard, player + 0x3F0u, 0.0f);
+    ClearScanPitchState(guard, player);
   }
   else if (s_scan_normal_frames > 0 && s_scan_normal_frames < 8)
   {
     ++s_scan_normal_frames;
-    TryWriteFloat(guard, player + PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET, 0.0f);
-    TryWriteFloat(guard, player + 0x3F0u, 0.0f);
+    ClearScanPitchState(guard, player);
   }
   else if (s_scan_normal_frames == 8)
   {
     s_smooth_scan_pitch = 0.0f;
-    TryWriteFloat(guard, player + PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET, 0.0f);
-    TryWriteFloat(guard, player + 0x3F0u, 0.0f);
+    ClearScanPitchState(guard, player);
     ++s_scan_normal_frames;
   }
 
@@ -2480,15 +2679,15 @@ u32 VrMenuItemCountForTab(u32 tab)
   case 1:
     return 7;
   case 2:
-    return 9;
+    return 10;
   case 3:
-    return 8;
+    return 9;
   case 4:
     return 2;
   case VR_MENU_CANNON_TAB:
     return 6;
   default:
-    return 4;
+    return 5;
   }
 }
 
@@ -2501,9 +2700,9 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
   case 1:
     return index <= 5;
   case 2:
-    return index == 2 || index == 5 || index == 6 || index == 7;
+    return index == 2 || index == 6 || index == 7 || index == 8;
   case 3:
-    return index >= 3 && index <= 6;
+    return index >= 3 && index <= 7;
   default:
     return false;
   }
@@ -2607,6 +2806,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->use_right_hand = true;
   settings->require_trigger = false;
   settings->trigger_threshold = 0.5f;
+  settings->primegun_grip_inputs_enabled = true;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -2622,6 +2822,7 @@ void ResetMovementSettings(RuntimeSettings* settings)
   settings->directional_movement_speed = 14.0f;
   settings->directional_movement_accel = 45.0f;
   settings->directional_movement_air_accel = 8.0f;
+  settings->look_yaw_sensitivity = 1.0f;
 }
 
 void ResetVrRuntimeSettings(RuntimeSettings* settings)
@@ -2686,15 +2887,15 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->trigger_threshold =
           std::clamp(settings->trigger_threshold + sign * 0.05f, 0.0f, 1.0f);
       break;
-    case 5:
+    case 6:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 6:
+    case 7:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 7:
+    case 8:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -2721,6 +2922,10 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->directional_movement_air_accel =
           std::clamp(settings->directional_movement_air_accel + sign * 1.0f, 1.0f, 120.0f);
       break;
+    case 7:
+      settings->look_yaw_sensitivity =
+          std::clamp(settings->look_yaw_sensitivity + sign * 0.05f, 0.20f, 3.00f);
+      break;
     default:
       break;
     }
@@ -2746,10 +2951,13 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     if (s_vr_menu_selected_index == 0)
       settings->gun_targeting_enabled = !settings->gun_targeting_enabled;
     else if (s_vr_menu_selected_index == 3)
+      settings->visor_helmet_enabled = !settings->visor_helmet_enabled;
+    else if (s_vr_menu_selected_index == 4)
     {
       settings->gun_targeting_enabled = true;
       settings->gun_targeting_distance = 60.0f;
       settings->gun_targeting_radius = 4.0f;
+      settings->visor_helmet_enabled = false;
     }
     return;
   }
@@ -2775,10 +2983,12 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (s_vr_menu_selected_index == 1)
       settings->require_trigger = !settings->require_trigger;
     else if (s_vr_menu_selected_index == 3)
-      settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
+      settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
     else if (s_vr_menu_selected_index == 4)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (s_vr_menu_selected_index == 8)
+    else if (s_vr_menu_selected_index == 5)
+      settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
+    else if (s_vr_menu_selected_index == 9)
       ResetControllerSettings(settings);
     return;
   }
@@ -2792,7 +3002,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (s_vr_menu_selected_index == 2)
       settings->directional_movement_use_hmd_direction =
           !settings->directional_movement_use_hmd_direction;
-    else if (s_vr_menu_selected_index == 7)
+    else if (s_vr_menu_selected_index == 8)
       ResetMovementSettings(settings);
     return;
   }
@@ -2869,9 +3079,11 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.use_right_hand = settings.use_right_hand;
   overlay.require_trigger = settings.require_trigger;
   overlay.trigger_threshold = settings.trigger_threshold;
+  overlay.primegun_grip_inputs_enabled = settings.primegun_grip_inputs_enabled;
   overlay.gun_targeting_enabled = settings.gun_targeting_enabled;
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
+  overlay.visor_helmet_enabled = settings.visor_helmet_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
   overlay.xr_dpad_head_radius = settings.xr_dpad_head_radius;
   overlay.xr_dpad_head_y_below = settings.xr_dpad_head_y_below;
@@ -2883,6 +3095,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.directional_movement_speed = settings.directional_movement_speed;
   overlay.directional_movement_accel = settings.directional_movement_accel;
   overlay.directional_movement_air_accel = settings.directional_movement_air_accel;
+  overlay.look_yaw_sensitivity = settings.look_yaw_sensitivity;
   overlay.offset_x = settings.offset_x;
   overlay.offset_y = settings.offset_y;
   overlay.offset_z = settings.offset_z;
@@ -3139,6 +3352,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   const float yaw_delta_deg = GetPlayerYawDeltaDegrees(guard);
   UpdateDirectionalMovement(guard, snapshot, settings, yaw_delta_deg);
   UpdateXrDpad(guard, snapshot, settings);
+  ApplyLookYawSensitivityBoost(guard, snapshot, settings, prompt_player);
 
   const Common::VR::OpenXRControllerState& hand =
       snapshot.controllers[settings.use_right_hand ? 1 : 0];
@@ -3315,12 +3529,29 @@ bool ApplyFirstPersonPitchLoadPatch(const Core::CPUThreadGuard& guard)
     return false;
 
   const u32 branch = PpcBranch(patch.address, patch.cave);
+  constexpr u32 flag_hi = (PITCH_ZERO_ENABLE_SCRATCH >> 16) & 0xffffu;
+  constexpr u32 flag_lo = PITCH_ZERO_ENABLE_SCRATCH & 0xffffu;
+  const u32 original_label = patch.cave + 0x18u;
+  const u32 zero_label = patch.cave + 0x20u;
+  const u32 return_addr = patch.address + 4u;
+  const auto write_cave = [&] {
+    return RefreshInstructionBlock(
+        guard, patch.cave,
+        {{0x00u, 0x3D800000u | flag_hi},
+         {0x04u, 0x618C0000u | flag_lo},
+         {0x08u, 0x818C0000u},
+         {0x0Cu, 0x2C0C0000u},
+         {0x10u, PpcBeq(patch.cave + 0x10u, original_label)},
+         {0x14u, PpcBranch(patch.cave + 0x14u, zero_label)},
+         {0x18u, patch.original},
+         {0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr)},
+         {0x20u, LOAD_ZERO_TO_F31},
+         {0x24u, PpcBranch(patch.cave + 0x24u, return_addr)}});
+  };
+
   if (current == branch)
   {
-    const u32 return_addr = patch.address + 4u;
-    TryWriteInstruction(guard, patch.cave + 0x00u, LOAD_ZERO_TO_F31);
-    TryWriteInstruction(guard, patch.cave + 0x04u, PpcBranch(patch.cave + 0x04u, return_addr));
-    patch.applied = true;
+    patch.applied = write_cave();
     return false;
   }
 
@@ -3330,10 +3561,7 @@ bool ApplyFirstPersonPitchLoadPatch(const Core::CPUThreadGuard& guard)
     return false;
   }
 
-  const u32 return_addr = patch.address + 4u;
-  TryWriteInstruction(guard, patch.cave + 0x00u, LOAD_ZERO_TO_F31);
-  TryWriteInstruction(guard, patch.cave + 0x04u, PpcBranch(patch.cave + 0x04u, return_addr));
-  patch.applied = TryWriteInstruction(guard, patch.address, branch);
+  patch.applied = write_cave() && TryWriteInstruction(guard, patch.address, branch);
   return patch.applied;
 }
 
@@ -3349,11 +3577,14 @@ bool ApplyRenderModelOffsetPatch(const Core::CPUThreadGuard& guard)
   {
     if (patch.original == 0)
       TryReadU32(guard, patch.cave + 0x44u, &patch.original);
-    patch.applied = patch.original != 0;
-    return false;
+    if (patch.original == 0)
+    {
+      patch.applied = false;
+      return false;
+    }
+    current = patch.original;
   }
-
-  if ((current & 0xFFFF0000u) != 0x94210000u)
+  else if ((current & 0xFFFF0000u) != 0x94210000u)
   {
     patch.applied = false;
     return false;
@@ -3366,26 +3597,27 @@ bool ApplyRenderModelOffsetPatch(const Core::CPUThreadGuard& guard)
   constexpr u32 offset_scratch_lo = MODEL_OFFSET_WORLD_SCRATCH & 0xffffu;
   const u32 return_addr = patch.address + 4u;
 
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | pos_scratch_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | pos_scratch_lo);
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0x3D600000u | offset_scratch_hi);
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x616B0000u | offset_scratch_lo);
-  TryWriteInstruction(guard, patch.cave + 0x10u, 0xC0050000u);
-  TryWriteInstruction(guard, patch.cave + 0x14u, 0xC02B0000u);
-  TryWriteInstruction(guard, patch.cave + 0x18u, 0xEC00082Au);
-  TryWriteInstruction(guard, patch.cave + 0x1Cu, 0xD00C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x20u, 0xC0450004u);
-  TryWriteInstruction(guard, patch.cave + 0x24u, 0xC06B0004u);
-  TryWriteInstruction(guard, patch.cave + 0x28u, 0xEC42182Au);
-  TryWriteInstruction(guard, patch.cave + 0x2Cu, 0xD04C0004u);
-  TryWriteInstruction(guard, patch.cave + 0x30u, 0xC0850008u);
-  TryWriteInstruction(guard, patch.cave + 0x34u, 0xC0AB0008u);
-  TryWriteInstruction(guard, patch.cave + 0x38u, 0xEC84282Au);
-  TryWriteInstruction(guard, patch.cave + 0x3Cu, 0xD08C0008u);
-  TryWriteInstruction(guard, patch.cave + 0x40u, 0x7D856378u);
-  TryWriteInstruction(guard, patch.cave + 0x44u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x48u, PpcBranch(patch.cave + 0x48u, return_addr));
-  patch.applied = TryWriteInstruction(guard, patch.address, branch);
+  patch.applied = InstallBranchAfterCaveWrite(
+      guard, patch.address, patch.cave,
+      {{0x00u, 0x3D800000u | pos_scratch_hi},
+       {0x04u, 0x618C0000u | pos_scratch_lo},
+       {0x08u, 0x3D600000u | offset_scratch_hi},
+       {0x0Cu, 0x616B0000u | offset_scratch_lo},
+       {0x10u, 0xC0050000u},
+       {0x14u, 0xC02B0000u},
+       {0x18u, 0xEC00082Au},
+       {0x1Cu, 0xD00C0000u},
+       {0x20u, 0xC0450004u},
+       {0x24u, 0xC06B0004u},
+       {0x28u, 0xEC42182Au},
+       {0x2Cu, 0xD04C0004u},
+       {0x30u, 0xC0850008u},
+       {0x34u, 0xC0AB0008u},
+       {0x38u, 0xEC84282Au},
+       {0x3Cu, 0xD08C0008u},
+       {0x40u, 0x7D856378u},
+       {0x44u, patch.original},
+       {0x48u, PpcBranch(patch.cave + 0x48u, return_addr)}});
   return patch.applied;
 }
 
@@ -3401,11 +3633,14 @@ bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
     {
       if (patch.original == 0)
         TryReadU32(guard, patch.cave + 0x18u, &patch.original);
-      patch.applied = patch.original != 0;
-      return false;
+      if (patch.original == 0)
+      {
+        patch.applied = false;
+        return false;
+      }
+      current = patch.original;
     }
-
-    if ((current & 0xFFFF0000u) != 0x94210000u)
+    else if ((current & 0xFFFF0000u) != 0x94210000u)
     {
       patch.applied = false;
       return false;
@@ -3417,15 +3652,16 @@ bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
     const u32 trace_lo = scratch & 0xffffu;
     const u32 return_addr = patch.address + 4u;
 
-    TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | trace_hi);
-    TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | trace_lo);
-    TryWriteInstruction(guard, patch.cave + 0x08u, 0x906C0000u);
-    TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x908C0004u);
-    TryWriteInstruction(guard, patch.cave + 0x10u, 0x38000001u);
-    TryWriteInstruction(guard, patch.cave + 0x14u, 0x900C0008u);
-    TryWriteInstruction(guard, patch.cave + 0x18u, patch.original);
-    TryWriteInstruction(guard, patch.cave + 0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr));
-    patch.applied = TryWriteInstruction(guard, patch.address, branch);
+    patch.applied = InstallBranchAfterCaveWrite(
+        guard, patch.address, patch.cave,
+        {{0x00u, 0x3D800000u | trace_hi},
+         {0x04u, 0x618C0000u | trace_lo},
+         {0x08u, 0x906C0000u},
+         {0x0Cu, 0x908C0004u},
+         {0x10u, 0x38000001u},
+         {0x14u, 0x900C0008u},
+         {0x18u, patch.original},
+         {0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr)}});
     return patch.applied;
   };
 
@@ -3442,27 +3678,34 @@ bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
     {
       if (update_patch.original == 0)
         TryReadU32(guard, update_patch.cave + 0x14u, &update_patch.original);
-      update_patch.applied = update_patch.original != 0;
+      if (update_patch.original == 0)
+      {
+        update_patch.applied = false;
+      }
+      else
+      {
+        current = update_patch.original;
+      }
     }
-    else if ((current & 0xFFFF0000u) == 0x94210000u)
+    if ((current & 0xFFFF0000u) == 0x94210000u)
     {
       update_patch.original = current;
       const u32 trace_hi = (SCAN_RETICLE_TRACE_SCRATCH >> 16) & 0xffffu;
       const u32 trace_lo = SCAN_RETICLE_TRACE_SCRATCH & 0xffffu;
       const u32 return_addr = update_patch.address + 4u;
 
-      TryWriteInstruction(guard, update_patch.cave + 0x00u, 0x3D800000u | trace_hi);
-      TryWriteInstruction(guard, update_patch.cave + 0x04u, 0x618C0000u | trace_lo);
-      TryWriteInstruction(guard, update_patch.cave + 0x08u, 0x906C0020u);
-      TryWriteInstruction(guard, update_patch.cave + 0x0Cu, 0x38000001u);
-      TryWriteInstruction(guard, update_patch.cave + 0x10u, 0x900C0024u);
-      TryWriteInstruction(guard, update_patch.cave + 0x14u, update_patch.original);
-      TryWriteInstruction(guard, update_patch.cave + 0x18u,
-                          PpcBranch(update_patch.cave + 0x18u, return_addr));
-      update_patch.applied = TryWriteInstruction(guard, update_patch.address, branch);
+      update_patch.applied = InstallBranchAfterCaveWrite(
+          guard, update_patch.address, update_patch.cave,
+          {{0x00u, 0x3D800000u | trace_hi},
+           {0x04u, 0x618C0000u | trace_lo},
+           {0x08u, 0x906C0020u},
+           {0x0Cu, 0x38000001u},
+           {0x10u, 0x900C0024u},
+           {0x14u, update_patch.original},
+           {0x18u, PpcBranch(update_patch.cave + 0x18u, return_addr)}});
       wrote = update_patch.applied || wrote;
     }
-    else
+    else if (current != branch)
     {
       update_patch.applied = false;
     }
@@ -3481,51 +3724,12 @@ bool ApplyScanIndicatorViewBasisPatch(const Core::CPUThreadGuard& guard)
   const u32 branch = PpcBranch(patch.address, patch.cave);
   if (current == branch)
   {
-    patch.applied = true;
-    return false;
-  }
-
-  if (current != patch.original)
-  {
     patch.applied = false;
-    return false;
+    return TryWriteInstruction(guard, patch.address, patch.original);
   }
 
-  patch.original = current;
-  constexpr u32 basis_hi = (RETICLE_BILLBOARD_SCRATCH >> 16) & 0xffffu;
-  constexpr u32 basis_lo = RETICLE_BILLBOARD_SCRATCH & 0xffffu;
-  const u32 return_addr = patch.address + 4u;
-
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | basis_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | basis_lo);
-
-  // Copy only the 3x3 orientation rows into the per-indicator model transform.
-  // Translation remains the scan indicator position the game already selected.
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0xC00C0004u);  // lfs f0, 4(r12)
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0xD0010148u);  // stfs f0, 0x148(r1)
-  TryWriteInstruction(guard, patch.cave + 0x10u, 0xC00C0008u);
-  TryWriteInstruction(guard, patch.cave + 0x14u, 0xD001014Cu);
-  TryWriteInstruction(guard, patch.cave + 0x18u, 0xC00C000Cu);
-  TryWriteInstruction(guard, patch.cave + 0x1Cu, 0xD0010150u);
-
-  TryWriteInstruction(guard, patch.cave + 0x20u, 0xC00C0010u);
-  TryWriteInstruction(guard, patch.cave + 0x24u, 0xD0010158u);
-  TryWriteInstruction(guard, patch.cave + 0x28u, 0xC00C0014u);
-  TryWriteInstruction(guard, patch.cave + 0x2Cu, 0xD001015Cu);
-  TryWriteInstruction(guard, patch.cave + 0x30u, 0xC00C0018u);
-  TryWriteInstruction(guard, patch.cave + 0x34u, 0xD0010160u);
-
-  TryWriteInstruction(guard, patch.cave + 0x38u, 0xC00C001Cu);
-  TryWriteInstruction(guard, patch.cave + 0x3Cu, 0xD0010168u);
-  TryWriteInstruction(guard, patch.cave + 0x40u, 0xC00C0020u);
-  TryWriteInstruction(guard, patch.cave + 0x44u, 0xD001016Cu);
-  TryWriteInstruction(guard, patch.cave + 0x48u, 0xC00C0024u);
-  TryWriteInstruction(guard, patch.cave + 0x4Cu, 0xD0010170u);
-
-  TryWriteInstruction(guard, patch.cave + 0x50u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x54u, PpcBranch(patch.cave + 0x54u, return_addr));
-  patch.applied = TryWriteInstruction(guard, patch.address, branch);
-  return patch.applied;
+  patch.applied = false;
+  return false;
 }
 
 bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, ProjectileTransformPatch& patch)
@@ -3537,11 +3741,16 @@ bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, Projectile
   const u32 branch = PpcBranch(patch.address, patch.cave);
   if (current == branch)
   {
-    patch.applied = true;
-    return false;
+    if (patch.original == 0)
+      TryReadU32(guard, patch.cave + 0x80u, &patch.original);
+    if (patch.original == 0)
+    {
+      patch.applied = false;
+      return false;
+    }
+    current = patch.original;
   }
-
-  if ((current & 0xFFFF0000u) != 0x94210000u)
+  else if ((current & 0xFFFF0000u) != 0x94210000u)
   {
     patch.applied = false;
     return false;
@@ -3556,41 +3765,42 @@ bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, Projectile
   const u32 return_addr = patch.address + 4u;
   const u32 src = patch.transform_register;
 
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | transform_scratch_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | transform_scratch_lo);
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0x3D600000u | cannon_scratch_hi);
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x616B0000u | cannon_scratch_lo);
-  TryWriteInstruction(guard, patch.cave + 0x10u, 0x800B0038u);
-  TryWriteInstruction(guard, patch.cave + 0x14u, 0x2C000000u);
-  TryWriteInstruction(guard, patch.cave + 0x18u, PpcBeq(patch.cave + 0x18u, original_label));
-  TryWriteInstruction(guard, patch.cave + 0x1Cu, 0x800B0000u);
-  TryWriteInstruction(guard, patch.cave + 0x20u, 0x900C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x24u, 0x800B0004u);
-  TryWriteInstruction(guard, patch.cave + 0x28u, 0x900C0004u);
-  TryWriteInstruction(guard, patch.cave + 0x2Cu, 0x800B0008u);
-  TryWriteInstruction(guard, patch.cave + 0x30u, 0x900C0008u);
-  TryWriteInstruction(guard, patch.cave + 0x34u, 0x800B000Cu);
-  TryWriteInstruction(guard, patch.cave + 0x38u, 0x900C0010u);
-  TryWriteInstruction(guard, patch.cave + 0x3Cu, 0x800B0010u);
-  TryWriteInstruction(guard, patch.cave + 0x40u, 0x900C0014u);
-  TryWriteInstruction(guard, patch.cave + 0x44u, 0x800B0014u);
-  TryWriteInstruction(guard, patch.cave + 0x48u, 0x900C0018u);
-  TryWriteInstruction(guard, patch.cave + 0x4Cu, 0x800B0018u);
-  TryWriteInstruction(guard, patch.cave + 0x50u, 0x900C0020u);
-  TryWriteInstruction(guard, patch.cave + 0x54u, 0x800B001Cu);
-  TryWriteInstruction(guard, patch.cave + 0x58u, 0x900C0024u);
-  TryWriteInstruction(guard, patch.cave + 0x5Cu, 0x800B0020u);
-  TryWriteInstruction(guard, patch.cave + 0x60u, 0x900C0028u);
-  TryWriteInstruction(guard, patch.cave + 0x64u, PpcLwzR0(src, 0x0Cu));
-  TryWriteInstruction(guard, patch.cave + 0x68u, 0x900C000Cu);
-  TryWriteInstruction(guard, patch.cave + 0x6Cu, PpcLwzR0(src, 0x1Cu));
-  TryWriteInstruction(guard, patch.cave + 0x70u, 0x900C001Cu);
-  TryWriteInstruction(guard, patch.cave + 0x74u, PpcLwzR0(src, 0x2Cu));
-  TryWriteInstruction(guard, patch.cave + 0x78u, 0x900C002Cu);
-  TryWriteInstruction(guard, patch.cave + 0x7Cu, PpcMr(src, 12));
-  TryWriteInstruction(guard, patch.cave + 0x80u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x84u, PpcBranch(patch.cave + 0x84u, return_addr));
-  patch.applied = TryWriteInstruction(guard, patch.address, branch);
+  patch.applied = InstallBranchAfterCaveWrite(
+      guard, patch.address, patch.cave,
+      {{0x00u, 0x3D800000u | transform_scratch_hi},
+       {0x04u, 0x618C0000u | transform_scratch_lo},
+       {0x08u, 0x3D600000u | cannon_scratch_hi},
+       {0x0Cu, 0x616B0000u | cannon_scratch_lo},
+       {0x10u, 0x800B0038u},
+       {0x14u, 0x2C000000u},
+       {0x18u, PpcBeq(patch.cave + 0x18u, original_label)},
+       {0x1Cu, 0x800B0000u},
+       {0x20u, 0x900C0000u},
+       {0x24u, 0x800B0004u},
+       {0x28u, 0x900C0004u},
+       {0x2Cu, 0x800B0008u},
+       {0x30u, 0x900C0008u},
+       {0x34u, 0x800B000Cu},
+       {0x38u, 0x900C0010u},
+       {0x3Cu, 0x800B0010u},
+       {0x40u, 0x900C0014u},
+       {0x44u, 0x800B0014u},
+       {0x48u, 0x900C0018u},
+       {0x4Cu, 0x800B0018u},
+       {0x50u, 0x900C0020u},
+       {0x54u, 0x800B001Cu},
+       {0x58u, 0x900C0024u},
+       {0x5Cu, 0x800B0020u},
+       {0x60u, 0x900C0028u},
+       {0x64u, PpcLwzR0(src, 0x0Cu)},
+       {0x68u, 0x900C000Cu},
+       {0x6Cu, PpcLwzR0(src, 0x1Cu)},
+       {0x70u, 0x900C001Cu},
+       {0x74u, PpcLwzR0(src, 0x2Cu)},
+       {0x78u, 0x900C002Cu},
+       {0x7Cu, PpcMr(src, 12)},
+       {0x80u, patch.original},
+       {0x84u, PpcBranch(patch.cave + 0x84u, return_addr)}});
   return patch.applied;
 }
 
@@ -3611,8 +3821,14 @@ bool ApplyGameFlowFlagPatch(const Core::CPUThreadGuard& guard, GameFlowFlagPatch
   const u32 branch = PpcBranch(patch.address, patch.cave);
   if (current == branch)
   {
-    patch.applied = true;
-    return false;
+    if (patch.original == 0)
+      TryReadU32(guard, patch.cave + 0x10u, &patch.original);
+    if (patch.original == 0)
+    {
+      patch.applied = false;
+      return false;
+    }
+    current = patch.original;
   }
 
   patch.original = current;
@@ -3620,13 +3836,14 @@ bool ApplyGameFlowFlagPatch(const Core::CPUThreadGuard& guard, GameFlowFlagPatch
   constexpr u32 menu_scratch_lo = GAMEFLOW_MENU_SCRATCH & 0xffffu;
   const u32 return_addr = patch.address + 4u;
 
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | menu_scratch_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | menu_scratch_lo);
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0x39600000u | (patch.menu_flag & 0xffffu));
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x916C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x10u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x14u, PpcBranch(patch.cave + 0x14u, return_addr));
-  patch.applied = TryWriteInstruction(guard, patch.address, branch);
+  patch.applied = InstallBranchAfterCaveWrite(
+      guard, patch.address, patch.cave,
+      {{0x00u, 0x3D800000u | menu_scratch_hi},
+       {0x04u, 0x618C0000u | menu_scratch_lo},
+       {0x08u, 0x39600000u | (patch.menu_flag & 0xffffu)},
+       {0x0Cu, 0x916C0000u},
+       {0x10u, patch.original},
+       {0x14u, PpcBranch(patch.cave + 0x14u, return_addr)}});
   return patch.applied;
 }
 
@@ -3657,21 +3874,28 @@ bool ApplyConditionalCombatPitchPatch(const Core::CPUThreadGuard& guard, Dynamic
   const u32 zero_label = patch.cave + 0x20u;
   const u32 return_addr = patch.address + 4u;
 
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | flag_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | flag_lo);
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0x818C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x2C0C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x10u, PpcBeq(patch.cave + 0x10u, original_label));
-  TryWriteInstruction(guard, patch.cave + 0x14u, PpcBranch(patch.cave + 0x14u, zero_label));
-  TryWriteInstruction(guard, patch.cave + 0x18u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr));
-  TryWriteInstruction(guard, patch.cave + 0x20u, patch.replacement);
-  TryWriteInstruction(guard, patch.cave + 0x24u, PpcBranch(patch.cave + 0x24u, return_addr));
+  const std::initializer_list<HookWrite> cave_writes{
+      {0x00u, 0x3D800000u | flag_hi},
+      {0x04u, 0x618C0000u | flag_lo},
+      {0x08u, 0x818C0000u},
+      {0x0Cu, 0x2C0C0000u},
+      {0x10u, PpcBeq(patch.cave + 0x10u, original_label)},
+      {0x14u, PpcBranch(patch.cave + 0x14u, zero_label)},
+      {0x18u, patch.original},
+      {0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr)},
+      {0x20u, patch.replacement},
+      {0x24u, PpcBranch(patch.cave + 0x24u, return_addr)}};
+  const bool cave_matches = InstructionBlockMatches(guard, patch.cave, cave_writes);
+  if (!cave_matches && !TryWriteInstructionBlock(guard, patch.cave, cave_writes))
+  {
+    patch.applied = false;
+    return false;
+  }
 
   if (current == branch)
   {
     patch.applied = true;
-    return false;
+    return !cave_matches;
   }
 
   patch.applied = TryWriteInstruction(guard, patch.address, branch);
@@ -3697,22 +3921,29 @@ bool ApplyConditionalElevationPitchPatch(const Core::CPUThreadGuard& guard, Dyna
   const u32 zero_label = patch.cave + 0x20u;
   const u32 return_addr = patch.address + 4u;
 
-  TryWriteInstruction(guard, patch.cave + 0x00u, 0x3D800000u | flag_hi);
-  TryWriteInstruction(guard, patch.cave + 0x04u, 0x618C0000u | flag_lo);
-  TryWriteInstruction(guard, patch.cave + 0x08u, 0x818C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x0Cu, 0x2C0C0000u);
-  TryWriteInstruction(guard, patch.cave + 0x10u, PpcBeq(patch.cave + 0x10u, original_label));
-  TryWriteInstruction(guard, patch.cave + 0x14u, PpcBranch(patch.cave + 0x14u, zero_label));
-  TryWriteInstruction(guard, patch.cave + 0x18u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr));
-  TryWriteInstruction(guard, patch.cave + 0x20u, 0xC00280B0u);
-  TryWriteInstruction(guard, patch.cave + 0x24u, patch.original);
-  TryWriteInstruction(guard, patch.cave + 0x28u, PpcBranch(patch.cave + 0x28u, return_addr));
+  const std::initializer_list<HookWrite> cave_writes{
+      {0x00u, 0x3D800000u | flag_hi},
+      {0x04u, 0x618C0000u | flag_lo},
+      {0x08u, 0x818C0000u},
+      {0x0Cu, 0x2C0C0000u},
+      {0x10u, PpcBeq(patch.cave + 0x10u, original_label)},
+      {0x14u, PpcBranch(patch.cave + 0x14u, zero_label)},
+      {0x18u, patch.original},
+      {0x1Cu, PpcBranch(patch.cave + 0x1Cu, return_addr)},
+      {0x20u, 0xC00280B0u},
+      {0x24u, patch.original},
+      {0x28u, PpcBranch(patch.cave + 0x28u, return_addr)}};
+  const bool cave_matches = InstructionBlockMatches(guard, patch.cave, cave_writes);
+  if (!cave_matches && !TryWriteInstructionBlock(guard, patch.cave, cave_writes))
+  {
+    patch.applied = false;
+    return false;
+  }
 
   if (current == branch)
   {
     patch.applied = true;
-    return false;
+    return !cave_matches;
   }
 
   patch.applied = TryWriteInstruction(guard, patch.address, branch);
@@ -3726,6 +3957,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyRenderModelOffsetPatch(guard) || wrote;
   wrote = ApplyScanReticleTracePatch(guard) || wrote;
   wrote = ApplyScanIndicatorViewBasisPatch(guard) || wrote;
+  wrote = ApplyFirstPersonPitchLoadPatch(guard) || wrote;
 
   u32 player = 0;
   const bool scan_active =
@@ -3757,7 +3989,7 @@ void ApplyBuiltinPatches(Core::System& system, const Core::CPUThreadGuard& guard
     if (current && current->value == patch.value)
       continue;
 
-    if (!PowerPC::MMU::HostTryWrite<u32>(guard, patch.value, patch.address))
+    if (!TryWriteInstruction(guard, patch.address, patch.value))
       continue;
 
     wrote_instruction = true;
@@ -3810,6 +4042,75 @@ void VerifyCriticalBuiltinPatches(Core::System& system, const Core::CPUThreadGua
 
   s_patches_applied_this_boot = false;
   ApplyBuiltinPatches(system, guard);
+  system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
+}
+
+void ResetCannonTrackingFeedState(const Core::CPUThreadGuard& guard)
+{
+  s_cannon_hand_pose_ready = false;
+  s_smooth_matrix_valid = false;
+  s_last_validated_gun = 0;
+  TryWriteU32(guard, CANNON_EXPECTED_GUN_SCRATCH, 0);
+  WriteGunTargetScratch(guard, 0, 0xffffu);
+  TryWriteU32(guard, RETICLE_BILLBOARD_SCRATCH, 0);
+}
+
+bool CannonFeedScratchLooksEmpty(const Core::CPUThreadGuard& guard)
+{
+  u32 expected_gun = 0;
+  if (!TryReadU32(guard, CANNON_EXPECTED_GUN_SCRATCH, &expected_gun) || expected_gun != 0)
+    return false;
+
+  for (u32 offset = 0; offset < 0x24u; offset += 4u)
+  {
+    u32 word = 0;
+    if (!TryReadU32(guard, CANNON_BASIS_SCRATCH + offset, &word) || word != 0)
+      return false;
+  }
+
+  return true;
+}
+
+void VerifyCannonFeedWatchdog(Core::System& system, const Core::CPUThreadGuard& guard,
+                              const RuntimeSettings& settings, bool have_player, u32 player)
+{
+  if (!settings.enabled || !settings.builtin_patches_enabled || !have_player)
+  {
+    s_cannon_feed_stall_frames = 0;
+    return;
+  }
+
+  if (s_frame_counter < s_last_cannon_feed_watchdog_frame + 60u)
+    return;
+  s_last_cannon_feed_watchdog_frame = s_frame_counter;
+
+  u32 gun = 0;
+  const bool cannon_ready = PlayerIsFirstPersonGunReady(guard, player) &&
+                            TryReadU32(guard, player + ADDRESS.cannon_offset, &gun) &&
+                            gun >= 0x80000000u;
+  if (!cannon_ready)
+  {
+    s_cannon_feed_stall_frames = 0;
+    return;
+  }
+
+  if (!CannonFeedScratchLooksEmpty(guard))
+  {
+    s_cannon_feed_stall_frames = 0;
+    return;
+  }
+
+  ++s_cannon_feed_stall_frames;
+  if (s_cannon_feed_stall_frames < 2)
+    return;
+
+  s_cannon_feed_stall_frames = 0;
+  ResetCannonTrackingFeedState(guard);
+  s_patches_applied_this_boot = false;
+  ApplyBuiltinPatches(system, guard);
+  ApplyCombatPitchPatches(guard);
+  if (settings.patch_beam_projectile_timing)
+    ApplyProjectileTransformPatches(guard);
   system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
 }
 
@@ -3868,7 +4169,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   if ((s_frame_counter % 60) == 1)
-    ApplyHelmetOpacityZero(guard);
+    ApplyHelmetOpacityZero(guard, settings);
 
   u32 player = 0;
   const bool have_player =
@@ -3909,6 +4210,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     LogScanReticleTrace(guard, player);
   }
   VerifyCriticalBuiltinPatches(system, guard, settings, have_player);
+  VerifyCannonFeedWatchdog(system, guard, settings, have_player, player);
   if (RuntimeLoggingEnabled())
   {
     if (!s_have_logged_gameplay_input_active ||
@@ -3989,6 +4291,8 @@ void ResetNativeRuntime()
   s_last_validated_gun = 0;
   s_last_patch_player = 0;
   s_patch_reapply_until_frame = 0;
+  s_last_cannon_feed_watchdog_frame = 0;
+  s_cannon_feed_stall_frames = 0;
   s_cannon_hand_pose_ready = false;
   s_smooth_matrix_valid = false;
   s_controller_base_x = 0.0f;
