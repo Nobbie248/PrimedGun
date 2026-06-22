@@ -371,7 +371,7 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
     out.Write("}} custom_uniforms;\n");
   }
 
-  if (uid_data->vs_expand != VSExpand::None)
+  if (uid_data->vs_expand != VSExpand::None || host_config.vk_multiview)
   {
     out.Write("UBO_BINDING(std140, 4) uniform GSBlock {{\n");
     out.Write("{}", s_geometry_shader_uniforms);
@@ -827,6 +827,132 @@ ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& ho
   // Hence, we compensate for this pixel center difference so that primitives
   // get rasterized correctly.
   out.Write("o.pos.xy = o.pos.xy - o.pos.w * " I_PIXELCENTERCORRECTION ".xy;\n");
+
+  // VR multiview (VK_KHR_multiview): the geometry shader is skipped, so apply the per-eye
+  // asymmetric HMD projection here in the vertex shader using gl_ViewIndex. Mirrors the
+  // perspective path of GeometryShaderGen (cstereo.w > 0.5); runs last so it overrides the mono
+  // projection. Head-locked/orthographic VR modes (cstereo.w < 0) are handled in a later pass.
+  if (host_config.vk_multiview)
+  {
+    out.Write("\t{{\n"
+              "\t\tint vr_eye = gl_ViewIndex;\n");
+    out.Write("\t\tif (" I_STEREOPARAMS ".w > 0.5f)\n"
+              "\t\t{{\n");
+    out.Write("\t\t\tif (" I_STEREOPARAMS ".y > 0.5f)\n"
+              "\t\t\t{{\n");
+    out.Write("\t\t\t\tfloat4 eye_proj_x = " I_LEGACY_EYE_PROJ_X "[vr_eye];\n"
+              "\t\t\t\tfloat4 eye_proj_y = " I_LEGACY_EYE_PROJ_Y "[vr_eye];\n");
+    out.Write(
+        "\t\t\t\to.pos.x = eye_proj_x.z * o.pos.x + eye_proj_x.x - eye_proj_x.y * o.pos.w;\n"
+        "\t\t\t\to.pos.y = eye_proj_y.z * o.pos.y + eye_proj_y.x - eye_proj_y.y * o.pos.w;\n");
+    if (!host_config.fast_depth_calc)
+      out.Write(
+          "\t\t\t\to.clipPos.x = eye_proj_x.z * o.clipPos.x + eye_proj_x.x - eye_proj_x.y * "
+          "o.clipPos.w;\n"
+          "\t\t\t\to.clipPos.y = eye_proj_y.z * o.clipPos.y + eye_proj_y.x - eye_proj_y.y * "
+          "o.clipPos.w;\n");
+    out.Write("\t\t\t}}\n"
+              "\t\t\telse\n"
+              "\t\t\t{{\n");
+    out.Write("\t\t\t\tfloat4 row0 = " I_EYE_PROJ "[vr_eye * 2 + 0];\n"
+              "\t\t\t\tfloat4 row1 = " I_EYE_PROJ "[vr_eye * 2 + 1];\n"
+              "\t\t\t\tfloat4 zrow = " I_VR_EYE_Z "[vr_eye];\n"
+              "\t\t\t\tfloat4 vp = o.viewPos;\n"
+              "\t\t\t\tvp.x *= " I_STEREOPARAMS ".x;\n");
+    out.Write("\t\t\t\tfloat z_eye = dot(zrow, vp);\n"
+              "\t\t\t\tfloat clip_x = dot(row0, vp);\n"
+              "\t\t\t\tfloat clip_y = dot(row1, vp);\n"
+              "\t\t\t\tfloat clip_w = -z_eye;\n"
+              "\t\t\t\tfloat clip_z = " I_VR_DEPTH ".x * z_eye + " I_VR_DEPTH ".y;\n");
+    if (!host_config.fast_depth_calc)
+      out.Write("\t\t\t\to.clipPos = float4(clip_x, clip_y, clip_z, clip_w);\n");
+    out.Write("\t\t\t\to.pos = float4(clip_x, clip_y, clip_z, clip_w);\n"
+              "\t\t\t\to.pos.z = o.pos.w * " I_VR_DEPTH ".w - o.pos.z * " I_VR_DEPTH ".z;\n");
+    if (!host_config.backend_clip_control)
+      out.Write("\t\t\t\to.pos.z = o.pos.z * 2.0 - o.pos.w;\n");
+    out.Write("\t\t\t\to.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n"
+              "\t\t\t\to.pos.xy = o.pos.xy - o.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+    out.Write("\t\t\t}}\n");
+    if (host_config.backend_depth_clamp)
+      out.Write("\t\t\tclipDist0 = 1.0;\n"
+                "\t\t\tclipDist1 = 1.0;\n");
+    out.Write("\t\t}}\n");
+
+    // Head-locked VR (cstereo.w < -1.5): HUD/visor on a virtual screen that follows the head.
+    out.Write("\t\telse if (" I_STEREOPARAMS ".w < -1.5f)\n"
+              "\t\t{{\n");
+    out.Write("\t\t\tfloat safe_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : ((o.pos.w < 0.0) ? -1.0e-5 "
+              ": 1.0e-5);\n"
+              "\t\t\tfloat ndc_x = clamp(o.pos.x / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_y = clamp(o.pos.y / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_z = clamp(o.pos.z / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
+    out.Write("\t\t\tfloat4 screenPos = float4(ndc_x * " I_VR_SCREEN ".x, ndc_y * " I_VR_SCREEN
+              ".y, -" I_VR_SCREEN ".z, 1.0);\n");
+    out.Write("\t\t\tfloat curve = max(" I_HEAD_PARAMS ".x, 0.0);\n"
+              "\t\t\tfloat horizontal = 0.5 * (ndc_x * ndc_x);\n"
+              "\t\t\tfloat curve_push = curve * horizontal * " I_VR_SCREEN ".z * 0.25;\n"
+              "\t\t\tcurve_push = min(curve_push, " I_VR_SCREEN ".z * 0.8);\n"
+              "\t\t\tscreenPos.z += curve_push;\n");
+    out.Write("\t\t\tfloat4 row0 = " I_HEAD_PROJ "[vr_eye * 2 + 0];\n"
+              "\t\t\tfloat4 row1 = " I_HEAD_PROJ "[vr_eye * 2 + 1];\n"
+              "\t\t\to.pos.x = dot(row0, screenPos);\n"
+              "\t\t\to.pos.y = dot(row1, screenPos);\n"
+              "\t\t\to.pos.w = max(-screenPos.z, 0.001);\n");
+    out.Write("\t\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n"
+              "\t\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n"
+              "\t\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n"
+              "\t\t\tlayer_step = min(layer_step, max_safe_step);\n"
+              "\t\t\to.pos.z = o.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * 0.0001);\n");
+    if (!host_config.fast_depth_calc)
+      out.Write("\t\t\to.clipPos = o.pos;\n");
+    if (!host_config.backend_clip_control)
+      out.Write("\t\t\to.pos.z = o.pos.z * 2.0 - o.pos.w;\n");
+    out.Write("\t\t\to.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n"
+              "\t\t\to.pos.xy = o.pos.xy - o.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+    if (host_config.backend_depth_clamp)
+      out.Write("\t\t\tclipDist0 = 1.0;\n"
+                "\t\t\tclipDist1 = 1.0;\n");
+    out.Write("\t\t}}\n");
+
+    // Orthographic VR (cstereo.w < -0.5): 2D content (menus/FMV/HUD) on a world-fixed screen.
+    out.Write("\t\telse if (" I_STEREOPARAMS ".w < -0.5f)\n"
+              "\t\t{{\n");
+    out.Write("\t\t\tfloat safe_w = (abs(o.pos.w) > 1.0e-5) ? o.pos.w : ((o.pos.w < 0.0) ? -1.0e-5 "
+              ": 1.0e-5);\n"
+              "\t\t\tfloat ndc_x = clamp(o.pos.x / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_y = clamp(o.pos.y / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_z = clamp(o.pos.z / safe_w, -1.0, 1.0);\n"
+              "\t\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
+    out.Write("\t\t\tfloat4 screenPos = float4(ndc_x * " I_VR_SCREEN ".x, ndc_y * " I_VR_SCREEN
+              ".y, -" I_VR_SCREEN ".z, 1.0);\n");
+    out.Write("\t\t\tfloat4 row0 = " I_EYE_PROJ "[vr_eye * 2 + 0];\n"
+              "\t\t\tfloat4 row1 = " I_EYE_PROJ "[vr_eye * 2 + 1];\n"
+              "\t\t\tfloat4 zrow = " I_VR_EYE_Z "[vr_eye];\n"
+              "\t\t\tfloat z_eye = dot(zrow, screenPos);\n"
+              "\t\t\tfloat clip_x = dot(row0, screenPos);\n"
+              "\t\t\tfloat clip_y = dot(row1, screenPos);\n"
+              "\t\t\tfloat clip_w = -z_eye;\n");
+    if (!host_config.fast_depth_calc)
+      out.Write("\t\t\to.clipPos = float4(clip_x, clip_y, 0.0, clip_w);\n");
+    out.Write("\t\t\to.pos = float4(clip_x, clip_y, 0.0, clip_w);\n");
+    out.Write("\t\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n"
+              "\t\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n"
+              "\t\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n"
+              "\t\t\tlayer_step = min(layer_step, max_safe_step);\n"
+              "\t\t\to.pos.z = o.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * " I_VR_DEPTH
+              ".y);\n");
+    if (!host_config.backend_clip_control)
+      out.Write("\t\t\to.pos.z = o.pos.z * 2.0 - o.pos.w;\n");
+    out.Write("\t\t\to.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n"
+              "\t\t\to.pos.xy = o.pos.xy - o.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+    if (host_config.backend_depth_clamp)
+      out.Write("\t\t\tclipDist0 = 1.0;\n"
+                "\t\t\tclipDist1 = 1.0;\n");
+    out.Write("\t\t}}\n");
+
+    out.Write("\t}}\n");
+  }
 
   if (vertex_rounding && !host_config.vr_stereo)
   {

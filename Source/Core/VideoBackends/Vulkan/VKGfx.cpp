@@ -26,6 +26,7 @@
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/RenderState.h"
+#include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VideoConfig.h"
 
@@ -208,7 +209,12 @@ void VKGfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_en
     }
     if (!clear_attachments.empty())
     {
-      VkClearRect vk_rect = {target_vk_rc, 0, g_framebuffer_manager->GetEFBLayers()};
+      // Under VK_KHR_multiview the render pass viewMask covers all views, so the clear rect must
+      // target a single layer (baseArrayLayer 0, layerCount 1), not the EFB's physical layer count
+      // — VUID-vkCmdClearAttachments-baseArrayLayer-00018.
+      const u32 clear_layer_count =
+          ShaderHostConfig::GetCurrent().vk_multiview ? 1u : g_framebuffer_manager->GetEFBLayers();
+      VkClearRect vk_rect = {target_vk_rc, 0, clear_layer_count};
       if (!StateTracker::GetInstance()->IsWithinRenderArea(
               target_vk_rc.offset.x, target_vk_rc.offset.y, target_vk_rc.extent.width,
               target_vk_rc.extent.height))

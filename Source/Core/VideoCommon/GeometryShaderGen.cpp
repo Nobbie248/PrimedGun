@@ -34,11 +34,13 @@ bool geometry_shader_uid_data::IsPassthrough() const
   const bool triangle = primitive_type >= static_cast<u32>(PrimitiveType::Triangles);
   if (triangle && !stereo && !wireframe)
     return true;
-  // VK_KHR_multiview path: stereo expansion is handled at the render-pass level via
-  // gl_ViewIndex in the VS. For triangle primitives without wireframe, the GS would be
-  // a pure passthrough — skip the stage entirely on the Vulkan multiview path.
+  // VK_KHR_multiview path: stereo expansion is handled at the render-pass level via gl_ViewIndex
+  // in the VS, and line/point expansion uses the vertex-shader path (UseVSForLinePointExpand). A
+  // geometry shader is invalid in a multiview render pass (multiviewGeometryShader is not enabled,
+  // and the GS would carry the Layer built-in) — so skip the GS stage entirely under multiview for
+  // ALL primitive types. (Wireframe GS expansion is unsupported under multiview; it's debug-only.)
   const bool multiview = ShaderHostConfig::GetCurrent().vk_multiview;
-  if (triangle && !wireframe && multiview)
+  if (multiview)
     return true;
   return false;
 }

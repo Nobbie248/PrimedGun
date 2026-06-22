@@ -24,6 +24,7 @@ static const char SHADER_HEADER[] = R"(
   #version 450 core
 
   #extension GL_ARB_shading_language_include : enable
+  #extension GL_EXT_multiview : enable
 
   #define ATTRIBUTE_LOCATION(x) layout(location = x)
   #define FRAGMENT_OUTPUT_LOCATION(x) layout(location = x)
