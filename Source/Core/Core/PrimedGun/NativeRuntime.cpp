@@ -141,7 +141,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
-constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false; 
+constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;
@@ -3694,6 +3694,23 @@ void UpdateShaderHunterGameFlowFlags(const Core::CPUThreadGuard& guard)
 
 void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
 {
+#if defined(ANDROID) && defined(ENABLE_VR)
+  // Mark the Gekko/emulation (CPU-bound) thread as APPLICATION_MAIN for Horizon's scheduler so it
+  // can pin us to a big (Prime/Gold) core via XR_KHR_android_thread_settings. OnFrameEnd runs on the
+  // CPU thread every emulated field (Core::OnFrameEnd → VideoInterface::Update), so register lazily
+  // here — by the time fields are produced the XR session is running. Mirrors the RENDERER_MAIN
+  // marking of the VK submission thread (CommandBufferManager). RegisterCurrentAndroidThread is a
+  // no-op unless the extension was enabled and the session exists, so retry until it succeeds;
+  // bound the attempts so a runtime lacking the extension never retries forever.
+  static thread_local bool s_app_main_registered = false;
+  static thread_local int s_app_main_attempts = 0;
+  if (!s_app_main_registered && VR::g_openxr && ++s_app_main_attempts <= 600)
+  {
+    s_app_main_registered = VR::g_openxr->RegisterCurrentAndroidThread(
+        VR::AndroidThreadType::ApplicationMain, "CPU thread (Gekko)");
+  }
+#endif
+
   ++s_frame_counter;
 
   const RuntimeSettings settings = GetRuntimeSettings();
