@@ -209,6 +209,12 @@ public:
   // Applied on the OpenXR render thread during LocateViews.
   void RequestRecenter();
 
+  // Request a full recenter: move the player back to the play-space centre, face them forward
+  // (yaw) and reset eye height. Fired in response to the system "Reset View" (the Meta-button
+  // hold sends XrEventDataReferenceSpaceChangePending). Applied on the OpenXR render thread at
+  // the top of LocateViews by recreating the active reference space at the levelled head pose.
+  void RequestFullRecenter();
+
 private:
   bool InitializeInputActions();
   void DestroyInputActions();
@@ -222,11 +228,22 @@ private:
   // (XR_EXT_performance_settings). No-op unless the extension was enabled (Android/Quest only).
   void ApplyPerformanceLevelHints();
 
+  // Recreate m_reference_space so its origin sits at the current head's levelled pose (play-space
+  // X/Z + yaw, height left to m_home_position). Measures the head against the immutable
+  // m_recenter_base_space and resets the software height home. Called on the render thread.
+  void ApplyFullRecenter();
+
   XrInstance m_instance = XR_NULL_HANDLE;
   std::string m_runtime_name;
   XrSystemId m_system_id = XR_NULL_SYSTEM_ID;
   XrSession m_session = XR_NULL_HANDLE;
   XrSpace m_reference_space = XR_NULL_HANDLE;
+  // Immutable reference space (same type/origin as the initial m_reference_space) used only to
+  // measure the head pose when computing a full recenter, so repeated recenters stay absolute.
+  XrSpace m_recenter_base_space = XR_NULL_HANDLE;
+  // Previous active reference space, kept alive one recenter longer because in-flight composition
+  // layers captured its handle; destroyed at the next recenter / teardown.
+  XrSpace m_old_reference_space = XR_NULL_HANDLE;
 
   // Non-owning pointer; lifetime managed by the backend (D3DOpenXR).
   IOpenXRSwapchain* m_swapchain = nullptr;
@@ -274,6 +291,7 @@ private:
   mutable bool m_home_set{false};
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
   std::atomic<bool> m_recenter_requested{false};
+  std::atomic<bool> m_full_recenter_requested{false};
 };
 
 // Global instance — created by the backend during VideoBackend::Initialize().

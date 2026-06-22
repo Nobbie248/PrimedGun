@@ -27,8 +27,8 @@
         android:required="true"
         android:version="1"/>
 
-    <!-- THE load-bearing flag for Navigator-era Horizon OS (reverse-engineered from Steam Link
-         v2.0.22). It tells the OS this package may own BOTH a 2D panel and an immersive surface.
+    <!-- THE load-bearing flag for Navigator-era Horizon OS. 
+         It tells the OS this package may own BOTH a 2D panel and an immersive surface.
          Without it (required=true), a 2D-launcher app can never promote a child activity to
          immersive — the OpenXR session reaches FOCUSED but the shell keeps it a 2D panel
          (isVrApplication=false). This is the single line that unblocks the 2D->immersive handoff. -->
@@ -74,7 +74,7 @@
         <meta-data
             android:name="com.oculus.supportedDevices"
             android:value="quest2|questpro|quest3|quest3s"/>
-        <!-- Steam Link hybrid app-level markers. focusaware=true lets the app keep running while
+        <!-- Hybrid app-level markers. focusaware=true lets the app keep running while
              the Navigator overlay is shown; the VR meta-data marks a real VR entry point. -->
         <meta-data android:name="com.oculus.intent.category.VR" android:value="vr_only"/>
         <meta-data android:name="com.oculus.vr.focusaware" android:value="true"/>

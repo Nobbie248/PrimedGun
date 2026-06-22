@@ -104,6 +104,10 @@ OpenXRManager::~OpenXRManager()
 
   if (m_reference_space != XR_NULL_HANDLE)
     xrDestroySpace(m_reference_space);
+  if (m_old_reference_space != XR_NULL_HANDLE)
+    xrDestroySpace(m_old_reference_space);
+  if (m_recenter_base_space != XR_NULL_HANDLE)
+    xrDestroySpace(m_recenter_base_space);
 
   if (m_session != XR_NULL_HANDLE)
   {
@@ -848,6 +852,9 @@ bool OpenXRManager::CreateReferenceSpace()
   if (XR_SUCCEEDED(result))
   {
     m_reference_space_is_stage = true;
+    // Immutable copy at the same (identity) origin used to measure the head for full recenters.
+    if (XR_FAILED(xrCreateReferenceSpace(m_session, &space_info, &m_recenter_base_space)))
+      m_recenter_base_space = XR_NULL_HANDLE;  // recenter becomes a no-op rather than crashing
     m_home_position = {0.0f, PRIMEGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     m_home_set = true;
     INFO_LOG_FMT(OPENXR,
@@ -864,6 +871,8 @@ bool OpenXRManager::CreateReferenceSpace()
 
   space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
   XR_CHECK(xrCreateReferenceSpace(m_session, &space_info, &m_reference_space));
+  if (XR_FAILED(xrCreateReferenceSpace(m_session, &space_info, &m_recenter_base_space)))
+    m_recenter_base_space = XR_NULL_HANDLE;
   m_reference_space_is_stage = false;
   m_home_set = false;
   m_home_position = {0.0f, 0.0f, 0.0f};
@@ -891,8 +900,16 @@ bool OpenXRManager::PollEvents()
       return false;
 
     case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
-      INFO_LOG_FMT(OPENXR, "OpenXR: Reference space change pending.");
+    {
+      // The runtime is moving a reference space's origin — this is what the Quest "Reset View"
+      // (Meta-button hold) raises. Respond like most apps do: recentre the player to the
+      // play-space centre, face them forward and reset eye height. Applied on the render thread.
+      const auto& ev = *reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&event);
+      INFO_LOG_FMT(OPENXR, "OpenXR: Reference space change pending (type={}) — requesting recenter.",
+                   static_cast<int>(ev.referenceSpaceType));
+      RequestFullRecenter();
       break;
+    }
 
     default:
       break;
@@ -1166,6 +1183,10 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 
 bool OpenXRManager::LocateViews()
 {
+  // Apply a pending full recenter before locating, so this frame already renders recentered.
+  if (m_full_recenter_requested.exchange(false, std::memory_order_acq_rel))
+    ApplyFullRecenter();
+
   XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
   locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
   locate_info.displayTime = m_frame_state.predictedDisplayTime;
@@ -1274,6 +1295,87 @@ bool OpenXRManager::IsQuestOrVirtualDesktopRuntime() const
 void OpenXRManager::RequestRecenter()
 {
   m_recenter_requested.store(true, std::memory_order_release);
+}
+
+void OpenXRManager::RequestFullRecenter()
+{
+  m_full_recenter_requested.store(true, std::memory_order_release);
+}
+
+void OpenXRManager::ApplyFullRecenter()
+{
+  if (m_session == XR_NULL_HANDLE || m_recenter_base_space == XR_NULL_HANDLE)
+    return;
+
+  // Measure the current head pose against the immutable base space (absolute play-space coords),
+  // so chained recenters never accumulate drift.
+  XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
+  locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate_info.displayTime = m_frame_state.predictedDisplayTime;
+  locate_info.space = m_recenter_base_space;
+
+  XrViewState view_state{XR_TYPE_VIEW_STATE};
+  std::array<XrView, 2> views{};
+  for (auto& view : views)
+    view.type = XR_TYPE_VIEW;
+  uint32_t count = 0;
+  if (XR_FAILED(xrLocateViews(m_session, &locate_info, &view_state,
+                              static_cast<uint32_t>(views.size()), &count, views.data())) ||
+      count < 2)
+  {
+    return;
+  }
+  constexpr XrViewStateFlags required_flags =
+      XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+  if ((view_state.viewStateFlags & required_flags) != required_flags)
+    return;
+
+  const float head_x = 0.5f * (views[0].pose.position.x + views[1].pose.position.x);
+  const float head_y = 0.5f * (views[0].pose.position.y + views[1].pose.position.y);
+  const float head_z = 0.5f * (views[0].pose.position.z + views[1].pose.position.z);
+
+  // Yaw (heading) about the up axis, derived from the head's horizontal forward (-Z) vector so
+  // pitch/roll are dropped — the recentered view is level. Forward = R(q)*(0,0,-1):
+  //   fwd.x = -2(xz + wy),  fwd.z = -(1 - 2(x^2 + y^2))
+  // and Ry(yaw)*(0,0,-1) = (-sin yaw, 0, -cos yaw), so yaw = atan2(-fwd.x, -fwd.z).
+  const XrQuaternionf& q = views[0].pose.orientation;
+  const float yaw = std::atan2(2.0f * (q.x * q.z + q.w * q.y),
+                               1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+  const float half_yaw = 0.5f * yaw;
+
+  XrReferenceSpaceCreateInfo space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+  space_info.referenceSpaceType =
+      m_reference_space_is_stage ? XR_REFERENCE_SPACE_TYPE_STAGE : XR_REFERENCE_SPACE_TYPE_LOCAL;
+  // New origin sits at the head's ground projection, yaw-aligned to where they look. Keeping y at 0
+  // leaves the space floor-aligned; eye height is handled by m_home_position below.
+  space_info.poseInReferenceSpace.orientation = {0.0f, std::sin(half_yaw), 0.0f, std::cos(half_yaw)};
+  space_info.poseInReferenceSpace.position = {head_x, 0.0f, head_z};
+
+  XrSpace new_space = XR_NULL_HANDLE;
+  if (XR_FAILED(xrCreateReferenceSpace(m_session, &space_info, &new_space)) ||
+      new_space == XR_NULL_HANDLE)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: Full recenter failed to create reference space.");
+    return;
+  }
+
+  // The previous active space may still be referenced by an in-flight (already-submitted) frame, so
+  // it can't be freed immediately. Free the one swapped out at the prior recenter (long since
+  // finalized) and stash the current one in its place.
+  if (m_old_reference_space != XR_NULL_HANDLE)
+    xrDestroySpace(m_old_reference_space);
+  m_old_reference_space = m_reference_space;
+  m_reference_space = new_space;
+
+  // Reset eye height in software: yaw rotates about Y and the translation is X/Z only, so the head's
+  // height in the new space is unchanged (= head_y). Anchor the home there so the eye maps to the
+  // game's standing eye level.
+  m_home_position = {0.0f, head_y, 0.0f};
+  m_home_set = true;
+
+  INFO_LOG_FMT(OPENXR,
+               "OpenXR: Full recenter (x={:.3f} z={:.3f} yaw={:.1f}deg height={:.3f}).", head_x,
+               head_z, yaw * 57.2957795f, head_y);
 }
 
 void OpenXRManager::GetEyeProjectionRows(
