@@ -14,7 +14,8 @@ enum class FloatSetting(
     MAIN_VI_OVERCLOCK(Settings.FILE_DOLPHIN, Settings.SECTION_INI_CORE, "VIOverclock", 1.0f),
     GFX_CC_GAME_GAMMA(Settings.FILE_GFX, Settings.SECTION_GFX_COLOR_CORRECTION, "GameGamma", 2.35f),
     GFX_STEREO_DEPTH(Settings.FILE_GFX, Settings.SECTION_STEREOSCOPY, "StereoDepth", 20.0f),
-    GFX_STEREO_CONVERGENCE(Settings.FILE_GFX, Settings.SECTION_STEREOSCOPY, "StereoConvergence", 20.0f);
+    GFX_STEREO_CONVERGENCE(Settings.FILE_GFX, Settings.SECTION_STEREOSCOPY, "StereoConvergence", 20.0f),
+    GFX_VR_UNITS_PER_METER(Settings.FILE_GFX, "VR", "UnitsPerMeter", 1.5f);
 
     override val isOverridden: Boolean
         get() = NativeConfig.isOverridden(file, section, key)

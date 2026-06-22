@@ -131,7 +131,9 @@ object QuestVrSettings {
 
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
         BooleanSetting.GFX_BACKEND_MULTITHREADING.setBoolean(settings, true)
-        IntSetting.GFX_EFB_SCALE.setInt(settings, 4)
+        // Quest 3: 2x internal res balances readability/fidelity against the mobile GPU (matches
+        // the GFX_EFB_SCALE Android code default). 4x is too heavy for a steady framerate here.
+        IntSetting.GFX_EFB_SCALE.setInt(settings, 2)
         BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, false)
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(settings, false)
         lockHeadPoseSetting().setBoolean(settings, false)
@@ -161,6 +163,9 @@ object QuestVrSettings {
         }
 
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
+        // GPU (compute-shader) texture decoding crashes the Quest's Adreno Vulkan driver in
+        // vkUpdateDescriptorSets; force CPU texture decoding on every Quest launch.
+        BooleanSetting.GFX_ENABLE_GPU_TEXTURE_DECODING.setBoolean(settings, false)
 
         val launchInVr = isLaunchInVrEnabled()
         openXrRuntimeSetting().setBoolean(settings, launchInVr)

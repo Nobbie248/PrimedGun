@@ -226,6 +226,14 @@ static constexpr int GFX_VR_CLEAR_EFB_STEP = 10;
 extern const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW;
 extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
+extern const Info<int> GFX_VR_FOVEATION_LEVEL;
+
+// Fixed Foveated Rendering level (XR_FB_foveation). Off/Low/Medium/High map to the FB foveation
+// levels; higher levels reclaim more GPU fill at the cost of more peripheral blur.
+static constexpr int GFX_VR_FOVEATION_LEVEL_OFF = 0;
+static constexpr int GFX_VR_FOVEATION_LEVEL_LOW = 1;
+static constexpr int GFX_VR_FOVEATION_LEVEL_MEDIUM = 2;
+static constexpr int GFX_VR_FOVEATION_LEVEL_HIGH = 3;
 
 static constexpr float GFX_VR_SCREEN_DISTANCE_MIN = 0.5f;
 static constexpr float GFX_VR_SCREEN_DISTANCE_MAX = 10.0f;

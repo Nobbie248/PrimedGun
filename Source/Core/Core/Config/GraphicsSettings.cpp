@@ -85,7 +85,12 @@ const Info<bool> GFX_ENABLE_PIXEL_LIGHTING{{System::GFX, "Settings", "EnablePixe
 const Info<bool> GFX_FAST_DEPTH_CALC{{System::GFX, "Settings", "FastDepthCalc"}, true};
 const Info<u32> GFX_MSAA{{System::GFX, "Settings", "MSAA"}, 1};
 const Info<bool> GFX_SSAA{{System::GFX, "Settings", "SSAA"}, false};
+#if defined(ANDROID)
+// Standalone Quest: 2x internal res balances readability/fidelity against the mobile GPU.
+const Info<int> GFX_EFB_SCALE{{System::GFX, "Settings", "InternalResolution"}, 2};
+#else
 const Info<int> GFX_EFB_SCALE{{System::GFX, "Settings", "InternalResolution"}, 4};
+#endif
 const Info<int> GFX_MAX_EFB_SCALE{{System::GFX, "Settings", "MaxInternalResolution"}, 12};
 const Info<bool> GFX_TEXFMT_OVERLAY_ENABLE{{System::GFX, "Settings", "TexFmtOverlayEnable"}, false};
 const Info<bool> GFX_TEXFMT_OVERLAY_CENTER{{System::GFX, "Settings", "TexFmtOverlayCenter"}, false};
@@ -241,11 +246,30 @@ const Info<bool> GFX_VR_AR_MODE_DEBUG{{System::GFX, "VR", "ARModeDebug"}, false}
 const Info<float> GFX_VR_AR_BACKGROUND_ALPHA{{System::GFX, "VR", "ARBackgroundAlpha"}, 0.0f};
 const Info<float> GFX_VR_GAMMA{{System::GFX, "VR", "Gamma"}, 1.0f};
 const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0};
+#if defined(ANDROID)
+// Standalone Quest: render OpenXR stereo single-pass via VK_KHR_multiview (skips the geometry
+// shader, which is slow on Adreno). Per-eye projection is done in the vertex shader via
+// gl_ViewIndex (VertexShaderGen). Desktop keeps the geometry-shader path (untested with multiview).
+const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, true};
+#else
 const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, false};
+#endif
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
 const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"},
                                                false};
+#if defined(ANDROID)
+// Standalone Quest: Fixed Foveated Rendering. The 2x eye buffers are fragment-fill bound, so
+// shading the periphery at a lower rate (XR_FB_foveation) reclaims GPU headroom while keeping the
+// gaze-centered region (Metroid's visor/HUD) full detail. Default High; applied to the OpenXR
+// eye/layered swapchains in VulkanOpenXR.
+const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
+                                       GFX_VR_FOVEATION_LEVEL_HIGH};
+#else
+// Desktop/PCVR runtimes generally lack the FB foveation extensions; default off (no-op there).
+const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
+                                       GFX_VR_FOVEATION_LEVEL_OFF};
+#endif
 // Graphics.Hacks
 
 const Info<bool> GFX_HACK_EFB_ACCESS_ENABLE{{System::GFX, "Hacks", "EFBAccessEnable"}, false};
