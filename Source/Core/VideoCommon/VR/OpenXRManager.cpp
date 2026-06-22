@@ -20,6 +20,16 @@
 #include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VideoConfig.h"
 
+#if defined(ANDROID)
+#include <unistd.h>  // gettid()
+
+// XR_KHR_android_thread_settings (xrSetAndroidApplicationThreadKHR + XrAndroidThreadTypeKHR) lives
+// in openxr_platform.h behind XR_USE_PLATFORM_ANDROID; jni.h provides the jobject it references.
+#include <jni.h>
+#define XR_USE_PLATFORM_ANDROID
+#include <openxr/openxr_platform.h>
+#endif
+
 namespace VR
 {
 std::unique_ptr<OpenXRManager> g_openxr;
@@ -973,6 +983,46 @@ void OpenXRManager::ApplyPerformanceLevelHints()
                "OpenXR: performance levels set (CPU={} [{}], GPU=SUSTAINED_HIGH [{}]).",
                cpu_boost ? "BOOST" : "SUSTAINED_HIGH", static_cast<int>(cpu_result),
                static_cast<int>(gpu_result));
+}
+
+bool OpenXRManager::RegisterCurrentAndroidThread(AndroidThreadType thread_type,
+                                                 const char* thread_name)
+{
+#if defined(ANDROID)
+  // Only meaningful when XR_KHR_android_thread_settings was enabled at instance creation (the
+  // Quest/Android Vulkan path). No-op everywhere else.
+  if (m_session == XR_NULL_HANDLE ||
+      !IsExtensionEnabled(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
+  {
+    return false;
+  }
+
+  PFN_xrSetAndroidApplicationThreadKHR set_thread = nullptr;
+  if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrSetAndroidApplicationThreadKHR",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&set_thread))) ||
+      set_thread == nullptr)
+  {
+    WARN_LOG_FMT(OPENXR,
+                 "OpenXR: xrSetAndroidApplicationThreadKHR not exposed by the loader; '{}' left "
+                 "unmarked.",
+                 thread_name);
+    return false;
+  }
+
+  const bool is_app_main = thread_type == AndroidThreadType::ApplicationMain;
+  const XrAndroidThreadTypeKHR xr_type = is_app_main ?
+                                             XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR :
+                                             XR_ANDROID_THREAD_TYPE_RENDERER_MAIN_KHR;
+  const uint32_t tid = static_cast<uint32_t>(gettid());
+  const XrResult result = set_thread(m_session, xr_type, tid);
+  INFO_LOG_FMT(OPENXR, "OpenXR: marked thread '{}' (tid {}) as {} [{}].", thread_name, tid,
+               is_app_main ? "APPLICATION_MAIN" : "RENDERER_MAIN", static_cast<int>(result));
+  return XR_SUCCEEDED(result);
+#else
+  (void)thread_type;
+  (void)thread_name;
+  return true;
+#endif
 }
 
 bool OpenXRManager::ApplyFoveationProfile(XrSwapchain swapchain)

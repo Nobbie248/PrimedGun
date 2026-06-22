@@ -82,6 +82,7 @@ VulkanContext::PhysicalDeviceInfo::PhysicalDeviceInfo(VkPhysicalDevice device)
     VkPhysicalDeviceFeatures2 features2 = {};
     VkPhysicalDeviceMultiviewFeatures features_multiview = {};
     VkPhysicalDeviceTimelineSemaphoreFeatures features_timeline_semaphore = {};
+    VkPhysicalDeviceRobustness2FeaturesEXT features_robustness2 = {};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features_multiview.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
     InsertIntoChain(&features2, &features_multiview);
@@ -91,9 +92,16 @@ VulkanContext::PhysicalDeviceInfo::PhysicalDeviceInfo(VkPhysicalDevice device)
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
       InsertIntoChain(&features2, &features_timeline_semaphore);
     }
+    // VK_EXT_robustness2 nullDescriptor: lets us legally write VK_NULL_HANDLE into the unused
+    // slots of the compute texture-decode descriptor set. Without it, the Adreno driver raises
+    // SIGSEGV inside vkUpdateDescriptorSets on null image/buffer views (StateTracker compute path),
+    // which is why GPU texture decoding was disabled.
+    features_robustness2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+    InsertIntoChain(&features2, &features_robustness2);
     vkGetPhysicalDeviceFeatures2(device, &features2);
     multiview = features_multiview.multiview != VK_FALSE && maxMultiviewViewCount >= 2;
     timelineSemaphore = features_timeline_semaphore.timelineSemaphore != VK_FALSE;
+    nullDescriptor = features_robustness2.nullDescriptor != VK_FALSE;
   }
 
   memcpy(deviceName, properties.deviceName, sizeof(deviceName));
@@ -572,6 +580,17 @@ void VulkanContext::PopulateBackendInfoFeatures(BackendInfo* backend_info, VkPhy
   // Dynamic sampler indexing locks up Intel GPUs on MoltenVK/Metal
   if (DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DYNAMIC_SAMPLER_INDEXING))
     backend_info->bSupportsDynamicSamplerIndexing = false;
+
+#if defined(ANDROID)
+  // GPU (compute-shader) texture decoding SIGSEGVs the Adreno driver inside vkUpdateDescriptorSets
+  // on the compute decode descriptor set (StateTracker::UpdateComputeDescriptorSet). VK_EXT_robustness2
+  // nullDescriptor was tried and is NOT sufficient: it doesn't cover the sampler half of a
+  // COMBINED_IMAGE_SAMPLER (must be non-null), and the driver faults regardless (crash repro
+  // 2026-06-22, see quest-gpu-shader-plan.md "Crash post-mortem"). Force the support flag off so
+  // UseGPUTextureDecoding() can never enable the crashing path, whatever the setting says. This is
+  // the real safety net; the QuestVrSettings launch write is just defense in depth.
+  backend_info->bSupportsGPUTextureDecoding = false;
+#endif
 }
 
 void VulkanContext::PopulateBackendInfoMultisampleModes(BackendInfo* backend_info,
@@ -702,6 +721,12 @@ bool VulkanContext::SelectDeviceExtensions(bool enable_surface)
 
   AddExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, false);
   AddExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
+
+  // For GPU texture decoding on Adreno: VK_EXT_robustness2 provides nullDescriptor, making the
+  // null image/buffer views in the compute decode descriptor set legal (avoids the Adreno driver
+  // SIGSEGV in vkUpdateDescriptorSets). Harmless if unavailable; the feature is only enabled at
+  // device creation when m_device_info.nullDescriptor is also set.
+  AddExtension(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, false);
 
   if (!DriverDetails::HasBug(DriverDetails::BUG_BROKEN_DEPTH_CLAMP_CONTROL))
   {
@@ -859,8 +884,14 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
   VkPhysicalDeviceFeatures2 features2 = {};
   VkPhysicalDeviceMultiviewFeatures multiview_features = {};
   VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore_features = {};
+  VkPhysicalDeviceRobustness2FeaturesEXT robustness2_features = {};
   const bool use_multiview =
       m_device_info.apiVersion >= VK_API_VERSION_1_1 && m_device_info.multiview;
+  // nullDescriptor lets the GPU texture decoder write null image/buffer views into the unused
+  // compute-descriptor slots without the Adreno driver crashing in vkUpdateDescriptorSets.
+  const bool use_null_descriptor =
+      m_device_info.nullDescriptor &&
+      Common::Contains(m_device_extensions, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
   // OpenXR runtimes (e.g. Virtual Desktop) that list VK_KHR_timeline_semaphore as a
   // required device extension create timeline semaphores on this device; the extension
   // alone is not enough — the timelineSemaphore feature must also be enabled, or every
@@ -868,7 +899,7 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
   const bool use_timeline_semaphore =
       m_device_info.timelineSemaphore &&
       Common::Contains(m_device_extensions, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
-  if (use_multiview || use_timeline_semaphore)
+  if (use_multiview || use_timeline_semaphore || use_null_descriptor)
   {
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features = device_features;
@@ -878,6 +909,13 @@ bool VulkanContext::CreateDevice(VkSurfaceKHR surface, bool enable_validation_la
       multiview_features.multiview = VK_TRUE;
       InsertIntoChain(&features2, &multiview_features);
       m_multiview_enabled = true;
+    }
+    if (use_null_descriptor)
+    {
+      robustness2_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+      robustness2_features.nullDescriptor = VK_TRUE;
+      InsertIntoChain(&features2, &robustness2_features);
+      INFO_LOG_FMT(VIDEO, "Vulkan: Enabling robustness2 nullDescriptor for GPU texture decoding.");
     }
     if (use_timeline_semaphore)
     {

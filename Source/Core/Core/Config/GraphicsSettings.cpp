@@ -109,9 +109,24 @@ const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL{
 const Info<bool> GFX_SHADER_CACHE{{System::GFX, "Settings", "ShaderCache"}, true};
 const Info<bool> GFX_WAIT_FOR_SHADERS_BEFORE_STARTING{
     {System::GFX, "Settings", "WaitForShadersBeforeStarting"}, true};
+#if defined(ANDROID)
+// Standalone Quest: compile new specialized pipelines on background worker threads instead of
+// blocking the (CPU-bound) emulation thread, which is what causes the 130-305 ms room-load stalls.
+// Skip-drawing mode (3) defers the draw of a not-yet-ready object for a few frames rather than
+// freezing; it never builds the fragment-heavy ubershaders, so it avoids tanking the already
+// fragment-bound fps. See quest-gpu-shader-plan.md.
+const Info<ShaderCompilationMode> GFX_SHADER_COMPILATION_MODE{
+    {System::GFX, "Settings", "ShaderCompilationMode"},
+    ShaderCompilationMode::AsynchronousSkipRendering};
+// Two background compile workers: enough to hide the stalls without oversubscribing the big cores
+// (JIT + render/submit + DSP threads already occupy several) or tripping Qualcomm's historical
+// parallel-compile instability. Tunable -- sweep 2 vs 3 vs auto on-device.
+const Info<int> GFX_SHADER_COMPILER_THREADS{{System::GFX, "Settings", "ShaderCompilerThreads"}, 2};
+#else
 const Info<ShaderCompilationMode> GFX_SHADER_COMPILATION_MODE{
     {System::GFX, "Settings", "ShaderCompilationMode"}, ShaderCompilationMode::Synchronous};
 const Info<int> GFX_SHADER_COMPILER_THREADS{{System::GFX, "Settings", "ShaderCompilerThreads"}, 1};
+#endif
 const Info<int> GFX_SHADER_PRECOMPILER_THREADS{
     {System::GFX, "Settings", "ShaderPrecompilerThreads"}, -1};
 const Info<bool> GFX_SAVE_TEXTURE_CACHE_TO_STATE{

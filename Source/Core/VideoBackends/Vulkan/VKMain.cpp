@@ -108,6 +108,16 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
 
   // Check for presence of the validation layers before trying to enable it
   bool enable_validation_layer = g_Config.bEnableValidationLayer;
+#if defined(ANDROID)
+  // Standalone Quest: force the Vulkan validation layer off for now. It's a heavy perf hit on the
+  // Adreno driver (and usually unavailable on retail devices anyway), and we don't want a stray
+  // GFX.ini "EnableValidationLayer=True" turning it on. Remove this guard to debug with validation.
+  if (enable_validation_layer)
+  {
+    WARN_LOG_FMT(VIDEO, "Vulkan validation layer forced off on Android (Quest standalone).");
+    enable_validation_layer = false;
+  }
+#endif
   if (enable_validation_layer && !VulkanContext::CheckValidationLayerAvailablility())
   {
     WARN_LOG_FMT(VIDEO, "Validation layer requested but not available, disabling.");

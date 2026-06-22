@@ -35,6 +35,14 @@ struct XREyeView
   XrFovf fov;
 };
 
+// Horizon thread-scheduling class for RegisterCurrentAndroidThread (maps to XrAndroidThreadTypeKHR
+// on Android). Defined unconditionally so the cross-platform method signature compiles everywhere.
+enum class AndroidThreadType
+{
+  ApplicationMain,  // the Gekko/emulation (CPU-bound) thread
+  RendererMain,     // the render/submit thread
+};
+
 // Abstract interface for backend-specific per-eye swapchain management.
 // Implemented by D3DOpenXR (D3D11) and VulkanOpenXR (Vulkan).
 // Used by Presenter::RenderXFBToScreen() to blit game frames into the HMD's
@@ -185,7 +193,11 @@ public:
       float game_projection_y_scale, float game_projection_y_offset,
       std::array<std::array<float, 4>, 2>& out_x_rows,
       std::array<std::array<float, 4>, 2>& out_y_rows) const;
-  bool RegisterCurrentAndroidThread(const char* thread_name) { return true; }
+  // Declare the calling thread to the Horizon scheduler via XR_KHR_android_thread_settings so it
+  // can pin the render/submit and emulation threads to the big (Prime/Gold) cores -- and is then
+  // free to schedule the unmarked async-shader compile workers onto the little cores. No-op off
+  // Android or when the extension wasn't enabled. See quest-gpu-shader-plan.md Step 5 / audit #3.
+  bool RegisterCurrentAndroidThread(AndroidThreadType thread_type, const char* thread_name);
 
   // Apply a fixed-foveation profile (XR_FB_foveation) to a backend eye/layered swapchain so the
   // runtime shades the periphery at a lower rate. Level comes from GFX_VR_FOVEATION_LEVEL. No-op

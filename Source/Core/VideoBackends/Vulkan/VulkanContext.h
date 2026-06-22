@@ -57,6 +57,7 @@ public:
     bool shaderSubgroupOperations = false;
     bool multiview = false;
     bool timelineSemaphore = false;
+    bool nullDescriptor = false;
     u32 maxMultiviewViewCount = 0;
     u32 maxMultiviewInstanceIndex = 0;
   };
