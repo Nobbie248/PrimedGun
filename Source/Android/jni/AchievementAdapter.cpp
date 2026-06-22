@@ -3,9 +3,11 @@
 
 #include <jni.h>
 
+#ifdef USE_RETRO_ACHIEVEMENTS
 #include <latch>
 #include "Common/Event.h"
 #include "Common/HookableEvent.h"
+#endif
 #include "Core/AchievementManager.h"
 #include "jni/AndroidCommon/AndroidCommon.h"
 #include "jni/AndroidCommon/IDCache.h"
@@ -15,13 +17,16 @@ extern "C" {
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_settings_model_AchievementModel_init(JNIEnv* env, jclass)
 {
+#ifdef USE_RETRO_ACHIEVEMENTS
   AchievementManager::GetInstance().Init(nullptr);
+#endif
 }
 
 JNIEXPORT jboolean JNICALL
 Java_org_dolphinemu_dolphinemu_features_settings_model_AchievementModel_login(JNIEnv* env, jclass,
                                                                               jstring password)
 {
+#ifdef USE_RETRO_ACHIEVEMENTS
   auto& instance = AchievementManager::GetInstance();
   bool success;
   std::latch login_complete_event{1};
@@ -33,12 +38,19 @@ Java_org_dolphinemu_dolphinemu_features_settings_model_AchievementModel_login(JN
   instance.Login(GetJString(env, password));
   login_complete_event.wait();
   return success;
+#else
+  (void)env;
+  (void)password;
+  return JNI_FALSE;
+#endif
 }
 
 JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_settings_model_AchievementModel_logout(JNIEnv* env, jclass)
 {
+#ifdef USE_RETRO_ACHIEVEMENTS
   AchievementManager::GetInstance().Logout();
+#endif
 }
 
 JNIEXPORT jboolean JNICALL
@@ -52,7 +64,9 @@ JNIEXPORT void JNICALL
 Java_org_dolphinemu_dolphinemu_features_settings_model_AchievementModel_shutdown(JNIEnv* env,
                                                                                  jclass)
 {
+#ifdef USE_RETRO_ACHIEVEMENTS
   AchievementManager::GetInstance().Shutdown();
+#endif
 }
 
 }  // extern "C"
