@@ -13,9 +13,11 @@
 #include <string>
 #include <string_view>
 
+#include "Common/Config/Config.h"
 #include "Common/Logging/Log.h"
 #include "Common/Matrix.h"
 #include "Common/VR/OpenXRInputState.h"
+#include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace VR
@@ -135,7 +137,8 @@ std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
   return extensions;
 }
 
-bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensions)
+bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensions,
+                                   const void* platform_instance_create_next)
 {
   m_enabled_extensions.clear();
 
@@ -181,6 +184,7 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
   app_info.apiVersion = requested_api_version;
 
   XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
+  create_info.next = platform_instance_create_next;
   create_info.applicationInfo = app_info;
   create_info.enabledExtensionCount = static_cast<uint32_t>(extra_extensions.size());
   create_info.enabledExtensionNames = extra_extensions.data();
@@ -906,6 +910,8 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
     {
       m_session_running = true;
       INFO_LOG_FMT(OPENXR, "OpenXR: Session running.");
+      // Re-applied on every transition to READY (levels can reset across focus loss).
+      ApplyPerformanceLevelHints();
     }
     else
     {
@@ -929,6 +935,130 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
   default:
     break;
   }
+}
+
+void OpenXRManager::ApplyPerformanceLevelHints()
+{
+  // Only meaningful when XR_EXT_performance_settings was enabled at instance creation
+  // (currently the Android/Quest Vulkan path). No-op everywhere else.
+  if (m_session == XR_NULL_HANDLE ||
+      !IsExtensionEnabled(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME))
+  {
+    return;
+  }
+
+  PFN_xrPerfSettingsSetPerformanceLevelEXT set_level = nullptr;
+  if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrPerfSettingsSetPerformanceLevelEXT",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&set_level))) ||
+      set_level == nullptr)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrPerfSettingsSetPerformanceLevelEXT not exposed by the loader.");
+    return;
+  }
+
+  // GPU: this workload is GPU-bound at 2x, so request the highest sustainable clock.
+  // CPU: SUSTAINED_HIGH by default; the "level 5" hint opts into BOOST, which pushes the CPU
+  // harder for the CPU-bound Gekko JIT at the cost of more aggressive thermal throttling.
+  const bool cpu_boost = Config::Get(Config::GFX_VR_QUEST_CPU_LEVEL_5_HINT);
+  const XrPerfSettingsLevelEXT cpu_level =
+      cpu_boost ? XR_PERF_SETTINGS_LEVEL_BOOST_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+  const XrPerfSettingsLevelEXT gpu_level = XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+
+  const XrResult cpu_result =
+      set_level(m_session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, cpu_level);
+  const XrResult gpu_result =
+      set_level(m_session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, gpu_level);
+
+  INFO_LOG_FMT(OPENXR,
+               "OpenXR: performance levels set (CPU={} [{}], GPU=SUSTAINED_HIGH [{}]).",
+               cpu_boost ? "BOOST" : "SUSTAINED_HIGH", static_cast<int>(cpu_result),
+               static_cast<int>(gpu_result));
+}
+
+bool OpenXRManager::ApplyFoveationProfile(XrSwapchain swapchain)
+{
+  if (m_session == XR_NULL_HANDLE || swapchain == XR_NULL_HANDLE)
+    return false;
+
+  // Needs the profile-creation + swapchain-state-update FB extensions (with the level/dynamic
+  // config). These are Quest-only in practice; the backend only enables them when the runtime
+  // advertises all three, so this is a no-op on desktop/PCVR.
+  if (!IsExtensionEnabled(XR_FB_FOVEATION_EXTENSION_NAME) ||
+      !IsExtensionEnabled(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME) ||
+      !IsExtensionEnabled(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME))
+  {
+    return false;
+  }
+
+  const int level_setting = Config::Get(Config::GFX_VR_FOVEATION_LEVEL);
+  if (level_setting <= Config::GFX_VR_FOVEATION_LEVEL_OFF)
+    return false;
+
+  XrFoveationLevelFB level = XR_FOVEATION_LEVEL_HIGH_FB;
+  switch (level_setting)
+  {
+  case Config::GFX_VR_FOVEATION_LEVEL_LOW:
+    level = XR_FOVEATION_LEVEL_LOW_FB;
+    break;
+  case Config::GFX_VR_FOVEATION_LEVEL_MEDIUM:
+    level = XR_FOVEATION_LEVEL_MEDIUM_FB;
+    break;
+  case Config::GFX_VR_FOVEATION_LEVEL_HIGH:
+  default:
+    level = XR_FOVEATION_LEVEL_HIGH_FB;
+    break;
+  }
+
+  PFN_xrCreateFoveationProfileFB create_profile = nullptr;
+  PFN_xrDestroyFoveationProfileFB destroy_profile = nullptr;
+  PFN_xrUpdateSwapchainFB update_swapchain = nullptr;
+  if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrCreateFoveationProfileFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&create_profile))) ||
+      XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrDestroyFoveationProfileFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&destroy_profile))) ||
+      XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrUpdateSwapchainFB",
+                                      reinterpret_cast<PFN_xrVoidFunction*>(&update_swapchain))) ||
+      create_profile == nullptr || destroy_profile == nullptr || update_swapchain == nullptr)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: FB foveation functions not exposed by the loader.");
+    return false;
+  }
+
+  // Fixed (non-eye-tracked) foveation: a single static level profile applied to the swapchain.
+  XrFoveationLevelProfileCreateInfoFB level_info{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+  level_info.level = level;
+  level_info.verticalOffset = 0.0f;
+  level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+
+  XrFoveationProfileCreateInfoFB profile_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+  profile_info.next = &level_info;
+
+  XrFoveationProfileFB profile = XR_NULL_HANDLE;
+  XrResult result = create_profile(m_session, &profile_info, &profile);
+  if (XR_FAILED(result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrCreateFoveationProfileFB failed ({}).",
+                 static_cast<int>(result));
+    return false;
+  }
+
+  XrSwapchainStateFoveationFB foveation_state{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+  foveation_state.profile = profile;
+  result = update_swapchain(
+      swapchain, reinterpret_cast<const XrSwapchainStateBaseHeaderFB*>(&foveation_state));
+
+  // The profile only has to live across the update call; the runtime keeps the resulting state.
+  destroy_profile(profile);
+
+  if (XR_FAILED(result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrUpdateSwapchainFB (foveation) failed ({}).",
+                 static_cast<int>(result));
+    return false;
+  }
+
+  INFO_LOG_FMT(OPENXR, "OpenXR: applied fixed-foveation level {} to swapchain.", level_setting);
+  return true;
 }
 
 bool OpenXRManager::WaitFrame()

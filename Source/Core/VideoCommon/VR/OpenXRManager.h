@@ -81,7 +81,10 @@ public:
 
   // Step 1: Create XrInstance.
   // extra_extensions must include the graphics API extension (e.g. XR_KHR_D3D11_ENABLE_EXTENSION_NAME).
-  bool CreateInstance(const std::vector<const char*>& extra_extensions = {});
+  // platform_instance_create_next is an optional struct chained into XrInstanceCreateInfo::next
+  // (used on Android to supply XrInstanceCreateInfoAndroidKHR).
+  bool CreateInstance(const std::vector<const char*>& extra_extensions = {},
+                      const void* platform_instance_create_next = nullptr);
 
   // Step 2: Locate the HMD system.
   bool InitializeSystem();
@@ -184,6 +187,12 @@ public:
       std::array<std::array<float, 4>, 2>& out_y_rows) const;
   bool RegisterCurrentAndroidThread(const char* thread_name) { return true; }
 
+  // Apply a fixed-foveation profile (XR_FB_foveation) to a backend eye/layered swapchain so the
+  // runtime shades the periphery at a lower rate. Level comes from GFX_VR_FOVEATION_LEVEL. No-op
+  // (returns false) unless the FB foveation extensions were enabled (Quest) and the level is above
+  // Off. Call once per swapchain after creation, passing the backend's XrSwapchain handle.
+  bool ApplyFoveationProfile(XrSwapchain swapchain);
+
   // Request a height-only recenter of the VR home position.
   // Applied on the OpenXR render thread during LocateViews.
   void RequestRecenter();
@@ -196,6 +205,10 @@ private:
   void ResetInputActionsState();
 
   void HandleSessionStateChange(XrSessionState new_state);
+
+  // Tell the runtime this is a heavy app so it schedules the CPU/GPU domains at high clocks
+  // (XR_EXT_performance_settings). No-op unless the extension was enabled (Android/Quest only).
+  void ApplyPerformanceLevelHints();
 
   XrInstance m_instance = XR_NULL_HANDLE;
   std::string m_runtime_name;
