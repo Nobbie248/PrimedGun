@@ -5,12 +5,12 @@
 # automatically below, so this script can build from a complete-fresh checkout.
 set -euo pipefail
 
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
-export ANDROID_HOME="$HOME/Android/Sdk"
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk}"
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-REPO="$HOME/games/PrimedGun"
+REPO="${REPO:-$HOME/games/PrimedGun}"
 
 # libadrenotools is required by the Android arm64 Vulkan build for custom-driver
 # loading on Adreno (CMakeLists.txt: add_subdirectory(Externals/libadrenotools)).
@@ -41,7 +41,7 @@ cd "$REPO/Source/Android"
 echo "[*] Building :app:assembleDebug (NDK arm64 cross-compile of Dolphin — this takes a while)..."
 ./gradlew :app:assembleDebug --no-daemon "$@"
 
-APK="$HOME/games/PrimedGun/Source/Android/app/build/outputs/apk/debug/app-debug.apk"
+APK="${REPO}/Source/Android/app/build/outputs/apk/debug/app-debug.apk"
 if [[ -f "$APK" ]]; then
   echo "[*] APK built: $APK"
   echo "[*] Install to a connected Quest:  adb install -r \"$APK\""
