@@ -196,7 +196,7 @@ public:
   // Declare the calling thread to the Horizon scheduler via XR_KHR_android_thread_settings so it
   // can pin the render/submit and emulation threads to the big (Prime/Gold) cores -- and is then
   // free to schedule the unmarked async-shader compile workers onto the little cores. No-op off
-  // Android or when the extension wasn't enabled. See quest-gpu-shader-plan.md Step 5 / audit #3.
+  // Android or when the extension wasn't enabled.
   bool RegisterCurrentAndroidThread(AndroidThreadType thread_type, const char* thread_name);
 
   // Apply a fixed-foveation profile (XR_FB_foveation) to a backend eye/layered swapchain so the

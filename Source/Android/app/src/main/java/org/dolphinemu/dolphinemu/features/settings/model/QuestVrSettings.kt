@@ -170,8 +170,8 @@ object QuestVrSettings {
 
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
         // GPU (compute-shader) texture decoding SIGSEGVs the Adreno driver in vkUpdateDescriptorSets
-        // (VK_EXT_robustness2 nullDescriptor was tried and is insufficient -- crash repro 2026-06-22,
-        // see quest-gpu-shader-plan.md). Force CPU texture decoding on every Quest launch. The native
+        // (VK_EXT_robustness2 nullDescriptor was tried and is insufficient -- confirmed by an
+        // on-device crash repro). Force CPU texture decoding on every Quest launch. The native
         // bSupportsGPUTextureDecoding=false gate (VulkanContext::PopulateBackendInfoFeatures) is the
         // real safety net; this is defense in depth.
         BooleanSetting.GFX_ENABLE_GPU_TEXTURE_DECODING.setBoolean(settings, false)

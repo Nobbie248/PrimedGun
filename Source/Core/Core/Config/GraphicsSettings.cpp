@@ -114,7 +114,7 @@ const Info<bool> GFX_WAIT_FOR_SHADERS_BEFORE_STARTING{
 // blocking the (CPU-bound) emulation thread, which is what causes the 130-305 ms room-load stalls.
 // Skip-drawing mode (3) defers the draw of a not-yet-ready object for a few frames rather than
 // freezing; it never builds the fragment-heavy ubershaders, so it avoids tanking the already
-// fragment-bound fps. See quest-gpu-shader-plan.md.
+// fragment-bound fps.
 const Info<ShaderCompilationMode> GFX_SHADER_COMPILATION_MODE{
     {System::GFX, "Settings", "ShaderCompilationMode"},
     ShaderCompilationMode::AsynchronousSkipRendering};

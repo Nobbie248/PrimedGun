@@ -163,6 +163,12 @@ if(ANDROID)
     # Force 16KB page sizes for Android 15+ compatibility.
     target_link_options(openxr_loader PRIVATE "-Wl,-z,max-page-size=16384")
 
+    # PrimedGun/Dolphin compiles with -fno-exceptions globally, but the OpenXR
+    # loader's Android code (jnipp via android_utilities.cpp + loader_core.cpp)
+    # requires C++ exceptions. Re-enable them for this target only; the later
+    # flag wins over the global -fno-exceptions on the compile command line.
+    target_compile_options(openxr_loader PRIVATE -fexceptions)
+
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(FALLBACK_CONFIG_DIRS
         "/etc/xdg"

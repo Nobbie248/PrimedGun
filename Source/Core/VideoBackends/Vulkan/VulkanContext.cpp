@@ -585,8 +585,8 @@ void VulkanContext::PopulateBackendInfoFeatures(BackendInfo* backend_info, VkPhy
   // GPU (compute-shader) texture decoding SIGSEGVs the Adreno driver inside vkUpdateDescriptorSets
   // on the compute decode descriptor set (StateTracker::UpdateComputeDescriptorSet). VK_EXT_robustness2
   // nullDescriptor was tried and is NOT sufficient: it doesn't cover the sampler half of a
-  // COMBINED_IMAGE_SAMPLER (must be non-null), and the driver faults regardless (crash repro
-  // 2026-06-22, see quest-gpu-shader-plan.md "Crash post-mortem"). Force the support flag off so
+  // COMBINED_IMAGE_SAMPLER (must be non-null), and the driver faults regardless (confirmed by an
+  // on-device crash repro). Force the support flag off so
   // UseGPUTextureDecoding() can never enable the crashing path, whatever the setting says. This is
   // the real safety net; the QuestVrSettings launch write is just defense in depth.
   backend_info->bSupportsGPUTextureDecoding = false;
