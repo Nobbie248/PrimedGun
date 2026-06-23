@@ -1307,6 +1307,9 @@ void VertexManagerBase::Flush()
             hunter_skip = hunter.ShouldSkipByOverride(vs_hash, ps_hash, gs_hash);
 
           // Check for screen/fullscreen handling overrides (VR stereo mode override)
+          // Hoisted so the VR_DRAW diagnostic below can report the resolved handling per draw
+          // (skip = no override matched -> default/stale stereo, the double-vision case).
+          auto vr_draw_resolved_handling = ShaderHunter::HandlingType::Skip;
           if (!hunter_skip && !elements_skip)
           {
             auto handling = ShaderHunter::HandlingType::Skip;
@@ -1357,6 +1360,7 @@ void VertexManagerBase::Flush()
             {
               handling = ShaderHunter::HandlingType::FullscreenMono;
             }
+            vr_draw_resolved_handling = handling;
 
             if (handling == ShaderHunter::HandlingType::Screen)
             {
@@ -1507,12 +1511,13 @@ void VertexManagerBase::Flush()
                            "VR_DRAW #{}: ORTHO l={:.1f} r={:.1f} t={:.1f} b={:.1f} n={:.1f} "
                            "f={:.1f} | VP({:.0f},{:.0f} {:.0f}x{:.0f}) | SC({},{} {},{})"
                            " | VS={:08x} PS={:08x} GS={:08x} | idx={} col={} alpha={} zt={} "
-                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | skip={}",
+                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | handling={} | "
+                           "skip={}",
                            m_draw_counter, left, right, top, bottom, znear, zfar, vp.xOrig,
                            vp.yOrig, vp.wd, vp.ht, scTL.x, scTL.y, scBR.x, scBR.y, vs_hash,
                            ps_hash, gs_hash, nidx, color_update, alpha_update, z_test, z_update,
                            bpmem.zmode.func, ortho_layer_counter, ortho_layer_override, layer_name,
-                           hunter_skip);
+                           HandlingToDebugName(vr_draw_resolved_handling), hunter_skip);
             }
             else
             {
@@ -1525,11 +1530,13 @@ void VertexManagerBase::Flush()
                            "VR_DRAW #{}: PERSP hfov={:.2f} vfov={:.2f} n={:.2f} f={:.2f}"
                            " | VP({:.0f},{:.0f} {:.0f}x{:.0f}) | SC({},{} {},{})"
                            " | VS={:08x} PS={:08x} GS={:08x} | idx={} col={} alpha={} zt={} "
-                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | skip={}",
+                           "z={} zf={} | layer_ctr={} layer_ovr={} | layer={} | handling={} | "
+                           "skip={}",
                            m_draw_counter, hfov, vfov, n, f, vp.xOrig, vp.yOrig, vp.wd, vp.ht,
                            scTL.x, scTL.y, scBR.x, scBR.y, vs_hash, ps_hash, gs_hash, nidx,
                            color_update, alpha_update, z_test, z_update, bpmem.zmode.func,
-                           ortho_layer_counter, ortho_layer_override, layer_name, hunter_skip);
+                           ortho_layer_counter, ortho_layer_override, layer_name,
+                           HandlingToDebugName(vr_draw_resolved_handling), hunter_skip);
             }
           }
         }
