@@ -14,15 +14,12 @@ REPO="${REPO:-$HOME/games/PrimedGun}"
 
 # libadrenotools is required by the Android arm64 Vulkan build for custom-driver
 # loading on Adreno (CMakeLists.txt: add_subdirectory(Externals/libadrenotools)).
-# Unlike the other Externals it is not vendored into this repo, and it is not wired
-# up as a real git submodule (git submodule status doesn't list it), so neither a
-# plain checkout nor `git submodule update` populates it. Clone it (and its nested
-# linkernsbypass submodule) on first build, pinned to a known-good commit so a fresh
-# checkout is reproducible. The lib/linkernsbypass/CMakeLists.txt sentinel confirms
-# both the outer tree and the nested submodule are present before we skip.
+# It is a registered git submodule (gitlink + .gitmodules entry) rather than vendored
+# inline like the other Externals, so a plain checkout leaves it empty. Populate it
+# (and its nested linkernsbypass submodule) on first build. The
+# lib/linkernsbypass/CMakeLists.txt sentinel confirms both the outer tree and the
+# nested submodule are present before we skip.
 ADRENO_DIR="$REPO/Externals/libadrenotools"
-# ADRENO_URL="https://github.com/bylaws/libadrenotools.git"
-# ADRENO_COMMIT="8fae8ce254dfc1344527e05301e43f37dea2df80"
 if [[ ! -f "$ADRENO_DIR/lib/linkernsbypass/CMakeLists.txt" ]]; then
   echo "[*] Populating submodules..."
   git -C "$REPO" submodule update --init --recursive
