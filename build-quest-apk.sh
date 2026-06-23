@@ -21,14 +21,11 @@ REPO="$HOME/games/PrimedGun"
 # checkout is reproducible. The lib/linkernsbypass/CMakeLists.txt sentinel confirms
 # both the outer tree and the nested submodule are present before we skip.
 ADRENO_DIR="$REPO/Externals/libadrenotools"
-ADRENO_URL="https://github.com/bylaws/libadrenotools.git"
-ADRENO_COMMIT="8fae8ce254dfc1344527e05301e43f37dea2df80"
+# ADRENO_URL="https://github.com/bylaws/libadrenotools.git"
+# ADRENO_COMMIT="8fae8ce254dfc1344527e05301e43f37dea2df80"
 if [[ ! -f "$ADRENO_DIR/lib/linkernsbypass/CMakeLists.txt" ]]; then
-  echo "[*] Populating libadrenotools (+ nested linkernsbypass) submodule..."
-  rm -rf "$ADRENO_DIR"
-  git clone "$ADRENO_URL" "$ADRENO_DIR"
-  git -C "$ADRENO_DIR" checkout --quiet "$ADRENO_COMMIT"
-  git -C "$ADRENO_DIR" submodule update --init --recursive
+  echo "[*] Populating submodules..."
+  git -C "$REPO" submodule update --init --recursive
 else
   echo "[*] libadrenotools already populated; skipping."
 fi
