@@ -649,6 +649,15 @@ add_custom_target(primegun-runtime-assets-copy
 )
 add_dependencies(dolphin-emu primegun-runtime-assets-copy)
 
+add_custom_target(primegun-readme-copy
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/README.md"
+          "$<TARGET_FILE_DIR:dolphin-emu>/README.md"
+  DEPENDS "${CMAKE_SOURCE_DIR}/README.md"
+  COMMENT "Copying PrimedGun README into the runtime directory"
+)
+add_dependencies(dolphin-emu primegun-readme-copy)
+
 # Handle localization
 if(PRIMEGUN_ENABLE_TRANSLATIONS)
 find_package(Gettext)

@@ -897,6 +897,8 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux|FreeBSD|OpenBSD")
           DESTINATION ${datadir}/User/Load/PrimedGun)
   install(DIRECTORY Data/User/Load/Textures/000_PrimedGunCannon/
           DESTINATION ${datadir}/User/Load/Textures/000_PrimedGunCannon)
+  install(FILES README.md
+          DESTINATION ${datadir})
 
   # Install the application icon and menu item
   install(FILES Data/primedgun.png

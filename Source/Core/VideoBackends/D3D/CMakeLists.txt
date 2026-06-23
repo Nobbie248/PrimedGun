@@ -37,6 +37,8 @@ endif()
 
 if(ENABLE_VR)
   target_sources(videod3d PRIVATE
+    D3DPrimedGunOverlay.cpp
+    D3DPrimedGunOverlay.h
     D3DOpenXR.cpp
     D3DOpenXR.h
   )

@@ -38,6 +38,7 @@ struct RuntimeSettings
   float trigger_threshold = 0.5f;
   bool primegun_grip_inputs_enabled = true;
   bool primegun_grip_inputs_use_trackpad = false;
+  float primegun_trackpad_press_threshold = 0.5f;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
   float gun_targeting_radius = 4.0f;

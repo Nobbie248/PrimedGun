@@ -102,6 +102,8 @@ constexpr float DEFAULT_ROT_OFFSET_X = 0.0f;
 constexpr float DEFAULT_ROT_OFFSET_Y = 0.0f;
 constexpr float DEFAULT_ROT_OFFSET_Z = 0.0f;
 
+constexpr u32 MEM1_BASE = 0x80000000u;
+constexpr u32 MEM1_END = 0x81800000u;
 constexpr u32 PATCH_CODE_ARENA_BASE = 0x817F8000u;
 constexpr u32 SCRATCH_BASE = 0x817FE000u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
@@ -140,6 +142,7 @@ constexpr u32 DRAW_NEXT_LOCK_ON_GROUP = 0x800BD808u;
 constexpr u32 DRAW_CURR_LOCK_ON_GROUP = 0x800BE25Cu;
 constexpr u32 UPDATE_SCAN_OBJECT_INDICATORS = 0x80112508u;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS = 0x801122CCu;
+constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL = 0xC0410074u;
 
 constexpr u32 VR_MENU_TAB_COUNT = 6;
 constexpr u32 VR_MENU_CANNON_TAB = 5;
@@ -255,6 +258,7 @@ bool s_prompt_waiting_for_second_ready = false;
 bool s_prompt_shown_this_session = false;
 bool s_dpad_forced_input_disabled = false;
 bool s_dpad_input_was_disabled = false;
+u32 s_dpad_input_player = 0;
 u32 s_dpad_input_flags_addr = 0;
 u64 s_dpad_last_disable_refresh_frame = 0;
 float s_directional_move_speed = 0.0f;
@@ -342,7 +346,8 @@ DynamicPpcPatch s_scan_reticle_trace_curr_patch{
 DynamicPpcPatch s_scan_indicator_update_trace_patch{
     UPDATE_SCAN_OBJECT_INDICATORS, 0, 0, SCAN_INDICATOR_UPDATE_TRACE_CAVE, false};
 DynamicPpcPatch s_scan_indicator_view_basis_patch{
-    DRAW_SCAN_INDICATOR_MODEL_BASIS, 0xC0410074u, 0, SCAN_INDICATOR_VIEW_BASIS_CAVE, false};
+    DRAW_SCAN_INDICATOR_MODEL_BASIS, DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL, 0,
+    SCAN_INDICATOR_VIEW_BASIS_CAVE, false};
 
 ProjectileTransformPatch s_projectile_transform_patches[] = {
     {0x800E0434u, 0, WAVE_PROJECTILE_TRANSFORM_CAVE, 6, false},
@@ -591,9 +596,7 @@ bool TryReadFloat(const Core::CPUThreadGuard& guard, u32 address, float* out)
 
 bool IsWritablePrimeMem1Address(u32 address, u32 size)
 {
-  constexpr u32 mem1_start = 0x80000000u;
-  constexpr u32 mem1_end = 0x81800000u;
-  return address >= mem1_start && address < mem1_end && size <= (mem1_end - address);
+  return address >= MEM1_BASE && address < MEM1_END && size <= (MEM1_END - address);
 }
 
 bool TryWriteFloat(const Core::CPUThreadGuard& guard, u32 address, float value)
@@ -1916,7 +1919,13 @@ bool LeftControllerNearHead(const Pose& left, const Pose& hmd, const RuntimeSett
 void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_manager,
                                    bool disabled)
 {
-  if (disabled && s_dpad_forced_input_disabled && s_dpad_input_flags_addr >= 0x80000000u)
+  u32 player = 0;
+  const bool have_player =
+      TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) &&
+      player >= 0x80000000u;
+
+  if (disabled && s_dpad_forced_input_disabled && have_player &&
+      player == s_dpad_input_player && s_dpad_input_flags_addr == player + PLAYER_DISABLE_INPUT_FLAGS_OFFSET)
   {
     if (s_frame_counter - s_dpad_last_disable_refresh_frame < 15)
       return;
@@ -1930,22 +1939,11 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
     return;
   }
 
-  u32 player = 0;
-  if (!TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) ||
-      player < 0x80000000u)
+  if (!have_player)
   {
-    if (s_dpad_forced_input_disabled && !s_dpad_input_was_disabled &&
-        s_dpad_input_flags_addr >= 0x80000000u)
-    {
-      u8 old_flags = 0;
-      if (TryReadU8(guard, s_dpad_input_flags_addr, &old_flags))
-      {
-        TryWriteU8(guard, s_dpad_input_flags_addr,
-                   old_flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
-      }
-    }
     s_dpad_forced_input_disabled = false;
     s_dpad_input_was_disabled = false;
+    s_dpad_input_player = 0;
     s_dpad_input_flags_addr = 0;
     s_dpad_last_disable_refresh_frame = 0;
     return;
@@ -1958,18 +1956,6 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
 
   if (disabled)
   {
-    if (s_dpad_forced_input_disabled && s_dpad_input_flags_addr != flags_addr &&
-        !s_dpad_input_was_disabled && s_dpad_input_flags_addr >= 0x80000000u)
-    {
-      u8 old_flags = 0;
-      if (TryReadU8(guard, s_dpad_input_flags_addr, &old_flags))
-      {
-        TryWriteU8(guard, s_dpad_input_flags_addr,
-                   old_flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
-      }
-      s_dpad_forced_input_disabled = false;
-    }
-
     if (!s_dpad_forced_input_disabled)
     {
       s_dpad_input_was_disabled = (flags & PLAYER_DISABLE_INPUT_MASK) != 0;
@@ -1977,6 +1963,7 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
     }
 
     TryWriteU8(guard, flags_addr, flags | PLAYER_DISABLE_INPUT_MASK);
+    s_dpad_input_player = player;
     s_dpad_input_flags_addr = flags_addr;
     s_dpad_last_disable_refresh_frame = s_frame_counter;
     return;
@@ -1987,6 +1974,7 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
 
   s_dpad_forced_input_disabled = false;
   s_dpad_input_was_disabled = false;
+  s_dpad_input_player = 0;
   s_dpad_input_flags_addr = 0;
   s_dpad_last_disable_refresh_frame = 0;
 }
@@ -2679,7 +2667,7 @@ u32 VrMenuItemCountForTab(u32 tab)
   case 1:
     return 7;
   case 2:
-    return 11;
+    return 12;
   case 3:
     return 9;
   case 4:
@@ -2700,7 +2688,7 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
   case 1:
     return index <= 5;
   case 2:
-    return index == 2 || index == 7 || index == 8 || index == 9;
+    return index == 2 || index == 5 || index == 8 || index == 9 || index == 10;
   case 3:
     return index >= 3 && index <= 7;
   default:
@@ -2808,6 +2796,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->trigger_threshold = 0.5f;
   settings->primegun_grip_inputs_enabled = true;
   settings->primegun_grip_inputs_use_trackpad = false;
+  settings->primegun_trackpad_press_threshold = 0.5f;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -2888,15 +2877,19 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->trigger_threshold =
           std::clamp(settings->trigger_threshold + sign * 0.05f, 0.0f, 1.0f);
       break;
-    case 7:
+    case 5:
+      settings->primegun_trackpad_press_threshold =
+          std::clamp(settings->primegun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
+      break;
+    case 8:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 8:
+    case 9:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 9:
+    case 10:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -2987,11 +2980,9 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
     else if (s_vr_menu_selected_index == 4)
       settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
-    else if (s_vr_menu_selected_index == 5)
-      settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
     else if (s_vr_menu_selected_index == 6)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (s_vr_menu_selected_index == 10)
+    else if (s_vr_menu_selected_index == 11)
       ResetControllerSettings(settings);
     return;
   }
@@ -3084,6 +3075,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.trigger_threshold = settings.trigger_threshold;
   overlay.primegun_grip_inputs_enabled = settings.primegun_grip_inputs_enabled;
   overlay.primegun_grip_inputs_use_trackpad = settings.primegun_grip_inputs_use_trackpad;
+  overlay.primegun_trackpad_press_threshold = settings.primegun_trackpad_press_threshold;
   overlay.gun_targeting_enabled = settings.gun_targeting_enabled;
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
@@ -3483,9 +3475,8 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   const u32 world_xf = gun + ADDRESS.world_xf_offset;
   const u32 local_xf = gun + ADDRESS.local_xf_offset;
   const bool gun_chain_valid =
-      s_last_validated_gun == gun ||
-      (LooksLikeTransformMatrix(guard, gun_xf) && LooksLikeTransformMatrix(guard, beam_xf) &&
-       LooksLikeTransformMatrix(guard, world_xf) && LooksLikeTransformMatrix(guard, local_xf));
+      LooksLikeTransformMatrix(guard, gun_xf) && LooksLikeTransformMatrix(guard, beam_xf) &&
+      LooksLikeTransformMatrix(guard, world_xf) && LooksLikeTransformMatrix(guard, local_xf);
   if (!gun_chain_valid)
   {
     s_smooth_matrix_valid = false;
@@ -3721,19 +3712,32 @@ bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
 bool ApplyScanIndicatorViewBasisPatch(const Core::CPUThreadGuard& guard)
 {
   auto& patch = s_scan_indicator_view_basis_patch;
+  if (patch.original == 0)
+    patch.original = DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL;
+
+  const u32 return_addr = patch.address + 4u;
+  const bool safe_cave_wrote = !InstructionBlockMatches(
+                                   guard, patch.cave,
+                                   {{0x00u, patch.original},
+                                    {0x04u, PpcBranch(patch.cave + 0x04u, return_addr)}}) &&
+                               TryWriteInstructionBlock(
+                                   guard, patch.cave,
+                                   {{0x00u, patch.original},
+                                    {0x04u, PpcBranch(patch.cave + 0x04u, return_addr)}});
+
   u32 current = 0;
   if (!TryReadU32(guard, patch.address, &current))
-    return false;
+    return safe_cave_wrote;
 
   const u32 branch = PpcBranch(patch.address, patch.cave);
   if (current == branch)
   {
     patch.applied = false;
-    return TryWriteInstruction(guard, patch.address, patch.original);
+    return TryWriteInstruction(guard, patch.address, patch.original) || safe_cave_wrote;
   }
 
   patch.applied = false;
-  return false;
+  return safe_cave_wrote;
 }
 
 bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, ProjectileTransformPatch& patch)
@@ -3761,8 +3765,9 @@ bool ApplyProjectileTransformPatch(const Core::CPUThreadGuard& guard, Projectile
   }
 
   patch.original = current;
-  constexpr u32 transform_scratch_hi = (0x817FE600u >> 16) & 0xffffu;
-  constexpr u32 transform_scratch_lo = 0x817FE600u & 0xffffu;
+  constexpr u32 transform_scratch = SCRATCH_BASE + 0x600u;
+  constexpr u32 transform_scratch_hi = (transform_scratch >> 16) & 0xffffu;
+  constexpr u32 transform_scratch_lo = transform_scratch & 0xffffu;
   constexpr u32 cannon_scratch_hi = (CANNON_BASIS_SCRATCH >> 16) & 0xffffu;
   constexpr u32 cannon_scratch_lo = CANNON_BASIS_SCRATCH & 0xffffu;
   const u32 original_label = patch.cave + 0x80u;
@@ -4150,7 +4155,9 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   if (!s_game_was_active)
+  {
     TryWriteU32(guard, GAMEFLOW_MENU_SCRATCH, 0);
+  }
   s_game_was_active = true;
   UpdateShaderHunterGameFlowFlags(guard);
 
@@ -4272,6 +4279,7 @@ void ResetNativeRuntime()
   s_translation_base_valid = false;
   s_dpad_forced_input_disabled = false;
   s_dpad_input_was_disabled = false;
+  s_dpad_input_player = 0;
   s_dpad_input_flags_addr = 0;
   s_dpad_last_disable_refresh_frame = 0;
   s_directional_move_speed = 0.0f;
@@ -4335,7 +4343,7 @@ void ResetNativeRuntime()
   s_scan_indicator_update_trace_patch.applied = false;
   s_scan_indicator_update_trace_patch.original = 0;
   s_scan_indicator_view_basis_patch.applied = false;
-  s_scan_indicator_view_basis_patch.original = 0;
+  s_scan_indicator_view_basis_patch.original = DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
     patch.applied = false;
   s_combat_elevation_pitch_patch.applied = false;
@@ -4373,6 +4381,8 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
 {
   std::lock_guard lock{s_settings_mutex};
   s_settings = settings;
+  s_settings.primegun_trackpad_press_threshold =
+      std::clamp(s_settings.primegun_trackpad_press_threshold, 0.05f, 1.0f);
 }
 
 void ResetCalibrationOffsets()

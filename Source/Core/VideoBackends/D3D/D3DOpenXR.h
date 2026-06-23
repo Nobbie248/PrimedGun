@@ -14,6 +14,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "VideoBackends/D3D/D3DPrimedGunOverlay.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 
 namespace DX11
@@ -33,24 +34,6 @@ struct XREyeSwapchain
   // One entry per swapchain image.
   std::vector<std::unique_ptr<DXTexture>> textures;
   std::vector<std::unique_ptr<DXFramebuffer>> framebuffers;
-};
-
-struct XRPrimedGunOverlaySwapchain
-{
-  XrSwapchain swapchain = XR_NULL_HANDLE;
-  uint32_t width = 0;
-  uint32_t height = 0;
-  uint32_t content_kind = 0;
-  uint32_t generation = 0;
-  bool texture_ready = false;
-  std::vector<XrSwapchainImageD3D11KHR> images;
-};
-
-struct XRPrimedGunLaserSwapchain
-{
-  XrSwapchain swapchain = XR_NULL_HANDLE;
-  bool texture_ready = false;
-  std::vector<XrSwapchainImageD3D11KHR> images;
 };
 
 // D3D11-specific OpenXR backend. Implements VR::IOpenXRSwapchain so that
@@ -97,17 +80,9 @@ private:
   bool CreateSwapchains();
 
   void DestroySwapchains();
-  bool EnsurePrimedGunOverlaySwapchain(uint32_t content_kind, uint32_t generation,
-                                      uint32_t width, uint32_t height,
-                                      const std::vector<uint32_t>& pixels);
-  void DestroyPrimedGunOverlaySwapchain();
-  bool EnsurePrimedGunLaserSwapchain();
-  void DestroyPrimedGunLaserSwapchain();
-  bool AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBaseHeader*>* layers);
 
   std::array<XREyeSwapchain, 2> m_eye_swapchains{};
-  XRPrimedGunOverlaySwapchain m_primegun_overlay_swapchain{};
-  XRPrimedGunLaserSwapchain m_primegun_laser_swapchain{};
+  D3DPrimedGunOverlay m_primegun_overlay{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};
@@ -116,8 +91,6 @@ private:
   // Reused per-frame composition data (avoids per-frame heap allocation).
   std::array<XrCompositionLayerProjectionView, 2> m_projection_views{};
   XrCompositionLayerProjection m_projection_layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-  XrCompositionLayerQuad m_primegun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
-  XrCompositionLayerQuad m_primegun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 
 };
 

@@ -268,7 +268,6 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
 {
   auto* core = game_ini->GetOrCreateSection("Core");
   core->Set("MMU", "True");
-  core->Set("EnableCheats", "False");
   core->Set("CPUThread", "True");
   core->Set("FPRF", "False");
   core->Set("SyncGPU", "False");

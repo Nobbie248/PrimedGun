@@ -195,11 +195,12 @@ static void ApplyPrimedGunClassicMenuControls(const Common::VR::OpenXRController
       left.connected && !suppress_left_stick ?
           PrimedGunAxisToPadByte(left.thumbstick_y, GCPadStatus::MAIN_STICK_CENTER_Y) :
           GCPadStatus::MAIN_STICK_CENTER_Y;
-  // PrimeGun owns beam selection through the explicit B-held weapon selector.  Do not let
-  // transient classic/menu fallback states pass the right stick through as C-stick, because visor
-  // transitions can briefly report non-gameplay and accidentally change beams.
-  pad->substickX = GCPadStatus::C_STICK_CENTER_X;
-  pad->substickY = GCPadStatus::C_STICK_CENTER_Y;
+  pad->substickX = right.connected ?
+                       PrimedGunAxisToPadByte(right.thumbstick_x, GCPadStatus::C_STICK_CENTER_X) :
+                       GCPadStatus::C_STICK_CENTER_X;
+  pad->substickY = right.connected ?
+                       PrimedGunAxisToPadByte(right.thumbstick_y, GCPadStatus::C_STICK_CENTER_Y) :
+                       GCPadStatus::C_STICK_CENTER_Y;
 
   if (left.connected)
   {
@@ -225,6 +226,35 @@ static void ApplyPrimedGunClassicMenuControls(const Common::VR::OpenXRController
       pad->button |= PAD_TRIGGER_R;
       pad->triggerRight = 0xFF;
     }
+  }
+}
+
+static void ApplyPrimedGunGripInputs(const Common::VR::OpenXRControllerState& left,
+                                     const Common::VR::OpenXRControllerState& right,
+                                     const Common::VR::PrimedGunVrOverlayState& overlay,
+                                     GCPadStatus* pad)
+{
+  if (!overlay.primegun_grip_inputs_enabled)
+    return;
+
+  if (left.connected)
+  {
+    const bool left_grip_action =
+        overlay.primegun_grip_inputs_use_trackpad ?
+            left.trackpad_force >= overlay.primegun_trackpad_press_threshold :
+            left.squeeze_button;
+    if (left_grip_action)
+      pad->button |= PAD_TRIGGER_Z;
+  }
+
+  if (right.connected)
+  {
+    const bool right_grip_action =
+        overlay.primegun_grip_inputs_use_trackpad ?
+            right.trackpad_force >= overlay.primegun_trackpad_press_threshold :
+            right.squeeze_button;
+    if (right_grip_action)
+      pad->button |= PAD_BUTTON_Y;
   }
 }
 
@@ -575,6 +605,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
   if (!gameplay)
   {
     ApplyPrimedGunClassicMenuControls(game_left, game_right, pad, suppress_left_stick, false);
+    ApplyPrimedGunGripInputs(game_left, game_right, overlay, pad);
     if (pad->button & PAD_BUTTON_A)
       pad->analogA = 0xFF;
     if (pad->button & PAD_BUTTON_B)
@@ -624,11 +655,6 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
       pad->button |= PAD_BUTTON_X;
     if (game_left.secondary_button && !left_vr_menu_button && !weapon_modifier)
       pad->button |= PAD_BUTTON_START;
-    const bool left_grip_action = overlay.primegun_grip_inputs_use_trackpad ?
-                                      game_left.trackpad_button :
-                                      game_left.squeeze_button;
-    if (overlay.primegun_grip_inputs_enabled && left_grip_action)
-      pad->button |= PAD_TRIGGER_Z;
     if (game_left.trigger_button)
     {
       pad->button |= PAD_TRIGGER_L;
@@ -642,14 +668,11 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
       pad->button |= PAD_BUTTON_A;
     if (!overlay.use_right_hand && game_right.secondary_button)
       pad->button |= PAD_BUTTON_START;
-    const bool right_grip_action = overlay.primegun_grip_inputs_use_trackpad ?
-                                       game_right.trackpad_button :
-                                       game_right.squeeze_button;
-    if (overlay.primegun_grip_inputs_enabled && right_grip_action)
-      pad->button |= PAD_BUTTON_Y;
     if (!weapon_modifier && look_stick.connected && look_stick.thumbstick_y > stick_button_threshold)
       pad->button |= PAD_BUTTON_B;
   }
+
+  ApplyPrimedGunGripInputs(game_left, game_right, overlay, pad);
 
   if (overlay.menu_visible)
   {

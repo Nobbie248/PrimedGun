@@ -104,6 +104,7 @@
 #include "Core/Movie.h"
 #include "Core/PrimedGun/NativeRuntime.h"
 #include "Core/PrimedGun/PPCTrace.h"
+#include "Core/PowerPC/PowerPC.h"
 #include "Core/State.h"
 #include "Core/System.h"
 #include "Core/WiiUtils.h"
@@ -694,9 +695,69 @@ void PrimedGunDumpMem1(QWidget* parent)
     return;
   }
 
+  const std::string context_path = path + ".txt";
+  File::IOFile context_file(context_path, "wb");
+  if (context_file)
+  {
+    const auto& system = Core::System::GetInstance();
+    const auto& ppc_state = system.GetPPCState();
+    std::string context = fmt::format(
+        "PrimedGun RAM dump context\n"
+        "PC={:08X}\n"
+        "NPC={:08X}\n"
+        "LR={:08X}\n"
+        "CTR={:08X}\n"
+        "SRR0={:08X}\n"
+        "SRR1={:08X}\n"
+        "Exceptions={:08X}\n",
+        ppc_state.pc, ppc_state.npc, ppc_state.spr[SPR_LR], ppc_state.spr[SPR_CTR],
+        ppc_state.spr[SPR_SRR0], ppc_state.spr[SPR_SRR1], ppc_state.Exceptions);
+
+    const auto read_mem1_u32 = [accessors](u32 address) -> std::optional<u32> {
+      constexpr u32 mem1_base = 0x80000000u;
+      if (address < mem1_base)
+        return std::nullopt;
+
+      const size_t offset = static_cast<size_t>(address - mem1_base);
+      const u8* const begin = accessors->begin();
+      const u8* const end = accessors->end();
+      if (begin + offset + sizeof(u32) > end)
+        return std::nullopt;
+
+      const u8* const ptr = begin + offset;
+      return (static_cast<u32>(ptr[0]) << 24) | (static_cast<u32>(ptr[1]) << 16) |
+             (static_cast<u32>(ptr[2]) << 8) | static_cast<u32>(ptr[3]);
+    };
+
+    context += "\nPatch sites\n";
+    for (const u32 address :
+         {0x8000E548u, 0x80041A8Cu, 0x8000E7B4u, 0x8000E808u, 0x8000E83Cu,
+          0x8000FA50u, 0x800BD808u, 0x800BE25Cu, 0x80112508u, 0x801122CCu,
+          0x800E0434u, 0x801B9070u})
+    {
+      const std::optional<u32> value = read_mem1_u32(address);
+      context += fmt::format("{:08X}={}\n", address,
+                             value ? fmt::format("{:08X}", *value) : "unreadable");
+    }
+
+    context += "\nHook cave heads\n";
+    for (const u32 address :
+         {0x817F8000u, 0x817F8080u, 0x817F8100u, 0x817F8140u, 0x817F8180u,
+          0x817F81C0u, 0x817F8200u, 0x817F8280u, 0x817F8340u, 0x817F8400u,
+          0x817F8540u, 0x817F8580u, 0x817F85C0u, 0x817F8600u})
+    {
+      const std::optional<u32> value = read_mem1_u32(address);
+      context += fmt::format("{:08X}={}\n", address,
+                             value ? fmt::format("{:08X}", *value) : "unreadable");
+    }
+
+    context_file.WriteBytes(context.data(), context.size());
+  }
+
   ModalMessageBox::information(
       parent, QObject::tr("RAM Dump"),
-      QObject::tr("RAM dumped to:\n%1").arg(QString::fromStdString(path)));
+      QObject::tr("RAM dumped to:\n%1\n\nContext written to:\n%2")
+          .arg(QString::fromStdString(path), QString::fromStdString(context_path)));
 }
 }  // namespace
 
@@ -1468,6 +1529,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
                        runtime.primegun_grip_inputs_use_trackpad)
             .toBool();
+    runtime.primegun_trackpad_press_threshold =
+        settings.value(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
+                       runtime.primegun_trackpad_press_threshold)
+            .toFloat();
     runtime.gun_targeting_enabled =
         settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
@@ -1568,6 +1633,8 @@ void MainWindow::ConnectStack()
                       runtime.primegun_grip_inputs_enabled);
     settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
                       runtime.primegun_grip_inputs_use_trackpad);
+    settings.setValue(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
+                      runtime.primegun_trackpad_press_threshold);
     settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
@@ -1778,10 +1845,13 @@ void MainWindow::ConnectStack()
   auto* setup_layout = make_scroll_tab(tr("Setup"));
   setup_layout->setContentsMargins(12, 10, 12, 0);
   setup_layout->addWidget(section_label(tr("Setup"), game_tab));
+  auto* notes = new QLabel(tr("Use the README for setup instructions."), game_tab);
+  notes->setObjectName(QStringLiteral("PrimedGunMuted"));
+  setup_layout->addWidget(notes);
   separator(setup_layout);
   setup_layout->addWidget(selected_game);
   auto* select_game_row = new QHBoxLayout;
-  auto* select_game_note = new QLabel(tr("Select Metroid Prime NTSC Revision 0."), game_tab);
+  auto* select_game_note = new QLabel(tr("Select Metroid Prime NTSC Revision 0 (1.0)."), game_tab);
   select_game_note->setObjectName(QStringLiteral("PrimedGunMuted"));
   select_game_row->addWidget(select_game_note);
   select_game_row->addStretch();
@@ -1798,22 +1868,11 @@ void MainWindow::ConnectStack()
   setup_layout->addSpacing(12);
   auto* scan_notice =
       new QLabel(tr("NOTE: Head-tracked scan visor is temporarily disabled in this build while "
-                    "scan-mode stability is being refined."),
+                    "scan-mode stability is being refined. Original scan mode has been restored."),
                  game_tab);
   scan_notice->setObjectName(QStringLiteral("PrimedGunNotice"));
   scan_notice->setWordWrap(true);
   setup_layout->addWidget(scan_notice);
-  auto* notes = new QLabel(tr("Setup notes\n"
-                              "  * HMD refresh rate set to 120 Hz is recommended.\n"
-                              "  * Meta's own OpenXR environment is not recommended; try SteamVR or VD instead.\n"
-                              "  * Select your Metroid Prime GameCube game file.\n"
-                              "  * Transfer your memory card into User\\GC if you want existing saves.\n"
-                              "  * Once in game, click the right stick to set your height.\n"
-                              "  * Click the left thumbstick to open or close the in-headset settings menu.\n"
-                              "  * Try to stay in the centre of your play space and face forward for the best interaction.\n"
-                              "  * Use Save Settings after changing PrimedGun options to apply them."), game_tab);
-  notes->setObjectName(QStringLiteral("PrimedGunMuted"));
-  setup_layout->addWidget(notes);
   setup_layout->addStretch();
   auto* setup_art = new QLabel(game_tab);
   setup_art->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
@@ -1861,7 +1920,7 @@ void MainWindow::ConnectStack()
   primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
   controller_layout->addWidget(primegun_grip_inputs_enabled);
   auto* primegun_grip_inputs_use_trackpad =
-      new QCheckBox(tr("Use touchpad press for PrimedGun grip inputs (Index users)"), game_tab);
+      new QCheckBox(tr("Use touchpad for PrimedGun grip inputs (Index users)"), game_tab);
   primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
   controller_layout->addWidget(primegun_grip_inputs_use_trackpad);
 
@@ -1918,6 +1977,10 @@ void MainWindow::ConnectStack()
     return spin;
   };
 
+  auto* trackpad_press_threshold_spin =
+      add_float_row(controller_layout, tr("Touchpad sensitivity"), 0.05, 1.00, 0.05,
+                    runtime->primegun_trackpad_press_threshold,
+                    [runtime](float v) { runtime->primegun_trackpad_press_threshold = v; });
   auto* dpad_radius_spin =
       add_float_row(controller_layout, tr("Head radius"), 0.08, 0.28, 0.01,
                     runtime->xr_dpad_head_radius,
@@ -2506,6 +2569,7 @@ void MainWindow::ConnectStack()
     targeting_enabled->setChecked(runtime->gun_targeting_enabled);
     visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
     set_float(dpad_radius_spin, runtime->xr_dpad_head_radius);
+    set_float(trackpad_press_threshold_spin, runtime->primegun_trackpad_press_threshold);
     set_float(dpad_below_spin, runtime->xr_dpad_head_y_below);
     set_float(dpad_deadzone_spin, runtime->xr_dpad_deadzone);
     set_float(movement_deadzone_spin, runtime->directional_movement_deadzone);
@@ -2540,6 +2604,7 @@ void MainWindow::ConnectStack()
     runtime->xr_dpad_enabled = true;
     runtime->primegun_grip_inputs_enabled = true;
     runtime->primegun_grip_inputs_use_trackpad = false;
+    runtime->primegun_trackpad_press_threshold = 0.5f;
     runtime->directional_movement_enabled = true;
     runtime->directional_movement_use_right_stick = false;
     runtime->directional_movement_use_hmd_direction = false;

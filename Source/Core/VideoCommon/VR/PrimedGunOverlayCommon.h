@@ -257,7 +257,7 @@ inline bool MenuRowIsNumeric(uint32_t tab, int index)
   case 1:
     return index >= 0 && index <= 5;
   case 2:
-    return index == 2 || index == 7 || index == 8 || index == 9;
+    return index == 2 || index == 5 || index == 8 || index == 9 || index == 10;
   case 3:
     return index >= 3 && index <= 7;
   default:
@@ -283,6 +283,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"TRIGGER", FloatText(s.trigger_threshold, 2)},
             {"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"},
             {"GRIP INPUT SOURCE", s.primegun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"},
+            {"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)},
             {"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"},
             {"D-PAD ENABLED", s.xr_dpad_enabled ? "ON" : "OFF"},
             {"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)},
