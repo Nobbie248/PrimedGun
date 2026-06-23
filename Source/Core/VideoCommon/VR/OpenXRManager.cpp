@@ -460,6 +460,12 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_haptic, "/user/hand/right/output/haptic"},
                    });
 
+  // NOTE: the Oculus Touch interaction profile has NO trackpad component
+  // (/input/trackpad/*). Suggesting any unsupported path makes the runtime reject the ENTIRE
+  // xrSuggestInteractionProfileBindings call for this profile, so the Quest then falls back to
+  // khr/simple_controller (only trigger->select + menu) and every thumbstick/trigger/grip/face
+  // binding silently dies. Keep trackpad bindings out of this profile — they belong only on
+  // profiles that actually have a trackpad (vive, index).
   suggest_bindings("/interaction_profiles/oculus/touch_controller",
                    {
                        {m_action_primary_click, "/user/hand/left/input/x/click"},
@@ -468,10 +474,6 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_thumbstick_click, "/user/hand/left/input/thumbstick/click"},
                        {m_action_thumbstick_x, "/user/hand/left/input/thumbstick/x"},
                        {m_action_thumbstick_y, "/user/hand/left/input/thumbstick/y"},
-                       {m_action_trackpad_touch, "/user/hand/left/input/trackpad/touch"},
-                       {m_action_trackpad_x, "/user/hand/left/input/trackpad/x"},
-                       {m_action_trackpad_y, "/user/hand/left/input/trackpad/y"},
-                       {m_action_trackpad_force, "/user/hand/left/input/trackpad/force"},
                        {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/left/input/squeeze/value"},
                        {m_action_aim_pose, "/user/hand/left/input/aim/pose"},
@@ -481,10 +483,6 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_thumbstick_click, "/user/hand/right/input/thumbstick/click"},
                        {m_action_thumbstick_x, "/user/hand/right/input/thumbstick/x"},
                        {m_action_thumbstick_y, "/user/hand/right/input/thumbstick/y"},
-                       {m_action_trackpad_touch, "/user/hand/right/input/trackpad/touch"},
-                       {m_action_trackpad_x, "/user/hand/right/input/trackpad/x"},
-                       {m_action_trackpad_y, "/user/hand/right/input/trackpad/y"},
-                       {m_action_trackpad_force, "/user/hand/right/input/trackpad/force"},
                        {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/right/input/squeeze/value"},
                        {m_action_aim_pose, "/user/hand/right/input/aim/pose"},
