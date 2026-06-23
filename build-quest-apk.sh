@@ -5,12 +5,12 @@
 # automatically below, so this script can build from a complete-fresh checkout.
 set -euo pipefail
 
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
-export ANDROID_HOME="$HOME/Android/Sdk"
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk}"
+export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
-REPO="$HOME/games/PrimedGun"
+REPO="${REPO:-$HOME/games/PrimedGun}"
 
 # libadrenotools is required by the Android arm64 Vulkan build for custom-driver
 # loading on Adreno (CMakeLists.txt: add_subdirectory(Externals/libadrenotools)).
@@ -21,14 +21,11 @@ REPO="$HOME/games/PrimedGun"
 # checkout is reproducible. The lib/linkernsbypass/CMakeLists.txt sentinel confirms
 # both the outer tree and the nested submodule are present before we skip.
 ADRENO_DIR="$REPO/Externals/libadrenotools"
-ADRENO_URL="https://github.com/bylaws/libadrenotools.git"
-ADRENO_COMMIT="8fae8ce254dfc1344527e05301e43f37dea2df80"
+# ADRENO_URL="https://github.com/bylaws/libadrenotools.git"
+# ADRENO_COMMIT="8fae8ce254dfc1344527e05301e43f37dea2df80"
 if [[ ! -f "$ADRENO_DIR/lib/linkernsbypass/CMakeLists.txt" ]]; then
-  echo "[*] Populating libadrenotools (+ nested linkernsbypass) submodule..."
-  rm -rf "$ADRENO_DIR"
-  git clone "$ADRENO_URL" "$ADRENO_DIR"
-  git -C "$ADRENO_DIR" checkout --quiet "$ADRENO_COMMIT"
-  git -C "$ADRENO_DIR" submodule update --init --recursive
+  echo "[*] Populating submodules..."
+  git -C "$REPO" submodule update --init --recursive
 else
   echo "[*] libadrenotools already populated; skipping."
 fi
@@ -44,7 +41,7 @@ cd "$REPO/Source/Android"
 echo "[*] Building :app:assembleDebug (NDK arm64 cross-compile of Dolphin — this takes a while)..."
 ./gradlew :app:assembleDebug --no-daemon "$@"
 
-APK="$HOME/games/PrimedGun/Source/Android/app/build/outputs/apk/debug/app-debug.apk"
+APK="${REPO}/Source/Android/app/build/outputs/apk/debug/app-debug.apk"
 if [[ -f "$APK" ]]; then
   echo "[*] APK built: $APK"
   echo "[*] Install to a connected Quest:  adb install -r \"$APK\""
