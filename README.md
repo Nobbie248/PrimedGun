@@ -33,23 +33,6 @@ cmake --build build --parallel
 ln -sfn ../../Data/Sys build/Binaries/Sys
 ```
 
-## Runtime Files
-
-For Windows distribution, use the contents of `Binary\x64`. The important runtime pieces are:
-
-- `PrimedGun.exe`
-- `assets/`
-- `Licenses/`
-- `Sys/`
-- `User/`
-- `QtPlugins/`
-- `COPYING`
-- `qt.conf`
-- `Qt6Core.dll`
-- `Qt6Gui.dll`
-- `Qt6Svg.dll`
-- `Qt6Widgets.dll`
-
 ## Features
 
 - Full directional movement.
@@ -75,6 +58,8 @@ For Windows distribution, use the contents of `Binary\x64`. The important runtim
 - Use Save Settings after changing PrimedGun options to apply them.
 
 ## Change Controller Bindings
+
+![PrimedGun controller layout](assets/controller%20layout.png)
 
 PrimedGun sets up the recommended controls automatically, but you can disable parts of that setup from the Controller tab. Turn off auto controller bindings, visor gesture input, or PrimedGun grip inputs there if you want to bind those controls manually.
 
