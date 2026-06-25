@@ -709,9 +709,21 @@ void PrimedGunDumpMem1(QWidget* parent)
         "CTR={:08X}\n"
         "SRR0={:08X}\n"
         "SRR1={:08X}\n"
+        "DSISR={:08X}\n"
+        "DAR={:08X}\n"
         "Exceptions={:08X}\n",
         ppc_state.pc, ppc_state.npc, ppc_state.spr[SPR_LR], ppc_state.spr[SPR_CTR],
-        ppc_state.spr[SPR_SRR0], ppc_state.spr[SPR_SRR1], ppc_state.Exceptions);
+        ppc_state.spr[SPR_SRR0], ppc_state.spr[SPR_SRR1], ppc_state.spr[SPR_DSISR],
+        ppc_state.spr[SPR_DAR], ppc_state.Exceptions);
+
+    context += "\nGPRs\n";
+    for (int reg = 0; reg < 32; reg += 4)
+    {
+      context += fmt::format("R{:02}={:08X} R{:02}={:08X} R{:02}={:08X} R{:02}={:08X}\n",
+                             reg, ppc_state.gpr[reg], reg + 1, ppc_state.gpr[reg + 1],
+                             reg + 2, ppc_state.gpr[reg + 2], reg + 3,
+                             ppc_state.gpr[reg + 3]);
+    }
 
     const auto read_mem1_u32 = [accessors](u32 address) -> std::optional<u32> {
       constexpr u32 mem1_base = 0x80000000u;
@@ -728,27 +740,80 @@ void PrimedGunDumpMem1(QWidget* parent)
       return (static_cast<u32>(ptr[0]) << 24) | (static_cast<u32>(ptr[1]) << 16) |
              (static_cast<u32>(ptr[2]) << 8) | static_cast<u32>(ptr[3]);
     };
+    const auto read_mem1_u8 = [accessors](u32 address) -> std::optional<u8> {
+      constexpr u32 mem1_base = 0x80000000u;
+      if (address < mem1_base)
+        return std::nullopt;
+
+      const size_t offset = static_cast<size_t>(address - mem1_base);
+      const u8* const begin = accessors->begin();
+      const u8* const end = accessors->end();
+      if (begin + offset + sizeof(u8) > end)
+        return std::nullopt;
+
+      return *(begin + offset);
+    };
+    const auto format_u32 = [](std::optional<u32> value) {
+      return value ? fmt::format("{:08X}", *value) : std::string{"unreadable"};
+    };
+    const auto format_u8 = [](std::optional<u8> value) {
+      return value ? fmt::format("{:02X}", *value) : std::string{"unreadable"};
+    };
 
     context += "\nPatch sites\n";
     for (const u32 address :
          {0x8000E548u, 0x80041A8Cu, 0x8000E7B4u, 0x8000E808u, 0x8000E83Cu,
           0x8000FA50u, 0x800BD808u, 0x800BE25Cu, 0x80112508u, 0x801122CCu,
-          0x800E0434u, 0x801B9070u})
+          0x800E0434u, 0x801B9070u, 0x800243CCu, 0x80024414u, 0x80024450u,
+          0x8002448Cu, 0x800244C8u, 0x80024504u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
-      context += fmt::format("{:08X}={}\n", address,
-                             value ? fmt::format("{:08X}", *value) : "unreadable");
+      context += fmt::format("{:08X}={}\n", address, format_u32(value));
     }
 
     context += "\nHook cave heads\n";
     for (const u32 address :
          {0x817F8000u, 0x817F8080u, 0x817F8100u, 0x817F8140u, 0x817F8180u,
           0x817F81C0u, 0x817F8200u, 0x817F8280u, 0x817F8340u, 0x817F8400u,
+          0x817F8430u, 0x817F8460u, 0x817F8490u, 0x817F84C0u, 0x817F84F0u,
           0x817F8540u, 0x817F8580u, 0x817F85C0u, 0x817F8600u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
-      context += fmt::format("{:08X}={}\n", address,
-                             value ? fmt::format("{:08X}", *value) : "unreadable");
+      context += fmt::format("{:08X}={}\n", address, format_u32(value));
+    }
+
+    constexpr u32 state_manager = 0x8045A1A8u;
+    constexpr u32 player_offset = 0x84Cu;
+    const std::optional<u32> player = read_mem1_u32(state_manager + player_offset);
+
+    context += "\nState snapshot\n";
+    context += fmt::format("StateManagerPlayer={}\n", format_u32(player));
+    context += fmt::format("PlayerState={}\n", format_u32(read_mem1_u32(state_manager + 0x8B8u)));
+    context += fmt::format("FinalInputDpadHeld0={}\n", format_u8(read_mem1_u8(state_manager + 0xB80u)));
+    context += fmt::format("FinalInputDpadHeld1={}\n", format_u8(read_mem1_u8(state_manager + 0xB81u)));
+    context += fmt::format("FinalInputDpadPressed0={}\n", format_u8(read_mem1_u8(state_manager + 0xB82u)));
+    if (player && *player >= 0x80000000u)
+    {
+      context += fmt::format("PlayerCameraState={}\n", format_u32(read_mem1_u32(*player + 0x2F4u)));
+      context += fmt::format("PlayerMorphState={}\n", format_u32(read_mem1_u32(*player + 0x2F8u)));
+      context += fmt::format("PlayerMovementState={}\n", format_u32(read_mem1_u32(*player + 0x258u)));
+      context += fmt::format("PlayerOrbitState={}\n", format_u32(read_mem1_u32(*player + 0x304u)));
+      context += fmt::format("PlayerOrbitTarget={}\n", format_u32(read_mem1_u32(*player + 0x310u)));
+      context += fmt::format("PlayerVisorState={}\n", format_u32(read_mem1_u32(*player + 0x330u)));
+      context += fmt::format("PlayerFreeLookState={}\n", format_u32(read_mem1_u32(*player + 0x3DCu)));
+      context += fmt::format("PlayerCannon={}\n", format_u32(read_mem1_u32(*player + 0x490u)));
+      context += fmt::format("PlayerGunAlpha={}\n", format_u32(read_mem1_u32(*player + 0x494u)));
+      context += fmt::format("PlayerHolsterState={}\n", format_u32(read_mem1_u32(*player + 0x498u)));
+      context += fmt::format("PlayerInputFlags={}\n", format_u8(read_mem1_u8(*player + 0x9C6u)));
+    }
+
+    context += "\nPrimedGun scratch\n";
+    for (const u32 address :
+         {0x817FE000u, 0x817FE038u, 0x817FE040u, 0x817FE050u, 0x817FE400u,
+          0x817FE500u, 0x817FE540u, 0x817FE5A0u, 0x817FE680u, 0x817FE684u,
+          0x817FE688u, 0x817FE68Cu, 0x817FE690u})
+    {
+      context += fmt::format("{:08X}={}\n", address, format_u32(read_mem1_u32(address)));
     }
 
     context_file.WriteBytes(context.data(), context.size());
@@ -756,7 +821,7 @@ void PrimedGunDumpMem1(QWidget* parent)
 
   ModalMessageBox::information(
       parent, QObject::tr("RAM Dump"),
-      QObject::tr("RAM dumped to:\n%1\n\nContext written to:\n%2")
+      QObject::tr("RAM dump written to:\n%1\n\nCrash context written to:\n%2\n\nPlease send both files together.")
           .arg(QString::fromStdString(path), QString::fromStdString(context_path)));
 }
 }  // namespace

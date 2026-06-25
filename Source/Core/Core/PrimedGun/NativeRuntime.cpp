@@ -105,6 +105,7 @@ constexpr float DEFAULT_ROT_OFFSET_Z = 0.0f;
 constexpr u32 MEM1_BASE = 0x80000000u;
 constexpr u32 MEM1_END = 0x81800000u;
 constexpr u32 PATCH_CODE_ARENA_BASE = 0x817F8000u;
+constexpr u32 PATCH_CODE_ARENA_SIZE = 0x1000u;
 constexpr u32 SCRATCH_BASE = 0x817FE000u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
 constexpr u32 CANNON_EXPECTED_GUN_SCRATCH = SCRATCH_BASE + 0x038u;
@@ -115,7 +116,11 @@ constexpr u32 RETICLE_BILLBOARD_SCRATCH = SCRATCH_BASE + 0x500u;
 constexpr u32 SCAN_RETICLE_TRACE_SCRATCH = SCRATCH_BASE + 0x540u;
 constexpr u32 PITCH_ZERO_ENABLE_SCRATCH = SCRATCH_BASE + 0x5A0u;
 constexpr u32 DPAD_PRESS_SCRATCH = SCRATCH_BASE + 0x680u;
+constexpr u32 DPAD_DISABLE_OWNER_SCRATCH = SCRATCH_BASE + 0x684u;
+constexpr u32 DPAD_DISABLE_FLAGS_ADDR_SCRATCH = SCRATCH_BASE + 0x688u;
+constexpr u32 DPAD_DISABLE_ORIGINAL_FLAGS_SCRATCH = SCRATCH_BASE + 0x68Cu;
 constexpr u32 GAMEFLOW_MENU_SCRATCH = SCRATCH_BASE + 0x690u;
+constexpr u32 DPAD_DISABLE_OWNER_MAGIC = 0x50474450u;  // PGDP
 
 constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
 constexpr u32 RENDER_MODEL_OFFSET_CAVE = PATCH_CODE_ARENA_BASE + 0x080u;
@@ -663,6 +668,13 @@ bool InstructionBlockMatches(const Core::CPUThreadGuard& guard, u32 base,
       return false;
   }
   return true;
+}
+
+void InvalidatePrimedGunPatchICache(Core::System& system)
+{
+  auto& jit = system.GetJitInterface();
+  jit.InvalidateICache(0x80000000u, 0x00200000u, true);
+  jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
 }
 
 bool InstallBranchAfterCaveWrite(const Core::CPUThreadGuard& guard, u32 patch_address,
@@ -1916,13 +1928,90 @@ bool LeftControllerNearHead(const Pose& left, const Pose& hmd, const RuntimeSett
          dy >= -(settings.xr_dpad_head_y_below + 0.04f) && dy <= 0.28f;
 }
 
+void ClearDpadDisableOwnershipScratch(const Core::CPUThreadGuard& guard)
+{
+  TryWriteU32(guard, DPAD_DISABLE_OWNER_SCRATCH, 0);
+  TryWriteU32(guard, DPAD_DISABLE_FLAGS_ADDR_SCRATCH, 0);
+  TryWriteU32(guard, DPAD_DISABLE_ORIGINAL_FLAGS_SCRATCH, 0);
+}
+
+void MarkDpadDisableOwnershipScratch(const Core::CPUThreadGuard& guard, u32 flags_addr,
+                                     u8 original_flags)
+{
+  TryWriteU32(guard, DPAD_DISABLE_OWNER_SCRATCH, DPAD_DISABLE_OWNER_MAGIC);
+  TryWriteU32(guard, DPAD_DISABLE_FLAGS_ADDR_SCRATCH, flags_addr);
+  TryWriteU32(guard, DPAD_DISABLE_ORIGINAL_FLAGS_SCRATCH, original_flags);
+}
+
+bool RestoreDpadDisableAt(const Core::CPUThreadGuard& guard, u32 flags_addr, u8 original_flags)
+{
+  if (!IsWritablePrimeMem1Address(flags_addr, sizeof(u8)))
+    return false;
+
+  u8 flags = 0;
+  if (!TryReadU8(guard, flags_addr, &flags))
+    return false;
+
+  if ((original_flags & PLAYER_DISABLE_INPUT_MASK) != 0)
+    return true;
+
+  return TryWriteU8(guard, flags_addr, flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
+}
+
+void ClearDpadDisableTracking()
+{
+  s_dpad_forced_input_disabled = false;
+  s_dpad_input_was_disabled = false;
+  s_dpad_input_player = 0;
+  s_dpad_input_flags_addr = 0;
+  s_dpad_last_disable_refresh_frame = 0;
+}
+
+void RestoreTrackedDpadDisable(const Core::CPUThreadGuard& guard)
+{
+  if (s_dpad_forced_input_disabled && s_dpad_input_flags_addr != 0)
+  {
+    RestoreDpadDisableAt(guard, s_dpad_input_flags_addr,
+                         s_dpad_input_was_disabled ? PLAYER_DISABLE_INPUT_MASK : 0);
+  }
+
+  ClearDpadDisableTracking();
+  ClearDpadDisableOwnershipScratch(guard);
+}
+
+void RestorePersistedDpadDisableIfIdle(const Core::CPUThreadGuard& guard)
+{
+  u32 owner = 0;
+  u32 flags_addr = 0;
+  u32 original_flags = 0;
+  if (!TryReadU32(guard, DPAD_DISABLE_OWNER_SCRATCH, &owner) ||
+      owner != DPAD_DISABLE_OWNER_MAGIC ||
+      !TryReadU32(guard, DPAD_DISABLE_FLAGS_ADDR_SCRATCH, &flags_addr) ||
+      !TryReadU32(guard, DPAD_DISABLE_ORIGINAL_FLAGS_SCRATCH, &original_flags))
+  {
+    return;
+  }
+
+  RestoreDpadDisableAt(guard, flags_addr, static_cast<u8>(original_flags));
+  ClearDpadDisableOwnershipScratch(guard);
+}
+
 void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_manager,
                                    bool disabled)
 {
+  if (!disabled)
+    RestorePersistedDpadDisableIfIdle(guard);
+
   u32 player = 0;
   const bool have_player =
       TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) &&
       player >= 0x80000000u;
+
+  if (disabled && s_dpad_forced_input_disabled && have_player &&
+      player != s_dpad_input_player)
+  {
+    RestoreTrackedDpadDisable(guard);
+  }
 
   if (disabled && s_dpad_forced_input_disabled && have_player &&
       player == s_dpad_input_player && s_dpad_input_flags_addr == player + PLAYER_DISABLE_INPUT_FLAGS_OFFSET)
@@ -1941,18 +2030,19 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
 
   if (!have_player)
   {
-    s_dpad_forced_input_disabled = false;
-    s_dpad_input_was_disabled = false;
-    s_dpad_input_player = 0;
-    s_dpad_input_flags_addr = 0;
-    s_dpad_last_disable_refresh_frame = 0;
+    if (!disabled)
+      RestoreTrackedDpadDisable(guard);
     return;
   }
 
   const u32 flags_addr = player + PLAYER_DISABLE_INPUT_FLAGS_OFFSET;
   u8 flags = 0;
   if (!TryReadU8(guard, flags_addr, &flags))
+  {
+    if (!disabled)
+      RestoreTrackedDpadDisable(guard);
     return;
+  }
 
   if (disabled)
   {
@@ -1966,17 +2056,11 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
     s_dpad_input_player = player;
     s_dpad_input_flags_addr = flags_addr;
     s_dpad_last_disable_refresh_frame = s_frame_counter;
+    MarkDpadDisableOwnershipScratch(guard, flags_addr, flags);
     return;
   }
 
-  if (s_dpad_forced_input_disabled && !s_dpad_input_was_disabled)
-    TryWriteU8(guard, flags_addr, flags & static_cast<u8>(~PLAYER_DISABLE_INPUT_MASK));
-
-  s_dpad_forced_input_disabled = false;
-  s_dpad_input_was_disabled = false;
-  s_dpad_input_player = 0;
-  s_dpad_input_flags_addr = 0;
-  s_dpad_last_disable_refresh_frame = 0;
+  RestoreTrackedDpadDisable(guard);
 }
 
 void SuppressCStickForDpad(const Core::CPUThreadGuard& guard, u32 state_manager)
@@ -4005,7 +4089,7 @@ void ApplyBuiltinPatches(Core::System& system, const Core::CPUThreadGuard& guard
   }
 
   if (wrote_instruction)
-    system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
+    InvalidatePrimedGunPatchICache(system);
 }
 
 bool BuiltinPatchGroupApplied(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings,
@@ -4051,7 +4135,7 @@ void VerifyCriticalBuiltinPatches(Core::System& system, const Core::CPUThreadGua
 
   s_patches_applied_this_boot = false;
   ApplyBuiltinPatches(system, guard);
-  system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
+  InvalidatePrimedGunPatchICache(system);
 }
 
 void ResetCannonTrackingFeedState(const Core::CPUThreadGuard& guard)
@@ -4120,7 +4204,7 @@ void VerifyCannonFeedWatchdog(Core::System& system, const Core::CPUThreadGuard& 
   ApplyCombatPitchPatches(guard);
   if (settings.patch_beam_projectile_timing)
     ApplyProjectileTransformPatches(guard);
-  system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
+  InvalidatePrimedGunPatchICache(system);
 }
 
 void UpdateShaderHunterGameFlowFlags(const Core::CPUThreadGuard& guard)
@@ -4169,7 +4253,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
       dynamic_patch_applied = ApplyProjectileTransformPatches(guard) || dynamic_patch_applied;
   }
   if (dynamic_patch_applied)
-    system.GetJitInterface().InvalidateICache(0x80000000u, 0x00200000u, true);
+    InvalidatePrimedGunPatchICache(system);
 
   // Recheck occasionally so user/loaded-state changes cannot silently undo PrimedGun patches.
   if (settings.builtin_patches_enabled &&
