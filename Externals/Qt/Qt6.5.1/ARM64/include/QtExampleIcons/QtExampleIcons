@@ -1,5 +1,0 @@
-#ifndef QT_QTEXAMPLEICONS_MODULE_H
-#define QT_QTEXAMPLEICONS_MODULE_H
-#include <QtExampleIcons/QtExampleIconsDepends>
-#include "qtexampleiconsversion.h"
-#endif
