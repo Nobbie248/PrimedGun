@@ -775,10 +775,10 @@ void PrimedGunDumpMem1(QWidget* parent)
 
     context += "\nHook cave heads\n";
     for (const u32 address :
-         {0x817F8000u, 0x817F8080u, 0x817F8100u, 0x817F8140u, 0x817F8180u,
-          0x817F81C0u, 0x817F8200u, 0x817F8280u, 0x817F8340u, 0x817F8400u,
-          0x817F8430u, 0x817F8460u, 0x817F8490u, 0x817F84C0u, 0x817F84F0u,
-          0x817F8540u, 0x817F8580u, 0x817F85C0u, 0x817F8600u})
+         {0x80001C00u, 0x80001C80u, 0x80001D00u, 0x80001D40u, 0x80001D80u,
+          0x80001DC0u, 0x80001E00u, 0x80001E80u, 0x80001F00u, 0x80001FA0u,
+          0x80002000u, 0x80002180u, 0x80002200u, 0x80002280u, 0x80002300u,
+          0x800023A0u, 0x80002400u, 0x80002620u, 0x80002660u, 0x800026D0u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
       context += fmt::format("{:08X}={}\n", address, format_u32(value));
@@ -791,6 +791,9 @@ void PrimedGunDumpMem1(QWidget* parent)
     context += "\nState snapshot\n";
     context += fmt::format("StateManagerPlayer={}\n", format_u32(player));
     context += fmt::format("PlayerState={}\n", format_u32(read_mem1_u32(state_manager + 0x8B8u)));
+    context += fmt::format("GpGameState={}\n", format_u32(read_mem1_u32(0x805A8C40u)));
+    context += fmt::format("AramActiveDmasHead={}\n", format_u32(read_mem1_u32(0x805A679Cu + 4u)));
+    context += fmt::format("AramActiveDmasTail={}\n", format_u32(read_mem1_u32(0x805A679Cu + 8u)));
     context += fmt::format("FinalInputDpadHeld0={}\n", format_u8(read_mem1_u8(state_manager + 0xB80u)));
     context += fmt::format("FinalInputDpadHeld1={}\n", format_u8(read_mem1_u8(state_manager + 0xB81u)));
     context += fmt::format("FinalInputDpadPressed0={}\n", format_u8(read_mem1_u8(state_manager + 0xB82u)));
@@ -811,9 +814,9 @@ void PrimedGunDumpMem1(QWidget* parent)
 
     context += "\nPrimedGun scratch\n";
     for (const u32 address :
-         {0x817F9600u, 0x817F9638u, 0x817F9640u, 0x817F9650u, 0x817F9A00u,
-          0x817F9B00u, 0x817F9B40u, 0x817F9BA0u, 0x817F9C80u, 0x817F9C84u,
-          0x817F9C88u, 0x817F9C8Cu, 0x817F9C90u})
+         {0x80002800u, 0x80002838u, 0x80002840u, 0x80002850u, 0x80002C00u,
+          0x80002D00u, 0x80002D40u, 0x80002DA0u, 0x80002E80u, 0x80002E84u,
+          0x80002E88u, 0x80002E8Cu, 0x80002E90u})
     {
       context += fmt::format("{:08X}={}\n", address, format_u32(read_mem1_u32(address)));
     }
@@ -2069,7 +2072,6 @@ void MainWindow::ConnectStack()
   controller_layout->addWidget(vr_overlays_enabled);
   auto* rumble_enabled = new QCheckBox(tr("Rumble"), game_tab);
   rumble_enabled->setChecked(runtime->rumble_enabled);
-  controller_layout->addWidget(rumble_enabled);
   auto* rumble_hand_mode = new QComboBox(game_tab);
   rumble_hand_mode->addItem(tr("Both"), 0);
   rumble_hand_mode->addItem(tr("Left only"), 1);
@@ -2083,20 +2085,14 @@ void MainWindow::ConnectStack()
   rumble_hand_row->addWidget(rumble_hand_label);
   rumble_hand_row->addWidget(rumble_hand_mode, 0);
   rumble_hand_row->addStretch();
-  controller_layout->addLayout(rumble_hand_row);
-  separator(controller_layout);
-  controller_layout->addWidget(section_label(tr("Left hand D-pad"), game_tab));
   auto* dpad_enabled = new QCheckBox(tr("Enable visor gesture input"), game_tab);
   dpad_enabled->setChecked(runtime->xr_dpad_enabled);
-  controller_layout->addWidget(dpad_enabled);
   auto* primegun_grip_inputs_enabled =
       new QCheckBox(tr("Use PrimedGun grip inputs"), game_tab);
   primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
-  controller_layout->addWidget(primegun_grip_inputs_enabled);
   auto* primegun_grip_inputs_use_trackpad =
       new QCheckBox(tr("Use touchpad for PrimedGun grip inputs (Index users)"), game_tab);
   primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
-  controller_layout->addWidget(primegun_grip_inputs_use_trackpad);
 
   auto float_rows = std::make_shared<std::vector<std::pair<QDoubleSpinBox*, QSlider*>>>();
   const auto add_float_row = [this, game_tab, apply_runtime, float_rows](
@@ -2151,6 +2147,12 @@ void MainWindow::ConnectStack()
     return spin;
   };
 
+  separator(controller_layout);
+  controller_layout->addWidget(section_label(tr("Rumble / Grip Inputs"), game_tab));
+  controller_layout->addWidget(rumble_enabled);
+  controller_layout->addLayout(rumble_hand_row);
+  controller_layout->addWidget(primegun_grip_inputs_enabled);
+  controller_layout->addWidget(primegun_grip_inputs_use_trackpad);
   auto* trackpad_press_threshold_spin =
       add_float_row(controller_layout, tr("Touchpad sensitivity"), 0.05, 1.00, 0.05,
                     runtime->primegun_trackpad_press_threshold,
@@ -2159,6 +2161,9 @@ void MainWindow::ConnectStack()
       add_float_row(controller_layout, tr("Rumble intensity"), 0.00, 1.00, 0.05,
                     runtime->rumble_intensity,
                     [runtime](float v) { runtime->rumble_intensity = v; });
+  separator(controller_layout);
+  controller_layout->addWidget(section_label(tr("D-pad"), game_tab));
+  controller_layout->addWidget(dpad_enabled);
   auto* dpad_radius_spin =
       add_float_row(controller_layout, tr("Head radius"), 0.08, 0.28, 0.01,
                     runtime->xr_dpad_head_radius,

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <initializer_list>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -136,9 +137,9 @@ constexpr float DEFAULT_ROT_OFFSET_Z = 0.0f;
 
 constexpr u32 MEM1_BASE = 0x80000000u;
 constexpr u32 MEM1_END = 0x81800000u;
-constexpr u32 PATCH_CODE_ARENA_BASE = 0x817F8000u;
-constexpr u32 PATCH_CODE_ARENA_SIZE = 0x2000u;
-constexpr u32 SCRATCH_BASE = 0x817F9600u;
+constexpr u32 PATCH_CODE_ARENA_BASE = 0x80001C00u;
+constexpr u32 PATCH_CODE_ARENA_SIZE = 0xC00u;
+constexpr u32 SCRATCH_BASE = 0x80002800u;
 constexpr u32 SCRATCH_ARENA_SIZE = 0x800u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
 constexpr u32 CANNON_EXPECTED_GUN_SCRATCH = SCRATCH_BASE + 0x038u;
@@ -222,8 +223,10 @@ constexpr u32 PLAYER_VELOCITY_OFFSET = 0x138u;
 constexpr u32 PLAYER_MOVEMENT_STATE_OFFSET = 0x258u;
 constexpr u32 PLAYER_ORBIT_STATE_OFFSET = 0x304u;
 constexpr u32 PLAYER_ORBIT_TARGET_ID_OFFSET = 0x310u;
+constexpr u32 PLAYER_ORBIT_LOCK_ID_OFFSET = 0x33Cu;
 constexpr u32 PLAYER_NEARBY_ORBIT_OBJECTS_OFFSET = 0x344u;
 constexpr u32 PLAYER_FREE_LOOK_STATE_OFFSET = 0x3DCu;
+constexpr u32 PLAYER_AIM_TARGET_ID_OFFSET = 0x3F4u;
 constexpr u32 PLAYER_FREE_LOOK_CENTER_TIME_OFFSET = 0x3E0u;
 constexpr u32 PLAYER_FREE_LOOK_YAW_ANGLE_OFFSET = 0x3E4u;
 constexpr u32 PLAYER_FREE_LOOK_YAW_VEL_OFFSET = 0x3E8u;
@@ -1429,6 +1432,27 @@ struct ScanTargetCandidate
   u32 obj = 0;
 };
 
+struct ActorAabb
+{
+  float min_x = 0.0f;
+  float min_y = 0.0f;
+  float min_z = 0.0f;
+  float max_x = 0.0f;
+  float max_y = 0.0f;
+  float max_z = 0.0f;
+};
+
+struct RayCandidateMetrics
+{
+  float x = 0.0f;
+  float y = 0.0f;
+  float z = 0.0f;
+  float along = 0.0f;
+  float perp = 0.0f;
+  float radius = 0.0f;
+  bool valid = false;
+};
+
 bool ReadTransformTranslation(const Core::CPUThreadGuard& guard, u32 transform, float* x,
                               float* y, float* z)
 {
@@ -1437,6 +1461,283 @@ bool ReadTransformTranslation(const Core::CPUThreadGuard& guard, u32 transform, 
          TryReadFloat(guard, transform + 0x1cu, y) &&
          TryReadFloat(guard, transform + 0x2cu, z) &&
          std::isfinite(*x) && std::isfinite(*y) && std::isfinite(*z);
+}
+
+bool LooksLikeTransformMatrix(const Core::CPUThreadGuard& guard, u32 transform);
+
+bool ReadAabb(const Core::CPUThreadGuard& guard, u32 address, ActorAabb* box)
+{
+  return address >= 0x80000000u &&
+         TryReadFloat(guard, address + 0x00u, &box->min_x) &&
+         TryReadFloat(guard, address + 0x04u, &box->min_y) &&
+         TryReadFloat(guard, address + 0x08u, &box->min_z) &&
+         TryReadFloat(guard, address + 0x0cu, &box->max_x) &&
+         TryReadFloat(guard, address + 0x10u, &box->max_y) &&
+         TryReadFloat(guard, address + 0x14u, &box->max_z);
+}
+
+bool AabbLooksUsable(const ActorAabb& box)
+{
+  const float width = box.max_x - box.min_x;
+  const float height = box.max_y - box.min_y;
+  const float depth = box.max_z - box.min_z;
+  const float center_x = (box.min_x + box.max_x) * 0.5f;
+  const float center_y = (box.min_y + box.max_y) * 0.5f;
+  const float center_z = (box.min_z + box.max_z) * 0.5f;
+  return std::isfinite(box.min_x) && std::isfinite(box.min_y) && std::isfinite(box.min_z) &&
+         std::isfinite(box.max_x) && std::isfinite(box.max_y) && std::isfinite(box.max_z) &&
+         std::isfinite(width) && std::isfinite(height) && std::isfinite(depth) &&
+         width >= 0.0f && height >= 0.0f && depth >= 0.0f &&
+         width <= 1000.0f && height <= 1000.0f && depth <= 1000.0f &&
+         std::fabs(center_x) <= 100000.0f && std::fabs(center_y) <= 100000.0f &&
+         std::fabs(center_z) <= 100000.0f;
+}
+
+bool ReadActorRenderAabb(const Core::CPUThreadGuard& guard, u32 obj, ActorAabb* box)
+{
+  return PrimeGameObjectPointerLooksValid(obj, 0xb4u) && ReadAabb(guard, obj + 0x9cu, box) &&
+         AabbLooksUsable(*box);
+}
+
+bool TransformAabbByMatrix(const Core::CPUThreadGuard& guard, u32 transform, const ActorAabb& local,
+                           ActorAabb* world)
+{
+  if (!LooksLikeTransformMatrix(guard, transform))
+    return false;
+
+  float m[12] = {};
+  for (int i = 0; i < 12; ++i)
+  {
+    if (!TryReadFloat(guard, transform + static_cast<u32>(i * 4), &m[i]) ||
+        !std::isfinite(m[i]))
+    {
+      return false;
+    }
+  }
+
+  world->min_x = world->min_y = world->min_z = std::numeric_limits<float>::max();
+  world->max_x = world->max_y = world->max_z = std::numeric_limits<float>::lowest();
+
+  for (int ix = 0; ix < 2; ++ix)
+  {
+    const float x = ix == 0 ? local.min_x : local.max_x;
+    for (int iy = 0; iy < 2; ++iy)
+    {
+      const float y = iy == 0 ? local.min_y : local.max_y;
+      for (int iz = 0; iz < 2; ++iz)
+      {
+        const float z = iz == 0 ? local.min_z : local.max_z;
+        const float wx = m[0] * x + m[1] * y + m[2] * z + m[3];
+        const float wy = m[4] * x + m[5] * y + m[6] * z + m[7];
+        const float wz = m[8] * x + m[9] * y + m[10] * z + m[11];
+        if (!std::isfinite(wx) || !std::isfinite(wy) || !std::isfinite(wz))
+          return false;
+
+        world->min_x = std::min(world->min_x, wx);
+        world->min_y = std::min(world->min_y, wy);
+        world->min_z = std::min(world->min_z, wz);
+        world->max_x = std::max(world->max_x, wx);
+        world->max_y = std::max(world->max_y, wy);
+        world->max_z = std::max(world->max_z, wz);
+      }
+    }
+  }
+
+  return AabbLooksUsable(*world);
+}
+
+bool ReadActorPhysicsAabb(const Core::CPUThreadGuard& guard, u32 obj, ActorAabb* box)
+{
+  ActorAabb base = {};
+  float tx = 0.0f;
+  float ty = 0.0f;
+  float tz = 0.0f;
+  float off_x = 0.0f;
+  float off_y = 0.0f;
+  float off_z = 0.0f;
+  if (!PrimeGameObjectPointerLooksValid(obj, 0x1f4u) || !ReadAabb(guard, obj + 0x1a4u, &base) ||
+      !AabbLooksUsable(base))
+  {
+    return false;
+  }
+
+  if (TransformAabbByMatrix(guard, obj + 0x1e8u, base, box))
+    return true;
+
+  if (!ReadTransformTranslation(guard, obj + ADDRESS.transform_offset, &tx, &ty, &tz) ||
+      !TryReadFloat(guard, obj + 0x1e8u, &off_x) || !TryReadFloat(guard, obj + 0x1ecu, &off_y) ||
+      !TryReadFloat(guard, obj + 0x1f0u, &off_z) || !std::isfinite(off_x) ||
+      !std::isfinite(off_y) || !std::isfinite(off_z))
+  {
+    return false;
+  }
+
+  const float x = tx + off_x;
+  const float y = ty + off_y;
+  const float z = tz + off_z;
+  box->min_x = base.min_x + x;
+  box->min_y = base.min_y + y;
+  box->min_z = base.min_z + z;
+  box->max_x = base.max_x + x;
+  box->max_y = base.max_y + y;
+  box->max_z = base.max_z + z;
+  return AabbLooksUsable(*box);
+}
+
+bool RayIntersectsAabb(float ray_x, float ray_y, float ray_z, float dir_x, float dir_y,
+                       float dir_z, const ActorAabb& box, float max_along, float* hit_along)
+{
+  float t_min = 0.0f;
+  float t_max = max_along;
+  bool starts_inside = ray_x >= box.min_x && ray_x <= box.max_x &&
+                       ray_y >= box.min_y && ray_y <= box.max_y &&
+                       ray_z >= box.min_z && ray_z <= box.max_z;
+  const auto test_axis = [](float ray, float dir, float min_v, float max_v, float* min_t,
+                            float* max_t) {
+    if (std::fabs(dir) < 0.00001f)
+      return ray >= min_v && ray <= max_v;
+
+    float t0 = (min_v - ray) / dir;
+    float t1 = (max_v - ray) / dir;
+    if (t0 > t1)
+      std::swap(t0, t1);
+    *min_t = std::max(*min_t, t0);
+    *max_t = std::min(*max_t, t1);
+    return *min_t <= *max_t;
+  };
+
+  if (!test_axis(ray_x, dir_x, box.min_x, box.max_x, &t_min, &t_max) ||
+      !test_axis(ray_y, dir_y, box.min_y, box.max_y, &t_min, &t_max) ||
+      !test_axis(ray_z, dir_z, box.min_z, box.max_z, &t_min, &t_max))
+  {
+    return false;
+  }
+
+  *hit_along = starts_inside ? t_max : std::max(t_min, 0.0f);
+  return std::isfinite(*hit_along) && *hit_along <= max_along;
+}
+
+bool RayMetricsForPoint(float ray_x, float ray_y, float ray_z, float dir_x, float dir_y,
+                        float dir_z, float x, float y, float z, float max_along,
+                        RayCandidateMetrics* metrics)
+{
+  const float vx = x - ray_x;
+  const float vy = y - ray_y;
+  const float vz = z - ray_z;
+  const float along = vx * dir_x + vy * dir_y + vz * dir_z;
+  if (along < 0.5f || along > max_along)
+    return false;
+
+  const float nearest_x = ray_x + dir_x * along;
+  const float nearest_y = ray_y + dir_y * along;
+  const float nearest_z = ray_z + dir_z * along;
+  const float dx = x - nearest_x;
+  const float dy = y - nearest_y;
+  const float dz = z - nearest_z;
+  const float perp_sq = dx * dx + dy * dy + dz * dz;
+  if (!std::isfinite(perp_sq))
+    return false;
+
+  metrics->x = x;
+  metrics->y = y;
+  metrics->z = z;
+  metrics->along = along;
+  metrics->perp = std::sqrt(perp_sq);
+  metrics->radius = 0.0f;
+  metrics->valid = true;
+  return true;
+}
+
+bool RayMetricsForAabb(float ray_x, float ray_y, float ray_z, float dir_x, float dir_y,
+                       float dir_z, const ActorAabb& box, float max_along,
+                       RayCandidateMetrics* metrics)
+{
+  if (!AabbLooksUsable(box))
+    return false;
+
+  const float center_x = (box.min_x + box.max_x) * 0.5f;
+  const float center_y = (box.min_y + box.max_y) * 0.5f;
+  const float center_z = (box.min_z + box.max_z) * 0.5f;
+  const float half_x = (box.max_x - box.min_x) * 0.5f;
+  const float half_y = (box.max_y - box.min_y) * 0.5f;
+  const float half_z = (box.max_z - box.min_z) * 0.5f;
+  const float projected_radius_sq =
+      half_x * half_x * std::max(0.0f, 1.0f - dir_x * dir_x) +
+      half_y * half_y * std::max(0.0f, 1.0f - dir_y * dir_y) +
+      half_z * half_z * std::max(0.0f, 1.0f - dir_z * dir_z);
+  const float projected_radius = std::sqrt(std::max(0.0f, projected_radius_sq));
+
+  float hit_along = 0.0f;
+  if (RayIntersectsAabb(ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, box, max_along, &hit_along))
+  {
+    metrics->x = ray_x + dir_x * hit_along;
+    metrics->y = ray_y + dir_y * hit_along;
+    metrics->z = ray_z + dir_z * hit_along;
+    metrics->along = hit_along;
+    metrics->perp = 0.0f;
+    metrics->radius = projected_radius;
+    metrics->valid = true;
+    return true;
+  }
+
+  RayCandidateMetrics center_metrics = {};
+  if (!RayMetricsForPoint(ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, center_x, center_y, center_z,
+                          max_along + projected_radius, &center_metrics))
+  {
+    return false;
+  }
+
+  center_metrics.along = std::clamp(center_metrics.along, 0.5f, max_along);
+  center_metrics.perp = std::max(0.0f, center_metrics.perp - projected_radius);
+  center_metrics.radius = projected_radius;
+  *metrics = center_metrics;
+  return true;
+}
+
+bool PreferRayMetrics(const RayCandidateMetrics& candidate, const RayCandidateMetrics& current)
+{
+  if (!candidate.valid)
+    return false;
+  if (!current.valid)
+    return true;
+  const float candidate_score = candidate.perp + candidate.along * 0.001f;
+  const float current_score = current.perp + current.along * 0.001f;
+  return candidate_score < current_score;
+}
+
+RayCandidateMetrics ResolveActorRayMetrics(const Core::CPUThreadGuard& guard, u32 obj, float ray_x,
+                                           float ray_y, float ray_z, float dir_x, float dir_y,
+                                           float dir_z, float max_along)
+{
+  RayCandidateMetrics best = {};
+  float ox = 0.0f;
+  float oy = 0.0f;
+  float oz = 0.0f;
+  RayCandidateMetrics metrics = {};
+  if (ReadTransformTranslation(guard, obj + ADDRESS.transform_offset, &ox, &oy, &oz) &&
+      RayMetricsForPoint(ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, ox, oy, oz, max_along,
+                         &metrics) &&
+      PreferRayMetrics(metrics, best))
+  {
+    best = metrics;
+  }
+
+  ActorAabb box = {};
+  if (ReadActorRenderAabb(guard, obj, &box) &&
+      RayMetricsForAabb(ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, box, max_along, &metrics) &&
+      PreferRayMetrics(metrics, best))
+  {
+    best = metrics;
+  }
+
+  if (ReadActorPhysicsAabb(guard, obj, &box) &&
+      RayMetricsForAabb(ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, box, max_along, &metrics) &&
+      PreferRayMetrics(metrics, best))
+  {
+    best = metrics;
+  }
+
+  return best;
 }
 
 bool LooksLikeTransformMatrix(const Core::CPUThreadGuard& guard, u32 transform)
@@ -1587,6 +1888,55 @@ bool ObjectByUid(const Core::CPUThreadGuard& guard, u32 state_manager, u16 uid, 
          static_cast<u16>(live_uid_word >> 16) == uid;
 }
 
+bool ReadPlayerTargetUid(const Core::CPUThreadGuard& guard, u32 player, u32 offset, u16* uid)
+{
+  u32 word = 0;
+  if (uid == nullptr || !TryReadU32(guard, player + offset, &word))
+    return false;
+
+  *uid = static_cast<u16>(word >> 16);
+  return *uid != 0xffffu;
+}
+
+bool ObjectLooksLikeVanillaTarget(const Core::CPUThreadGuard& guard, u32 obj)
+{
+  return ActorIsTargetable(guard, obj) &&
+         (ActorHasMaterial(guard, obj, 40) || ActorHasMaterial(guard, obj, 41) ||
+          ActorHasMaterial(guard, obj, 39) || ActorIsGrapplePoint(guard, obj));
+}
+
+bool ReadVanillaTargetUid(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
+                          u32 gun, u16* uid)
+{
+  if (uid == nullptr)
+    return false;
+
+  constexpr std::array<u32, 3> target_offsets = {
+      PLAYER_ORBIT_TARGET_ID_OFFSET,
+      PLAYER_ORBIT_LOCK_ID_OFFSET,
+      PLAYER_AIM_TARGET_ID_OFFSET,
+  };
+
+  for (const u32 offset : target_offsets)
+  {
+    u16 candidate_uid = 0xffffu;
+    u32 obj = 0;
+    if (!ReadPlayerTargetUid(guard, player, offset, &candidate_uid) ||
+        !ObjectByUid(guard, state_manager, candidate_uid, &obj) || obj == player || obj == gun ||
+        !ObjectLooksLikeVanillaTarget(guard, obj))
+    {
+      continue;
+    }
+
+    *uid = candidate_uid;
+    return true;
+  }
+
+  return false;
+}
+
+bool ResolveActiveCameraTransform(const Core::CPUThreadGuard& guard, u32* transform);
+
 bool RefreshScanTargetCandidates(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
                                  std::vector<ScanTargetCandidate>* candidates)
 {
@@ -1621,6 +1971,16 @@ bool RefreshScanTargetCandidates(const Core::CPUThreadGuard& guard, u32 state_ma
   return !candidates->empty();
 }
 
+bool CandidateListContainsUid(const std::vector<ScanTargetCandidate>& candidates, u16 uid)
+{
+  for (const ScanTargetCandidate& candidate : candidates)
+  {
+    if (candidate.uid == uid)
+      return true;
+  }
+  return false;
+}
+
 bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
                            const Matrix3x4& hmd, const RuntimeSettings& settings,
                            GunTargetPick* pick)
@@ -1638,8 +1998,13 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
   float ray_x = 0.0f;
   float ray_y = 0.0f;
   float ray_z = 0.0f;
-  if (!ReadTransformTranslation(guard, player + ADDRESS.transform_offset, &ray_x, &ray_y, &ray_z))
-    return false;
+  u32 camera_transform = 0;
+  if (!ResolveActiveCameraTransform(guard, &camera_transform) ||
+      !ReadTransformTranslation(guard, camera_transform, &ray_x, &ray_y, &ray_z))
+  {
+    if (!ReadTransformTranslation(guard, player + ADDRESS.transform_offset, &ray_x, &ray_y, &ray_z))
+      return false;
+  }
 
   float dir_x = 0.0f;
   float dir_y = 0.0f;
@@ -1647,10 +2012,9 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
   if (!GunAimDirectionFromMatrix(hmd, &dir_x, &dir_y, &dir_z))
     return false;
 
-  constexpr float scan_pick_radius_multiplier = 1.5f;
+  constexpr float scan_pick_radius_multiplier = 3.0f;
   const float max_along = settings.gun_targeting_distance;
   const float max_perp = settings.gun_targeting_radius * scan_pick_radius_multiplier;
-  const float max_perp_sq = max_perp * max_perp;
   bool found = false;
 
   for (const ScanTargetCandidate& candidate : candidates)
@@ -1658,32 +2022,15 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
     if (!TargetUidStillExists(guard, state_manager, candidate.uid, candidate.obj))
       continue;
 
-    float ox = 0.0f;
-    float oy = 0.0f;
-    float oz = 0.0f;
-    if (!ReadTransformTranslation(guard, candidate.obj + ADDRESS.transform_offset, &ox, &oy, &oz))
+    const RayCandidateMetrics metrics =
+        ResolveActorRayMetrics(guard, candidate.obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z,
+                               max_along);
+    if (!metrics.valid || metrics.perp > max_perp)
       continue;
 
-    const float vx = ox - ray_x;
-    const float vy = oy - ray_y;
-    const float vz = oz - ray_z;
-    const float along = vx * dir_x + vy * dir_y + vz * dir_z;
-    if (along < 0.5f || along > max_along)
-      continue;
-
-    const float nearest_x = ray_x + dir_x * along;
-    const float nearest_y = ray_y + dir_y * along;
-    const float nearest_z = ray_z + dir_z * along;
-    const float dx = ox - nearest_x;
-    const float dy = oy - nearest_y;
-    const float dz = oz - nearest_z;
-    const float perp_sq = dx * dx + dy * dy + dz * dz;
-    if (!std::isfinite(perp_sq) || perp_sq > max_perp_sq)
-      continue;
-
-    const float perp = std::sqrt(perp_sq);
-    const float cone_fraction = perp / std::max(max_perp, 0.001f);
-    const float score = cone_fraction * 1.50f + perp * 0.35f + along * 0.003f;
+    const float cone_fraction = metrics.perp / std::max(max_perp, 0.001f);
+    const float score = cone_fraction * 1.50f + metrics.perp * 0.35f +
+                        metrics.along * 0.003f - metrics.radius * 0.015f;
     if (!found || score < pick->score)
     {
       found = true;
@@ -1695,11 +2042,11 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
       pick->dir_x = dir_x;
       pick->dir_y = dir_y;
       pick->dir_z = dir_z;
-      pick->x = ox;
-      pick->y = oy;
-      pick->z = oz;
-      pick->along = along;
-      pick->perp = perp;
+      pick->x = metrics.x;
+      pick->y = metrics.y;
+      pick->z = metrics.z;
+      pick->along = metrics.along;
+      pick->perp = metrics.perp;
       pick->score = score;
       pick->has_scan = true;
     }
@@ -1747,9 +2094,14 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
   const u16 player_uid = static_cast<u16>(player_uid_word >> 16);
   const float max_along = settings.gun_targeting_distance;
   const float max_perp = settings.gun_targeting_radius;
+  constexpr float combat_pick_radius_multiplier = 1.0f;
   constexpr float scan_pick_radius_multiplier = 3.0f;
   const float grapple_max_perp = max_perp * 1.30f;
   const bool scan_mode = ScanVisorActive(guard, player);
+  std::vector<ScanTargetCandidate> nearby_orbit_candidates;
+  const bool have_nearby_orbit_candidates =
+      !scan_mode && RefreshScanTargetCandidates(guard, state_manager, player,
+                                                &nearby_orbit_candidates);
   bool found = false;
 
   for (u32 i = 0; i < 1024u; ++i)
@@ -1762,28 +2114,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       continue;
     }
 
-    float ox = 0.0f;
-    float oy = 0.0f;
-    float oz = 0.0f;
-    if (!ReadTransformTranslation(guard, obj + ADDRESS.transform_offset, &ox, &oy, &oz))
-      continue;
-
-    const float vx = ox - ray_x;
-    const float vy = oy - ray_y;
-    const float vz = oz - ray_z;
-    const float along = vx * dir_x + vy * dir_y + vz * dir_z;
-    if (along < 0.5f || along > max_along)
-      continue;
-
-    const float nearest_x = ray_x + dir_x * along;
-    const float nearest_y = ray_y + dir_y * along;
-    const float nearest_z = ray_z + dir_z * along;
-    const float dx = ox - nearest_x;
-    const float dy = oy - nearest_y;
-    const float dz = oz - nearest_z;
-    const float perp_sq = dx * dx + dy * dy + dz * dz;
-    if (!std::isfinite(perp_sq) || perp_sq > grapple_max_perp * grapple_max_perp ||
-        !LooksLikeTransformMatrix(guard, obj + ADDRESS.transform_offset))
+    if (!LooksLikeTransformMatrix(guard, obj + ADDRESS.transform_offset))
     {
       continue;
     }
@@ -1804,43 +2135,64 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
     const bool has_scan = ActorHasMaterial(guard, obj, 39);
     const bool targetable = ActorIsTargetable(guard, obj);
     const bool grapple_point = ActorIsGrapplePoint(guard, obj);
-    const bool combat_candidate = has_target && targetable;
+    const bool nearby_orbit_candidate =
+        have_nearby_orbit_candidates && CandidateListContainsUid(nearby_orbit_candidates, uid);
     const bool orbit_candidate = has_orbit && targetable;
     const bool scan_candidate = has_scan;
     const bool grapple_candidate = grapple_point && has_orbit;
+    const bool vanilla_orbit_candidate =
+        !scan_mode && nearby_orbit_candidate && orbit_candidate;
+
+    const bool has_any_target_hint =
+        has_target || has_orbit || scan_candidate || grapple_candidate;
+    if (!has_any_target_hint)
+      continue;
+
+    const RayCandidateMetrics metrics =
+        ResolveActorRayMetrics(guard, obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, max_along);
+    if (!metrics.valid)
+      continue;
+
+    const bool combat_candidate = has_target && (targetable || nearby_orbit_candidate);
+
     if (scan_mode && !scan_candidate)
       continue;
 
-    if (!scan_mode && !combat_candidate && !grapple_candidate)
+    if (!scan_mode && !combat_candidate && !vanilla_orbit_candidate && !grapple_candidate)
       continue;
 
     if (scan_mode && !combat_candidate && !orbit_candidate && !scan_candidate && !grapple_candidate)
       continue;
 
-    const float perp = std::sqrt(perp_sq);
     const float candidate_max_perp =
         scan_mode && scan_candidate ? max_perp * scan_pick_radius_multiplier :
+        combat_candidate             ? max_perp * combat_pick_radius_multiplier :
+        vanilla_orbit_candidate      ? max_perp * combat_pick_radius_multiplier :
         grapple_candidate             ? grapple_max_perp :
                                        max_perp;
-    if (perp > candidate_max_perp)
+    if (metrics.perp > candidate_max_perp)
       continue;
 
     float aim_cone_perp = candidate_max_perp;
     if (strict_lock_aim && !scan_mode)
     {
-      const float strict_cone = 0.45f + along * 0.075f;
+      const float strict_cone = 0.45f + metrics.along * 0.075f;
+      const float bounds_slack = std::min(metrics.radius * 0.60f, candidate_max_perp * 0.50f);
       const float strict_candidate_cone =
-          grapple_candidate ? strict_cone * 1.30f :
-                              strict_cone;
+          grapple_candidate ? strict_cone * 1.30f + bounds_slack :
+                              strict_cone + bounds_slack;
       aim_cone_perp = std::min(candidate_max_perp, strict_candidate_cone);
-      if (perp > aim_cone_perp)
+      if (metrics.perp > aim_cone_perp)
         continue;
     }
 
-    const float cone_fraction = perp / std::max(aim_cone_perp, 0.001f);
-    float score = cone_fraction * 1.50f + perp * 0.35f + along * 0.003f;
+    const float cone_fraction = metrics.perp / std::max(aim_cone_perp, 0.001f);
+    float score = cone_fraction * 1.50f + metrics.perp * 0.35f +
+                  metrics.along * 0.003f - metrics.radius * 0.015f;
     if (grapple_candidate)
       score -= 0.15f;
+    if (vanilla_orbit_candidate)
+      score -= 0.08f;
     if (scan_mode)
     {
       score -= 0.10f;
@@ -1853,6 +2205,8 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
         score += 0.10f;
       else if (!has_character)
         score += 0.15f;
+      if (nearby_orbit_candidate)
+        score -= 0.12f;
     }
 
     if (!found || score < pick->score)
@@ -1860,11 +2214,11 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       found = true;
       pick->uid = uid;
       pick->obj = obj;
-      pick->x = ox;
-      pick->y = oy;
-      pick->z = oz;
-      pick->along = along;
-      pick->perp = perp;
+      pick->x = metrics.x;
+      pick->y = metrics.y;
+      pick->z = metrics.z;
+      pick->along = metrics.along;
+      pick->perp = metrics.perp;
       pick->score = score;
       pick->has_target = has_target;
       pick->has_character = has_character;
@@ -1940,7 +2294,11 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
 
   if (!found || pick.suppress_orbit_hook)
   {
-    WriteGunTargetScratch(guard, player, 0xffffu);
+    u16 vanilla_uid = 0xffffu;
+    if (lock_held && ReadVanillaTargetUid(guard, state_manager, player, gun, &vanilla_uid))
+      WriteGunTargetScratch(guard, player, vanilla_uid);
+    else
+      WriteGunTargetScratch(guard, player, 0xffffu);
     return;
   }
 
@@ -3966,10 +4324,14 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   for (int i = 0; i < 12; ++i)
     mat.m[i] = s_smooth_matrix[i];
   if (!MatrixNumbersLookValid(mat))
+  {
+    ClearCannonRuntimeScratch(guard);
+    TryWriteU32(guard, RETICLE_BILLBOARD_SCRATCH, 0);
     return;
+  }
 
   auto clear_active_cannon_feed = [&] {
-    TryWriteU32(guard, CANNON_EXPECTED_GUN_SCRATCH, 0);
+    ClearCannonRuntimeScratch(guard);
     TryWriteU32(guard, RETICLE_BILLBOARD_SCRATCH, 0);
   };
 
@@ -4009,12 +4371,9 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
     return;
   }
 
-  const u32 gun_xf = gun + ADDRESS.gun_xf_offset;
-  const u32 beam_xf = gun + ADDRESS.beam_xf_offset;
   const u32 world_xf = gun + ADDRESS.world_xf_offset;
   const u32 local_xf = gun + ADDRESS.local_xf_offset;
   const bool gun_chain_valid =
-      LooksLikeTransformMatrix(guard, gun_xf) && LooksLikeTransformMatrix(guard, beam_xf) &&
       LooksLikeTransformMatrix(guard, world_xf) && LooksLikeTransformMatrix(guard, local_xf);
   if (!gun_chain_valid)
   {
@@ -4055,6 +4414,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   if (!std::isfinite(model_world_x) || !std::isfinite(model_world_y) ||
       !std::isfinite(model_world_z))
   {
+    clear_active_cannon_feed();
     return;
   }
   TryWriteFloat(guard, MODEL_OFFSET_WORLD_SCRATCH + 0, model_world_x);
@@ -4481,6 +4841,39 @@ bool ApplyGameFlowFlagPatches(const Core::CPUThreadGuard& guard)
   return wrote;
 }
 
+bool RestoreGameFlowFlagPatch(const Core::CPUThreadGuard& guard, GameFlowFlagPatch& patch)
+{
+  const u32 branch = PpcBranch(patch.address, patch.cave);
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current) || current != branch)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  u32 original = patch.original;
+  if (original == 0)
+    TryReadU32(guard, patch.cave + 0x10u, &original);
+  if (original == 0)
+    return false;
+
+  const bool restored = TryWriteInstruction(guard, patch.address, original);
+  if (restored)
+  {
+    patch.original = original;
+    patch.applied = false;
+  }
+  return restored;
+}
+
+bool RestoreGameFlowFlagPatches(const Core::CPUThreadGuard& guard)
+{
+  bool restored = false;
+  for (GameFlowFlagPatch& patch : s_game_flow_flag_patches)
+    restored = RestoreGameFlowFlagPatch(guard, patch) || restored;
+  return restored;
+}
+
 bool ApplyConditionalCombatPitchPatch(const Core::CPUThreadGuard& guard, DynamicPpcPatch& patch)
 {
   u32 current = 0;
@@ -4747,9 +5140,12 @@ void VerifyCannonFeedWatchdog(Core::System& system, const Core::CPUThreadGuard& 
 
 void UpdateShaderHunterGameFlowFlags(const Core::CPUThreadGuard& guard)
 {
-  u32 gameflow_menu = 0;
-  if (TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow_menu) && gameflow_menu == 1)
+  u32 player = 0;
+  if (TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) &&
+      PlayerObjectLooksValid(guard, player) && PlayerIsInMenuMapOrMorphball(guard, player))
+  {
     ShaderHunter::GetInstance().RegisterExternalFlag("primedgun_map_or_pause");
+  }
 }
 }  // namespace
 
@@ -4776,12 +5172,31 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     return;
   }
 
-  if (!s_game_was_active)
-  {
-    TryWriteU32(guard, GAMEFLOW_MENU_SCRATCH, 0);
-  }
   s_game_was_active = true;
   UpdateShaderHunterGameFlowFlags(guard);
+
+  u32 player = 0;
+  const bool have_player =
+      TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) &&
+      PlayerObjectLooksValid(guard, player);
+  if (!have_player)
+  {
+    if (s_last_patch_player != 0)
+      s_patch_reapply_until_frame = s_frame_counter + 180u;
+    s_last_patch_player = 0;
+    s_patches_applied_this_boot = false;
+    s_gameplay_input_active.store(false, std::memory_order_relaxed);
+    s_orbit_lock_active.store(false, std::memory_order_relaxed);
+    return;
+  }
+
+  if (player != s_last_patch_player)
+  {
+    s_last_patch_player = player;
+    s_patches_applied_this_boot = false;
+    s_patch_reapply_until_frame = s_frame_counter + 180u;
+    TryWriteU32(guard, GAMEFLOW_MENU_SCRATCH, 0);
+  }
 
   bool dynamic_patch_applied = false;
   if (settings.builtin_patches_enabled)
@@ -4803,23 +5218,6 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
 
   if ((s_frame_counter % 60) == 1)
     ApplyHelmetOpacityZero(guard, settings);
-
-  u32 player = 0;
-  const bool have_player =
-      TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) &&
-      PlayerObjectLooksValid(guard, player);
-  if (!have_player)
-  {
-    if (s_last_patch_player != 0)
-      s_patch_reapply_until_frame = s_frame_counter + 180u;
-    s_last_patch_player = 0;
-  }
-  else if (player != s_last_patch_player)
-  {
-    s_last_patch_player = player;
-    s_patches_applied_this_boot = false;
-    s_patch_reapply_until_frame = s_frame_counter + 180u;
-  }
 
   const bool patch_reapply_window = have_player && s_frame_counter < s_patch_reapply_until_frame;
   if (settings.builtin_patches_enabled &&
