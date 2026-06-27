@@ -681,17 +681,26 @@ if(ENABLE_VR)
   # component. Use the vendored jsoncpp so the loader target is self-contained in this build.
   set(BUILD_WITH_SYSTEM_JSONCPP OFF CACHE BOOL "" FORCE)
 
-  # GCC 16 rejects the Khronos loader exception wrapper generated in this SDK snapshot. Disable
-  # the loader's C ABI exception catch layer for affected Linux toolchains until the external SDK
-  # is updated.
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  option(PRIMEDGUN_OPENXR_LOADER_EXCEPTIONS
+    "Build the bundled OpenXR loader with its normal C++ exception handling enabled." ON)
+  if(PRIMEDGUN_OPENXR_LOADER_EXCEPTIONS)
+    set(BUILD_LOADER_WITH_EXCEPTION_HANDLING ON CACHE BOOL "" FORCE)
+  else()
     set(BUILD_LOADER_WITH_EXCEPTION_HANDLING OFF CACHE BOOL "" FORCE)
   endif()
 
   add_subdirectory(Externals/OpenXR "${CMAKE_BINARY_DIR}/Externals/OpenXR" EXCLUDE_FROM_ALL)
 
-  if(TARGET openxr_loader AND NOT BUILD_LOADER_WITH_EXCEPTION_HANDLING)
-    target_compile_definitions(openxr_loader PRIVATE JSON_USE_EXCEPTIONS=0)
+  if(TARGET openxr_loader)
+    if(BUILD_LOADER_WITH_EXCEPTION_HANDLING)
+      if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        # Dolphin builds most non-MSVC code with -fno-exceptions. The OpenXR loader is the
+        # exception: Khronos' default Linux loader path expects exceptions around its C ABI.
+        target_compile_options(openxr_loader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fexceptions>)
+      endif()
+    else()
+      target_compile_definitions(openxr_loader PRIVATE JSON_USE_EXCEPTION=0 JSON_USE_EXCEPTIONS=0)
+    endif()
   endif()
 endif()
 
