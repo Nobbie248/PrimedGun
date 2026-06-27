@@ -196,9 +196,10 @@ private:
   bool CreateEyeSwapchains(int64_t swapchain_format);
 
   void DestroySwapchains();
-  bool EnsurePrimedGunOverlaySwapchain(uint32_t content_kind, uint32_t generation, uint32_t width,
+  bool EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain* overlay,
+                                      uint32_t content_kind, uint32_t generation, uint32_t width,
                                       uint32_t height, const std::vector<uint32_t>& pixels);
-  void DestroyPrimedGunOverlaySwapchain();
+  void DestroyPrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain* overlay);
   bool EnsurePrimedGunLaserSwapchain();
   void DestroyPrimedGunLaserSwapchain();
   bool AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBaseHeader*>* layers);
@@ -207,6 +208,7 @@ private:
   std::array<XRVkEyeSwapchain, 2> m_eye_swapchains{};
   XRVkLayeredSwapchain m_layered_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primegun_overlay_swapchain{};
+  XRPrimedGunVkOverlaySwapchain m_primegun_position_marker_swapchain{};
   XRPrimedGunVkLaserSwapchain m_primegun_laser_swapchain{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
@@ -221,6 +223,7 @@ private:
   std::array<XrCompositionLayerProjectionView, 2> m_projection_views{};
   XrCompositionLayerProjection m_projection_layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   XrCompositionLayerQuad m_primegun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_primegun_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primegun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 
   std::atomic<bool> m_async_frame_finalization_in_flight{false};

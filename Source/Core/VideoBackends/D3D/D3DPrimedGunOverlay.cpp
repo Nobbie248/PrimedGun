@@ -27,24 +27,27 @@ D3DPrimedGunOverlay::~D3DPrimedGunOverlay()
 
 void D3DPrimedGunOverlay::Shutdown()
 {
-  DestroyOverlaySwapchain();
+  DestroyOverlaySwapchain(&m_overlay_swapchain);
+  DestroyOverlaySwapchain(&m_position_marker_swapchain);
   DestroyLaserSwapchain();
 }
 
-void D3DPrimedGunOverlay::DestroyOverlaySwapchain()
+void D3DPrimedGunOverlay::DestroyOverlaySwapchain(XRPrimedGunOverlaySwapchain* overlay)
 {
-  auto& overlay = m_overlay_swapchain;
-  overlay.images.clear();
-  overlay.texture_ready = false;
-  overlay.content_kind = 0;
-  overlay.generation = 0;
-  if (overlay.swapchain != XR_NULL_HANDLE)
+  if (!overlay)
+    return;
+
+  overlay->images.clear();
+  overlay->texture_ready = false;
+  overlay->content_kind = 0;
+  overlay->generation = 0;
+  if (overlay->swapchain != XR_NULL_HANDLE)
   {
-    const XrResult result = xrDestroySwapchain(overlay.swapchain);
+    const XrResult result = xrDestroySwapchain(overlay->swapchain);
     if (XR_FAILED(result))
       WARN_LOG_FMT(VIDEO, "OpenXR: PrimedGun overlay xrDestroySwapchain failed ({}).",
                    static_cast<int>(result));
-    overlay.swapchain = XR_NULL_HANDLE;
+    overlay->swapchain = XR_NULL_HANDLE;
   }
 }
 
@@ -147,14 +150,17 @@ bool D3DPrimedGunOverlay::EnsureLaserSwapchain()
   return true;
 }
 
-bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(uint32_t content_kind, uint32_t generation,
+bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(XRPrimedGunOverlaySwapchain* overlay,
+                                                uint32_t content_kind, uint32_t generation,
                                                 uint32_t width, uint32_t height,
                                                 const std::vector<uint32_t>& pixels)
 {
-  auto& overlay = m_overlay_swapchain;
-  if (overlay.texture_ready && overlay.swapchain != XR_NULL_HANDLE &&
-      overlay.content_kind == content_kind && overlay.generation == generation &&
-      overlay.width == width && overlay.height == height)
+  if (!overlay)
+    return false;
+
+  if (overlay->texture_ready && overlay->swapchain != XR_NULL_HANDLE &&
+      overlay->content_kind == content_kind && overlay->generation == generation &&
+      overlay->width == width && overlay->height == height)
   {
     return true;
   }
@@ -162,9 +168,9 @@ bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(uint32_t content_kind, uint32_t
   if (!VR::g_openxr)
     return false;
 
-  DestroyOverlaySwapchain();
-  overlay.width = width;
-  overlay.height = height;
+  DestroyOverlaySwapchain(overlay);
+  overlay->width = width;
+  overlay->height = height;
 
   int64_t swapchain_format = DXGI_FORMAT_R8G8B8A8_UNORM;
   VR::D3D11OpenXR::SelectSwapchainFormat(VR::g_openxr->GetSession(), &swapchain_format);
@@ -179,8 +185,8 @@ bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(uint32_t content_kind, uint32_t
   info.sampleCount = 1;
   info.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
 
-  XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &overlay.swapchain);
-  if (XR_FAILED(result) || overlay.swapchain == XR_NULL_HANDLE)
+  XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &overlay->swapchain);
+  if (XR_FAILED(result) || overlay->swapchain == XR_NULL_HANDLE)
   {
     WARN_LOG_FMT(VIDEO, "OpenXR: PrimedGun overlay xrCreateSwapchain failed ({}).",
                  static_cast<int>(result));
@@ -188,20 +194,20 @@ bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(uint32_t content_kind, uint32_t
   }
 
   uint32_t image_count = 0;
-  result = xrEnumerateSwapchainImages(overlay.swapchain, 0, &image_count, nullptr);
+  result = xrEnumerateSwapchainImages(overlay->swapchain, 0, &image_count, nullptr);
   if (XR_FAILED(result) || image_count == 0)
   {
-    DestroyOverlaySwapchain();
+    DestroyOverlaySwapchain(overlay);
     return false;
   }
 
-  overlay.images.assign(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+  overlay->images.assign(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
   result = xrEnumerateSwapchainImages(
-      overlay.swapchain, image_count, &image_count,
-      reinterpret_cast<XrSwapchainImageBaseHeader*>(overlay.images.data()));
+      overlay->swapchain, image_count, &image_count,
+      reinterpret_cast<XrSwapchainImageBaseHeader*>(overlay->images.data()));
   if (XR_FAILED(result))
   {
-    DestroyOverlaySwapchain();
+    DestroyOverlaySwapchain(overlay);
     return false;
   }
 
@@ -209,36 +215,36 @@ bool D3DPrimedGunOverlay::EnsureOverlaySwapchain(uint32_t content_kind, uint32_t
   {
     uint32_t acquired = 0;
     XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    result = xrAcquireSwapchainImage(overlay.swapchain, &acquire_info, &acquired);
+    result = xrAcquireSwapchainImage(overlay->swapchain, &acquire_info, &acquired);
     if (XR_FAILED(result))
     {
-      DestroyOverlaySwapchain();
+      DestroyOverlaySwapchain(overlay);
       return false;
     }
 
     XrSwapchainImageWaitInfo wait_info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
     wait_info.timeout = XR_INFINITE_DURATION;
-    result = xrWaitSwapchainImage(overlay.swapchain, &wait_info);
-    if (XR_SUCCEEDED(result) && acquired < overlay.images.size() &&
-        overlay.images[acquired].texture)
+    result = xrWaitSwapchainImage(overlay->swapchain, &wait_info);
+    if (XR_SUCCEEDED(result) && acquired < overlay->images.size() &&
+        overlay->images[acquired].texture)
     {
-      D3D::context->UpdateSubresource(overlay.images[acquired].texture, 0, nullptr, pixels.data(),
+      D3D::context->UpdateSubresource(overlay->images[acquired].texture, 0, nullptr, pixels.data(),
                                       width * sizeof(uint32_t), 0);
       D3D::context->Flush();
     }
 
     XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    xrReleaseSwapchainImage(overlay.swapchain, &release_info);
+    xrReleaseSwapchainImage(overlay->swapchain, &release_info);
     if (XR_FAILED(result))
     {
-      DestroyOverlaySwapchain();
+      DestroyOverlaySwapchain(overlay);
       return false;
     }
   }
 
-  overlay.content_kind = content_kind;
-  overlay.generation = generation;
-  overlay.texture_ready = true;
+  overlay->content_kind = content_kind;
+  overlay->generation = generation;
+  overlay->texture_ready = true;
   return true;
 }
 
@@ -248,12 +254,45 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
     return false;
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible)
+  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible &&
+      !overlay.position_marker_visible)
     return false;
 
   const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
   if (!snapshot.runtime_active)
     return false;
+
+  bool appended_layer = false;
+  if (overlay.position_marker_visible)
+  {
+    constexpr uint32_t marker_width = 512;
+    constexpr uint32_t marker_height = 512;
+    const std::vector<uint32_t> marker_pixels =
+        PGO::BuildPositionMarkerPixels(marker_width, marker_height);
+    if (EnsureOverlaySwapchain(&m_position_marker_swapchain, 4u, 1u, marker_width, marker_height,
+                               marker_pixels))
+    {
+      m_position_marker_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+      m_position_marker_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                                           XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+      m_position_marker_layer.space = VR::g_openxr->GetReferenceSpace();
+      m_position_marker_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+      m_position_marker_layer.subImage.swapchain = m_position_marker_swapchain.swapchain;
+      m_position_marker_layer.subImage.imageRect.offset = {0, 0};
+      m_position_marker_layer.subImage.imageRect.extent = {static_cast<int32_t>(marker_width),
+                                                           static_cast<int32_t>(marker_height)};
+      m_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f, 0.70710678f};
+      m_position_marker_layer.pose.position = {snapshot.tracking_origin_position[0], 0.005f,
+                                               snapshot.tracking_origin_position[2]};
+      m_position_marker_layer.size = {0.356f, 0.356f};
+      layers->push_back(
+          reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_position_marker_layer));
+      appended_layer = true;
+    }
+  }
+
+  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible)
+    return appended_layer;
 
   const bool menu = overlay.menu_visible;
   const bool weapon_panel = !menu && overlay.weapon_panel_visible;
@@ -266,8 +305,9 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
       menu ? PGO::BuildMenuPixels(width, height, overlay) :
              weapon_panel ? PGO::BuildWeaponPanelPixels(width, height, overlay) :
                             PGO::BuildPromptPixels(width, height);
-  if (!EnsureOverlaySwapchain(content_kind, generation, width, height, pixels))
-    return false;
+  if (!EnsureOverlaySwapchain(&m_overlay_swapchain, content_kind, generation, width, height,
+                              pixels))
+    return appended_layer;
 
   m_overlay_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   m_overlay_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
@@ -333,10 +373,11 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
   }
   else
   {
-    return false;
+    return appended_layer;
   }
 
   layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_overlay_layer));
+  appended_layer = true;
 
   if (menu && laser_pose.valid && EnsureLaserSwapchain())
   {
@@ -359,7 +400,7 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
     layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_laser_layer));
   }
 
-  return true;
+  return appended_layer;
 }
 }  // namespace DX11
 

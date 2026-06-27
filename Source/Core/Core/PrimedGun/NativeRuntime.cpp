@@ -149,8 +149,12 @@ constexpr u32 UPDATE_SCAN_OBJECT_INDICATORS = 0x80112508u;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS = 0x801122CCu;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL = 0xC0410074u;
 
-constexpr u32 VR_MENU_TAB_COUNT = 6;
+constexpr u32 VR_MENU_TAB_COUNT = 7;
+constexpr u32 VR_MENU_CONTROL_TAB = 2;
 constexpr u32 VR_MENU_CANNON_TAB = 5;
+constexpr u32 VR_MENU_STATE_TAB = 6;
+constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 7;
+constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
 constexpr const char* PRIMEGUN_CANNON_GAME_ID = "GM8E01";
 constexpr const char* PRIMEGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
 constexpr const char* PRIMEGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
@@ -229,7 +233,6 @@ RuntimeSettings s_settings;
 u64 s_frame_counter = 0;
 bool s_game_was_active = false;
 bool s_patches_applied_this_boot = false;
-u64 s_last_patch_watchdog_frame = 0;
 bool s_scan_was_active = false;
 u32 s_scan_last_player = 0;
 u32 s_scan_normal_frames = 0;
@@ -250,12 +253,15 @@ bool s_last_vr_menu_stick_right = false;
 bool s_vr_menu_visible = false;
 u32 s_vr_menu_tab = 0;
 u32 s_vr_menu_selected_index = 0;
+u32 s_vr_menu_control_page = 0;
 u32 s_vr_menu_generation = 1;
 u64 s_vr_menu_saved_notice_until_frame = 0;
 u64 s_vr_menu_input_suppress_until_frame = 0;
 u32 s_vr_cannon_texture_slot = 0;
 u64 s_vr_cannon_texture_notice_until_frame = 0;
 bool s_vr_settings_save_requested = false;
+std::atomic_bool s_vr_state_load_requested{false};
+std::atomic_bool s_vr_state_save_requested{false};
 u64 s_height_prompt_until_frame = 0;
 u64 s_prompt_gameplay_ready_since_frame = 0;
 u64 s_prompt_first_ready_timeout_frame = 0;
@@ -645,6 +651,43 @@ bool TryWriteInstruction(const Core::CPUThreadGuard& guard, u32 address, u32 val
          PowerPC::MMU::HostTryWrite<u32>(guard, value, address).has_value();
 }
 
+bool PrimePointerLooksValid(u32 address, u32 size)
+{
+  return (address & 3u) == 0 && IsWritablePrimeMem1Address(address, size);
+}
+
+bool PlayerObjectLooksValid(const Core::CPUThreadGuard& guard, u32 player)
+{
+  if (!PrimePointerLooksValid(player, PLAYER_DISABLE_INPUT_FLAGS_OFFSET + 1u))
+    return false;
+
+  u32 camera_state = 0xffffffffu;
+  u32 morph_state = 0xffffffffu;
+  u32 movement_state = 0xffffffffu;
+  u32 visor_state = 0xffffffffu;
+  u32 holster_state = 0xffffffffu;
+  float gun_alpha = 0.0f;
+  float vx = 0.0f;
+  float vy = 0.0f;
+  float vz = 0.0f;
+  if (!TryReadU32(guard, player + 0x2F4u, &camera_state) ||
+      !TryReadU32(guard, player + 0x2F8u, &morph_state) ||
+      !TryReadU32(guard, player + PLAYER_MOVEMENT_STATE_OFFSET, &movement_state) ||
+      !TryReadU32(guard, player + PLAYER_VISOR_STATE_OFFSET, &visor_state) ||
+      !TryReadFloat(guard, player + 0x494u, &gun_alpha) ||
+      !TryReadU32(guard, player + 0x498u, &holster_state) ||
+      !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x00u, &vx) ||
+      !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x04u, &vy) ||
+      !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x08u, &vz))
+  {
+    return false;
+  }
+
+  return camera_state <= 8 && morph_state <= 8 && movement_state <= 16 && visor_state <= 8 &&
+         holster_state <= 8 && std::isfinite(gun_alpha) && gun_alpha >= -0.05f &&
+         gun_alpha <= 1.05f && std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz);
+}
+
 u32 PpcBranch(u32 from, u32 to);
 
 bool TryWriteInstructionBlock(const Core::CPUThreadGuard& guard, u32 base,
@@ -806,7 +849,7 @@ bool ScanVisorActive(const Core::CPUThreadGuard& guard, u32 player)
 
 bool PlayerIsFirstPersonUnmorphed(const Core::CPUThreadGuard& guard, u32 player)
 {
-  if (player < 0x80000000u)
+  if (!PlayerObjectLooksValid(guard, player))
     return false;
 
   u32 gameflow_menu = 0;
@@ -844,7 +887,7 @@ bool PlayerIsFirstPersonUnmorphed(const Core::CPUThreadGuard& guard, u32 player)
 
 bool PlayerIsFirstPersonGunReady(const Core::CPUThreadGuard& guard, u32 player)
 {
-  if (player < 0x80000000u)
+  if (!PlayerObjectLooksValid(guard, player))
     return false;
 
   u32 camera_state = 0xffffffffu;
@@ -1420,7 +1463,7 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
                            GunTargetPick* pick)
 {
   if (!settings.gun_targeting_enabled || state_manager < 0x80000000u ||
-      player < 0x80000000u)
+      !PlayerObjectLooksValid(guard, player))
   {
     return false;
   }
@@ -1507,7 +1550,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
                       bool strict_lock_aim, GunTargetPick* pick)
 {
   if (!settings.gun_targeting_enabled || state_manager < 0x80000000u ||
-      player < 0x80000000u || gun < 0x80000000u)
+      !PlayerObjectLooksValid(guard, player) || gun < 0x80000000u)
   {
     return false;
   }
@@ -1689,7 +1732,8 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   static u32 s_last_pick_player = 0;
   static u32 s_last_pick_gun = 0;
 
-  if (!settings.gun_targeting_enabled || !settings.patch_gun_ray_target || player < 0x80000000u)
+  if (!settings.gun_targeting_enabled || !settings.patch_gun_ray_target ||
+      !PlayerObjectLooksValid(guard, player))
   {
     s_last_pick_valid = false;
     WriteGunTargetScratch(guard, 0, 0xffffu);
@@ -1814,8 +1858,8 @@ bool ResolveActiveCameraTransform(const Core::CPUThreadGuard& guard, u32* transf
   u32 camera_manager = 0;
   u32 object_list = 0;
   if (!TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) ||
-      player < 0x80000000u || !TryReadU32(guard, player + ADDRESS.cannon_offset, &gun) ||
-      gun < 0x80000000u ||
+      !PlayerObjectLooksValid(guard, player) ||
+      !TryReadU32(guard, player + ADDRESS.cannon_offset, &gun) || gun < 0x80000000u ||
       !TryReadU32(guard, ADDRESS.state_manager + ADDRESS.camera_manager_offset, &camera_manager) ||
       camera_manager < 0x80000000u ||
       !TryReadU32(guard, ADDRESS.state_manager + object_list_offset, &object_list) ||
@@ -2139,7 +2183,7 @@ void SetPlayerInputDisabledForDpad(const Core::CPUThreadGuard& guard, u32 state_
   u32 player = 0;
   const bool have_player =
       TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) &&
-      player >= 0x80000000u;
+      PlayerObjectLooksValid(guard, player);
 
   if (disabled && s_dpad_forced_input_disabled && have_player &&
       player != s_dpad_input_player)
@@ -2201,7 +2245,7 @@ void SuppressCStickForDpad(const Core::CPUThreadGuard& guard, u32 state_manager)
 {
   u32 player = 0;
   if (!TryReadU32(guard, state_manager + ADDRESS.player_offset, &player) ||
-      player < 0x80000000u || ScanVisorActive(guard, player))
+      !PlayerObjectLooksValid(guard, player) || ScanVisorActive(guard, player))
   {
     return;
   }
@@ -2287,7 +2331,7 @@ bool MatrixFromHmdSnapshot(const Common::VR::OpenXRInputSnapshot& snapshot, floa
 
 bool ScanPitchFieldsWritable(const Core::CPUThreadGuard& guard, u32 player)
 {
-  if (player < 0x80000000u)
+  if (!PlayerObjectLooksValid(guard, player))
     return false;
 
   float pitch = 0.0f;
@@ -2302,7 +2346,7 @@ bool ScanPitchFieldsWritable(const Core::CPUThreadGuard& guard, u32 player)
 
 void ClearScanPitchState(const Core::CPUThreadGuard& guard, u32 player)
 {
-  if (player < 0x80000000u)
+  if (!ScanPitchFieldsWritable(guard, player))
     return;
 
   TryWriteU8(guard, player + PLAYER_FREE_LOOK_STATE_OFFSET + 2, 0);
@@ -2448,6 +2492,14 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
   };
 
   if (!settings.xr_dpad_enabled || !snapshot.runtime_active)
+  {
+    disarm();
+    return;
+  }
+
+  u32 player = 0;
+  if (!TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) ||
+      !PlayerIsFirstPersonUnmorphed(guard, player))
   {
     disarm();
     return;
@@ -2823,18 +2875,31 @@ u32 VrMenuItemCountForTab(u32 tab)
   switch (tab)
   {
   case 1:
-    return 7;
-  case 2:
-    return 15;
+    return 8;
+  case VR_MENU_CONTROL_TAB:
+    return s_vr_menu_control_page == 0 ? VR_MENU_CONTROL_FIRST_PAGE_ITEMS + 1 :
+                                         15 - VR_MENU_CONTROL_FIRST_PAGE_ITEMS + 1;
   case 3:
     return 9;
   case 4:
     return 2;
   case VR_MENU_CANNON_TAB:
     return 6;
+  case VR_MENU_STATE_TAB:
+    return 2;
   default:
     return 5;
   }
+}
+
+int VrMenuControlActualIndex(u32 local_index)
+{
+  if (local_index == 0)
+    return -1;
+
+  return s_vr_menu_control_page == 0 ?
+             static_cast<int>(local_index - 1) :
+             static_cast<int>(VR_MENU_CONTROL_FIRST_PAGE_ITEMS + local_index - 1);
 }
 
 bool VrMenuRowIsNumeric(u32 tab, u32 index)
@@ -2845,8 +2910,15 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
     return index == 1 || index == 2;
   case 1:
     return index <= 5;
-  case 2:
-    return index == 2 || index == 5 || index == 8 || index == 11 || index == 12 || index == 13;
+  case VR_MENU_CONTROL_TAB:
+  {
+    if (index == 0)
+      return true;
+
+    const int actual_index = VrMenuControlActualIndex(index);
+    return actual_index == 2 || actual_index == 5 || actual_index == 8 ||
+           actual_index == 11 || actual_index == 12 || actual_index == 13;
+  }
   case 3:
     return index >= 3 && index <= 7;
   default:
@@ -2861,6 +2933,12 @@ void ClampVrMenuSelection()
     s_vr_menu_selected_index = 0;
   else if (s_vr_menu_selected_index >= count)
     s_vr_menu_selected_index = count - 1;
+}
+
+void SetVrMenuControlPage(u32 page)
+{
+  s_vr_menu_control_page = page % VR_MENU_CONTROL_PAGE_COUNT;
+  ClampVrMenuSelection();
 }
 
 void RotatePoseVector(const Pose& pose, float x, float y, float z, float* out_x, float* out_y,
@@ -3031,8 +3109,16 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       break;
     }
     break;
-  case 2:
-    switch (s_vr_menu_selected_index)
+  case VR_MENU_CONTROL_TAB:
+  {
+    if (s_vr_menu_selected_index == 0)
+    {
+      SetVrMenuControlPage(direction < 0 ? s_vr_menu_control_page + VR_MENU_CONTROL_PAGE_COUNT - 1 :
+                                           s_vr_menu_control_page + 1);
+      break;
+    }
+
+    switch (VrMenuControlActualIndex(s_vr_menu_selected_index))
     {
     case 2:
       settings->trigger_threshold =
@@ -3062,6 +3148,7 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       break;
     }
     break;
+  }
   case 3:
     switch (s_vr_menu_selected_index)
     {
@@ -3124,6 +3211,8 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
   if (s_vr_menu_tab == 1)
   {
     if (s_vr_menu_selected_index == 6)
+      settings->position_marker_enabled = !settings->position_marker_enabled;
+    else if (s_vr_menu_selected_index == 7)
     {
       settings->model_offset_x = DEFAULT_MODEL_OFFSET_X;
       settings->model_offset_y = DEFAULT_MODEL_OFFSET_Y;
@@ -3135,23 +3224,30 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     return;
   }
 
-  if (s_vr_menu_tab == 2)
+  if (s_vr_menu_tab == VR_MENU_CONTROL_TAB)
   {
     if (s_vr_menu_selected_index == 0)
+    {
+      SetVrMenuControlPage(s_vr_menu_control_page + 1);
+      return;
+    }
+
+    const int actual_index = VrMenuControlActualIndex(s_vr_menu_selected_index);
+    if (actual_index == 0)
       settings->use_right_hand = !settings->use_right_hand;
-    else if (s_vr_menu_selected_index == 1)
+    else if (actual_index == 1)
       settings->require_trigger = !settings->require_trigger;
-    else if (s_vr_menu_selected_index == 3)
+    else if (actual_index == 3)
       settings->rumble_enabled = !settings->rumble_enabled;
-    else if (s_vr_menu_selected_index == 4)
+    else if (actual_index == 4)
       settings->rumble_hand_mode = (std::clamp(settings->rumble_hand_mode, 0, 2) + 1) % 3;
-    else if (s_vr_menu_selected_index == 6)
+    else if (actual_index == 6)
       settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
-    else if (s_vr_menu_selected_index == 7)
+    else if (actual_index == 7)
       settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
-    else if (s_vr_menu_selected_index == 9)
+    else if (actual_index == 9)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (s_vr_menu_selected_index == 14)
+    else if (actual_index == 14)
       ResetControllerSettings(settings);
     return;
   }
@@ -3210,6 +3306,15 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       return;
     }
   }
+
+  if (s_vr_menu_tab == VR_MENU_STATE_TAB)
+  {
+    if (s_vr_menu_selected_index == 0)
+      s_vr_state_load_requested.store(true, std::memory_order_release);
+    else if (s_vr_menu_selected_index == 1)
+      s_vr_state_save_requested.store(true, std::memory_order_release);
+    return;
+  }
 }
 
 void SaveVrMenuSettingsNotice()
@@ -3232,6 +3337,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.tab = s_vr_menu_tab;
   overlay.selected_index = s_vr_menu_selected_index;
   overlay.item_count = VrMenuItemCountForTab(s_vr_menu_tab);
+  overlay.control_page = s_vr_menu_control_page;
   overlay.cannon_texture_slot = s_vr_cannon_texture_slot;
   overlay.cannon_texture_notice = s_frame_counter < s_vr_cannon_texture_notice_until_frame;
   overlay.weapon_panel_visible = settings.vr_overlays_enabled && previous.weapon_panel_visible;
@@ -3252,6 +3358,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
   overlay.visor_helmet_enabled = settings.visor_helmet_enabled;
+  overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
   overlay.xr_dpad_head_radius = settings.xr_dpad_head_radius;
   overlay.xr_dpad_head_y_below = settings.xr_dpad_head_y_below;
@@ -3349,10 +3456,12 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * 512.0f;
       if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
       {
-        constexpr float tab_step = 162.0f;
-        constexpr float tab_width = 150.0f;
-        const int tab = static_cast<int>((texture_x - 36.0f) / tab_step);
-        const float tab_local_x = texture_x - (36.0f + static_cast<float>(tab) * tab_step);
+        constexpr float tab_start_x = 22.0f;
+        constexpr float tab_step = 140.0f;
+        constexpr float tab_width = 130.0f;
+        const int tab = static_cast<int>((texture_x - tab_start_x) / tab_step);
+        const float tab_local_x =
+            texture_x - (tab_start_x + static_cast<float>(tab) * tab_step);
         if (tab >= 0 && tab < static_cast<int>(VR_MENU_TAB_COUNT) && tab_local_x >= 0.0f &&
             tab_local_x <= tab_width &&
             s_vr_menu_tab != static_cast<u32>(tab))
@@ -3613,7 +3722,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
 
   u32 player = 0;
   if (!TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) ||
-      player < 0x80000000u)
+      !PlayerObjectLooksValid(guard, player))
   {
     s_smooth_matrix_valid = false;
     s_last_validated_gun = 0;
@@ -4287,12 +4396,6 @@ void VerifyCriticalBuiltinPatches(Core::System& system, const Core::CPUThreadGua
   if (!settings.builtin_patches_enabled || !have_player)
     return;
 
-  const bool startup_window = s_frame_counter < 600u;
-  const u64 interval = startup_window ? 5u : 30u;
-  if (s_frame_counter < s_last_patch_watchdog_frame + interval)
-    return;
-
-  s_last_patch_watchdog_frame = s_frame_counter;
   if (BuiltinPatchGroupApplied(guard, settings, PatchCannonRotation) &&
       BuiltinPatchGroupApplied(guard, settings, PatchGunRayTarget) &&
       BuiltinPatchGroupApplied(guard, settings, PatchReticle))
@@ -4442,7 +4545,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   u32 player = 0;
   const bool have_player =
       TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) &&
-      player >= 0x80000000u;
+      PlayerObjectLooksValid(guard, player);
   if (!have_player)
   {
     if (s_last_patch_player != 0)
@@ -4531,7 +4634,6 @@ bool IsOrbitLockActive()
 void ResetNativeRuntime()
 {
   s_patches_applied_this_boot = false;
-  s_last_patch_watchdog_frame = 0;
   s_frame_counter = 0;
   s_scan_was_active = false;
   s_scan_last_player = 0;
@@ -4583,6 +4685,7 @@ void ResetNativeRuntime()
   s_vr_menu_visible = false;
   s_vr_menu_tab = 0;
   s_vr_menu_selected_index = 0;
+  s_vr_menu_control_page = 0;
   ++s_vr_menu_generation;
   s_vr_menu_saved_notice_until_frame = 0;
   s_vr_cannon_texture_notice_until_frame = 0;
@@ -4694,5 +4797,15 @@ void MarkVrSettingsSaved()
   std::lock_guard lock{s_settings_mutex};
   s_vr_menu_saved_notice_until_frame = s_frame_counter + 180;
   ++s_vr_menu_generation;
+}
+
+bool ConsumeVrStateLoadRequest()
+{
+  return s_vr_state_load_requested.exchange(false, std::memory_order_acq_rel);
+}
+
+bool ConsumeVrStateSaveRequest()
+{
+  return s_vr_state_save_requested.exchange(false, std::memory_order_acq_rel);
 }
 }  // namespace PrimedGun

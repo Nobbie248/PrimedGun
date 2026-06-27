@@ -47,15 +47,18 @@ public:
   bool AppendLayers(std::vector<XrCompositionLayerBaseHeader*>* layers);
 
 private:
-  bool EnsureOverlaySwapchain(uint32_t content_kind, uint32_t generation, uint32_t width,
-                              uint32_t height, const std::vector<uint32_t>& pixels);
-  void DestroyOverlaySwapchain();
+  bool EnsureOverlaySwapchain(XRPrimedGunOverlaySwapchain* overlay, uint32_t content_kind,
+                              uint32_t generation, uint32_t width, uint32_t height,
+                              const std::vector<uint32_t>& pixels);
+  void DestroyOverlaySwapchain(XRPrimedGunOverlaySwapchain* overlay);
   bool EnsureLaserSwapchain();
   void DestroyLaserSwapchain();
 
   XRPrimedGunOverlaySwapchain m_overlay_swapchain{};
+  XRPrimedGunOverlaySwapchain m_position_marker_swapchain{};
   XRPrimedGunLaserSwapchain m_laser_swapchain{};
   XrCompositionLayerQuad m_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 };
 }  // namespace DX11

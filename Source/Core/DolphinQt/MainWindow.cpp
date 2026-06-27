@@ -7,6 +7,7 @@
 #include "Common/Version.h"
 
 #include <QApplication>
+#include <QActionGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -1478,6 +1479,9 @@ void MainWindow::ConnectStack()
   auto* pause_button = new QPushButton(tr("Pause"), game_tab);
   auto* stop_button = new QPushButton(tr("Stop"), game_tab);
   auto* options_button = new QPushButton(tr("Game Options..."), game_tab);
+  auto* load_state_button = new QPushButton(tr("Load State"), game_tab);
+  auto* save_state_button = new QPushButton(tr("Save State"), game_tab);
+  auto* select_state_slot_button = new QPushButton(tr("Select State Slot"), game_tab);
   const QString game_button_style = QStringLiteral(R"(
     QPushButton {
       background-color: #242a33;
@@ -1514,11 +1518,17 @@ void MainWindow::ConnectStack()
   pause_button->setFlat(true);
   stop_button->setFlat(true);
   options_button->setFlat(true);
+  load_state_button->setFlat(true);
+  save_state_button->setFlat(true);
+  select_state_slot_button->setFlat(true);
   select_button->setStyleSheet(game_button_style);
   play_button->setStyleSheet(primary_game_button_style);
   pause_button->setStyleSheet(game_button_style);
   stop_button->setStyleSheet(game_button_style);
   options_button->setStyleSheet(game_button_style);
+  load_state_button->setStyleSheet(game_button_style);
+  save_state_button->setStyleSheet(game_button_style);
+  select_state_slot_button->setStyleSheet(game_button_style);
   QSettings& settings = Settings::GetQSettings();
   const auto load_primegun_runtime_settings = [&settings] {
     PrimedGun::RuntimeSettings runtime = PrimedGun::GetRuntimeSettings();
@@ -1625,6 +1635,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/vr_overlays_enabled"),
                        runtime.vr_overlays_enabled)
             .toBool();
+    runtime.position_marker_enabled =
+        settings.value(QStringLiteral("primegun/position_marker_enabled"),
+                       runtime.position_marker_enabled)
+            .toBool();
     runtime.xr_dpad_enabled =
         settings.value(QStringLiteral("primegun/xr_dpad_enabled"), runtime.xr_dpad_enabled).toBool();
     runtime.xr_dpad_head_radius =
@@ -1718,6 +1732,8 @@ void MainWindow::ConnectStack()
     settings.setValue(QStringLiteral("primegun/visor_helmet_enabled"),
                       runtime.visor_helmet_enabled);
     settings.setValue(QStringLiteral("primegun/vr_overlays_enabled"), runtime.vr_overlays_enabled);
+    settings.setValue(QStringLiteral("primegun/position_marker_enabled"),
+                      runtime.position_marker_enabled);
     settings.setValue(QStringLiteral("primegun/xr_dpad_enabled"), runtime.xr_dpad_enabled);
     settings.setValue(QStringLiteral("primegun/xr_dpad_head_radius"), runtime.xr_dpad_head_radius);
     settings.setValue(QStringLiteral("primegun/xr_dpad_head_y_below"),
@@ -1742,12 +1758,18 @@ void MainWindow::ConnectStack()
   };
   load_primegun_runtime_settings();
   auto* primegun_vr_save_timer = new QTimer(this);
-  connect(primegun_vr_save_timer, &QTimer::timeout, this, [save_primegun_runtime_settings] {
-    if (!PrimedGun::ConsumeVrSettingsSaveRequest())
-      return;
+  connect(primegun_vr_save_timer, &QTimer::timeout, this, [this, save_primegun_runtime_settings] {
+    if (PrimedGun::ConsumeVrSettingsSaveRequest())
+    {
+      save_primegun_runtime_settings(PrimedGun::GetRuntimeSettings());
+      PrimedGun::MarkVrSettingsSaved();
+    }
 
-    save_primegun_runtime_settings(PrimedGun::GetRuntimeSettings());
-    PrimedGun::MarkVrSettingsSaved();
+    if (PrimedGun::ConsumeVrStateLoadRequest())
+      StateLoadSlot();
+
+    if (PrimedGun::ConsumeVrStateSaveRequest())
+      StateSaveSlot();
   });
   primegun_vr_save_timer->start(250);
   auto* revision_warning = new QLabel(tr("Wrong revision"), game_tab);
@@ -1917,6 +1939,68 @@ void MainWindow::ConnectStack()
   const auto apply_runtime = [runtime] { PrimedGun::SetRuntimeSettings(*runtime); };
   const QString assets_dir = QApplication::applicationDirPath() + QStringLiteral("/assets/");
 
+  auto* load_state_menu = new QMenu(load_state_button);
+  load_state_menu->addAction(tr("Load State from File"), this, &MainWindow::StateLoad);
+  load_state_menu->addAction(tr("Load State from Selected Slot"), this, &MainWindow::StateLoadSlot);
+  auto* load_state_slots_menu = load_state_menu->addMenu(tr("Load State from Slot"));
+  load_state_menu->addAction(tr("Undo Load State"), this, &MainWindow::StateLoadUndo);
+
+  auto* save_state_menu = new QMenu(save_state_button);
+  save_state_menu->addAction(tr("Save State to File"), this, &MainWindow::StateSave);
+  save_state_menu->addAction(tr("Save State to Selected Slot"), this, &MainWindow::StateSaveSlot);
+  save_state_menu->addAction(tr("Save State to Oldest Slot"), this, &MainWindow::StateSaveOldest);
+  auto* save_state_slots_menu = save_state_menu->addMenu(tr("Save State to Slot"));
+  save_state_menu->addAction(tr("Undo Save State"), this, &MainWindow::StateSaveUndo);
+
+  auto* select_state_slot_menu = new QMenu(select_state_slot_button);
+  auto* select_state_group = new QActionGroup(select_state_slot_menu);
+  QList<QAction*> load_state_slot_actions;
+  QList<QAction*> save_state_slot_actions;
+  QList<QAction*> select_state_slot_actions;
+  const int state_slot_count = static_cast<int>(State::NUM_STATES);
+  for (int slot = 1; slot <= state_slot_count; ++slot)
+  {
+    QAction* load_action = load_state_slots_menu->addAction(QString{});
+    QAction* save_action = save_state_slots_menu->addAction(QString{});
+    QAction* select_action = select_state_slot_menu->addAction(QString{});
+    select_action->setCheckable(true);
+    select_action->setActionGroup(select_state_group);
+
+    load_state_slot_actions.append(load_action);
+    save_state_slot_actions.append(save_action);
+    select_state_slot_actions.append(select_action);
+
+    connect(load_action, &QAction::triggered, this, [this, slot] { StateLoadSlotAt(slot); });
+    connect(save_action, &QAction::triggered, this, [this, slot] { StateSaveSlotAt(slot); });
+    connect(select_action, &QAction::triggered, this, [this, slot] {
+      m_menu_bar->SetStateSlot(slot);
+    });
+  }
+
+  const auto refresh_state_slot_menus = [load_state_slot_actions, save_state_slot_actions,
+                                         select_state_slot_actions, state_slot_count] {
+    const int selected_slot = Settings::Instance().GetStateSlot();
+    for (int index = 0; index < state_slot_count; ++index)
+    {
+      const int slot = index + 1;
+      const QString info = QString::fromStdString(State::GetInfoStringOfSlot(slot));
+      load_state_slot_actions.at(index)->setText(
+          QObject::tr("Load from Slot %1 - %2").arg(slot).arg(info));
+      save_state_slot_actions.at(index)->setText(
+          QObject::tr("Save to Slot %1 - %2").arg(slot).arg(info));
+      select_state_slot_actions.at(index)->setText(
+          QObject::tr("Select Slot %1 - %2").arg(slot).arg(info));
+      select_state_slot_actions.at(index)->setChecked(selected_slot == slot);
+    }
+  };
+  connect(load_state_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
+  connect(save_state_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
+  connect(select_state_slot_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
+  refresh_state_slot_menus();
+  load_state_button->setMenu(load_state_menu);
+  save_state_button->setMenu(save_state_menu);
+  select_state_slot_button->setMenu(select_state_slot_menu);
+
   auto* setup_layout = make_scroll_tab(tr("Setup"));
   setup_layout->setContentsMargins(12, 10, 12, 0);
   setup_layout->addWidget(section_label(tr("Setup"), game_tab));
@@ -1940,6 +2024,11 @@ void MainWindow::ConnectStack()
   play_control_row->addWidget(stop_button);
   setup_layout->addLayout(play_control_row);
   setup_layout->addWidget(options_button);
+  setup_layout->addSpacing(10);
+  setup_layout->addWidget(section_label(tr("Save States"), game_tab));
+  setup_layout->addWidget(load_state_button);
+  setup_layout->addWidget(save_state_button);
+  setup_layout->addWidget(select_state_slot_button);
   setup_layout->addSpacing(12);
   setup_layout->addStretch();
   auto* setup_art = new QLabel(game_tab);
@@ -2164,6 +2253,9 @@ void MainWindow::ConnectStack()
 
   auto* calibration_layout = make_scroll_tab(tr("Calibration"));
   calibration_layout->addWidget(section_label(tr("Offset Tuning"), game_tab));
+  auto* position_marker_enabled = new QCheckBox(tr("Show floor position marker"), game_tab);
+  position_marker_enabled->setChecked(runtime->position_marker_enabled);
+  calibration_layout->addWidget(position_marker_enabled);
   separator(calibration_layout);
   calibration_layout->addWidget(section_label(tr("Position"), game_tab));
   auto* model_x_spin =
@@ -2626,6 +2718,7 @@ void MainWindow::ConnectStack()
     const QSignalBlocker hmd_direction_blocker{hmd_direction};
     const QSignalBlocker targeting_enabled_blocker{targeting_enabled};
     const QSignalBlocker visor_helmet_enabled_blocker{visor_helmet_enabled};
+    const QSignalBlocker position_marker_enabled_blocker{position_marker_enabled};
     const auto set_float = [float_rows](QDoubleSpinBox* spin, double value) {
       QSlider* linked_slider = nullptr;
       for (const auto& [row_spin, row_slider] : *float_rows)
@@ -2661,6 +2754,7 @@ void MainWindow::ConnectStack()
     hmd_direction->setChecked(runtime->directional_movement_use_hmd_direction);
     targeting_enabled->setChecked(runtime->gun_targeting_enabled);
     visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
+    position_marker_enabled->setChecked(runtime->position_marker_enabled);
     set_float(dpad_radius_spin, runtime->xr_dpad_head_radius);
     set_float(trackpad_press_threshold_spin, runtime->primegun_trackpad_press_threshold);
     set_float(rumble_intensity_spin, runtime->rumble_intensity);
@@ -2807,6 +2901,11 @@ void MainWindow::ConnectStack()
   connect(visor_helmet_enabled, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
     runtime->visor_helmet_enabled = checked;
+    apply_runtime();
+  });
+  connect(position_marker_enabled, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->position_marker_enabled = checked;
     apply_runtime();
   });
   connect(default_preset, &QPushButton::clicked, this, reset_calibration_values);

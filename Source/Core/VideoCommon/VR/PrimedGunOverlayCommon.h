@@ -155,6 +155,7 @@ inline const PrimedGunPng& LoadPrimedGunPng(const char* filename)
   static PrimedGunPng wave;
   static PrimedGunPng ice;
   static PrimedGunPng plasma;
+  static PrimedGunPng position;
 
   PrimedGunPng* image = &power;
   if (std::strcmp(filename, "wave.png") == 0)
@@ -163,6 +164,8 @@ inline const PrimedGunPng& LoadPrimedGunPng(const char* filename)
     image = &ice;
   else if (std::strcmp(filename, "plasma.png") == 0)
     image = &plasma;
+  else if (std::strcmp(filename, "position.png") == 0)
+    image = &position;
 
   if (!image->tried)
   {
@@ -248,16 +251,32 @@ struct MenuRow
   std::string value;
 };
 
-inline bool MenuRowIsNumeric(uint32_t tab, int index)
+inline int ControlMenuActualIndex(uint32_t page, int local_index)
 {
-  switch (tab)
+  if (local_index <= 0)
+    return -1;
+
+  constexpr int first_page_items = 7;
+  return page == 0 ? local_index - 1 : first_page_items + local_index - 1;
+}
+
+inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int index)
+{
+  switch (s.tab)
   {
   case 0:
     return index == 1 || index == 2;
   case 1:
     return index >= 0 && index <= 5;
   case 2:
-    return index == 2 || index == 5 || index == 8 || index == 11 || index == 12 || index == 13;
+  {
+    if (index == 0)
+      return true;
+
+    const int actual_index = ControlMenuActualIndex(s.control_page, index);
+    return actual_index == 2 || actual_index == 5 || actual_index == 8 ||
+           actual_index == 11 || actual_index == 12 || actual_index == 13;
+  }
   case 3:
     return index >= 3 && index <= 7;
   default:
@@ -289,23 +308,38 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"ROT PITCH", FloatText(s.rot_offset_x, 1)},
             {"ROT YAW", FloatText(s.rot_offset_y, 1)},
             {"ROT ROLL", FloatText(s.rot_offset_z, 1)},
+            {"FLOOR POSITION MARKER", s.position_marker_visible ? "ON" : "OFF"},
             {"RESET CALIBRATION", "PRESS"}};
   case 2:
-    return {{"RIGHT HAND", s.use_right_hand ? "ON" : "OFF"},
-            {"REQUIRE R TRIGGER", s.require_trigger ? "ON" : "OFF"},
-            {"R TRIGGER", FloatText(s.trigger_threshold, 2)},
-            {"RUMBLE", s.rumble_enabled ? "ON" : "OFF"},
-            {"RUMBLE TARGET", RumbleHandModeText(s.rumble_hand_mode)},
-            {"RUMBLE INTENSITY", FloatText(s.rumble_intensity, 2)},
-            {"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"},
-            {"GRIP INPUT SOURCE", s.primegun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"},
-            {"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)},
-            {"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"},
-            {"D-PAD ENABLED", s.xr_dpad_enabled ? "ON" : "OFF"},
-            {"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)},
-            {"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)},
-            {"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)},
-            {"RESET CONTROLLER", "PRESS"}};
+  {
+    std::vector<MenuRow> rows;
+    rows.push_back({"PAGE", s.control_page == 0 ? "1/2" : "2/2"});
+
+    if (s.control_page == 0)
+    {
+      rows.push_back({"RIGHT HAND", s.use_right_hand ? "ON" : "OFF"});
+      rows.push_back({"REQUIRE R TRIGGER", s.require_trigger ? "ON" : "OFF"});
+      rows.push_back({"R TRIGGER", FloatText(s.trigger_threshold, 2)});
+      rows.push_back({"RUMBLE", s.rumble_enabled ? "ON" : "OFF"});
+      rows.push_back({"RUMBLE TARGET", RumbleHandModeText(s.rumble_hand_mode)});
+      rows.push_back({"RUMBLE INTENSITY", FloatText(s.rumble_intensity, 2)});
+      rows.push_back({"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"});
+    }
+    else
+    {
+      rows.push_back(
+          {"GRIP INPUT SOURCE", s.primegun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
+      rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)});
+      rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
+      rows.push_back({"D-PAD ENABLED", s.xr_dpad_enabled ? "ON" : "OFF"});
+      rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
+      rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
+      rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});
+      rows.push_back({"RESET CONTROLLER", "PRESS"});
+    }
+
+    return rows;
+  }
   case 3:
     return {{"LEFT STICK STRAFE", s.directional_movement_enabled ? "ON" : "OFF"},
             {"MOVEMENT STICK", s.directional_movement_use_right_stick ? "RIGHT" : "LEFT"},
@@ -327,6 +361,8 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"SLOT 2", slot_status(2)}, {"SLOT 3", slot_status(3)},
             {"SLOT 4", slot_status(4)}, {"CUSTOM", slot_status(5)}};
   }
+  case 6:
+    return {{"LOAD STATE", "PRESS"}, {"SAVE STATE", "PRESS"}};
   default:
     return {{"TARGETING", s.gun_targeting_enabled ? "ON" : "OFF"},
             {"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)},
@@ -367,12 +403,13 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   if (s.saved_notice)
     DrawText(pixels, width, height, "SETTINGS SAVED", 760, 34, 2, 0xFFFFE6B8u);
 
-  constexpr const char* tabs[] = {"AIMING", "CALIB", "CONTROL", "MOVE", "PRESETS", "TEXTURE"};
-  constexpr int tab_width = 150;
-  constexpr int tab_step = 162;
+  constexpr const char* tabs[] = {"AIMING",  "CALIB",   "CONTROL", "MOVE",
+                                  "PRESETS", "TEXTURE", "STATE"};
+  constexpr int tab_width = 130;
+  constexpr int tab_step = 140;
   for (int i = 0; i < static_cast<int>(std::size(tabs)); ++i)
   {
-    const int x = 36 + i * tab_step;
+    const int x = 22 + i * tab_step;
     const bool active = i == static_cast<int>(s.tab);
     FillRect(pixels, width, height, x, 64, tab_width, 38, active ? 0xD04A2C12u : 0x7030180Cu);
     FillRect(pixels, width, height, x, 98, tab_width, 4, active ? 0xFFFFB030u : 0x604A2C12u);
@@ -403,7 +440,7 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
     DrawText(pixels, width, height, rows[i].label, row_x + 16, y, 2,
              selected ? 0xFFFFE6B8u : 0xFFD8C0A0u);
     const int value_x = row_x + row_w - 190;
-    const bool numeric = MenuRowIsNumeric(s.tab, i);
+    const bool numeric = MenuRowIsNumeric(s, i);
     FillRect(pixels, width, height, value_x, y - 5, 170, 23,
              selected ? 0xD030180Cu : 0x9030180Cu);
     if (numeric)
@@ -431,6 +468,14 @@ inline std::vector<uint32_t> BuildWeaponPanelPixels(
   draw_slot(4, "plasma.png", 32, 184, 144, 144);
   draw_slot(2, "wave.png", 336, 184, 144, 144);
   draw_slot(3, "ice.png", 184, 336, 144, 144);
+  return pixels;
+}
+
+inline std::vector<uint32_t> BuildPositionMarkerPixels(uint32_t width, uint32_t height)
+{
+  std::vector<uint32_t> pixels(static_cast<size_t>(width) * height, 0);
+  DrawPngFit(pixels, width, height, LoadPrimedGunPng("position.png"), 0, 0,
+             static_cast<int>(width), static_cast<int>(height), false);
   return pixels;
 }
 

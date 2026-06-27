@@ -83,6 +83,7 @@ struct PrimedGunVrOverlayState
   uint32_t tab = 0;
   uint32_t selected_index = 0;
   uint32_t item_count = 0;
+  uint32_t control_page = 0;
   uint32_t cannon_texture_slot = 0;
   bool cannon_texture_notice = false;
   uint32_t weapon_selected_index = 0;
@@ -105,6 +106,7 @@ struct PrimedGunVrOverlayState
   float gun_targeting_radius = 4.0f;
   bool visor_helmet_enabled = false;
   bool xr_dpad_enabled = true;
+  bool position_marker_visible = false;
   float xr_dpad_head_radius = 0.18f;
   float xr_dpad_head_y_below = 0.14f;
   float xr_dpad_deadzone = 0.45f;

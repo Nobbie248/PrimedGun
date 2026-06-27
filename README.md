@@ -43,7 +43,7 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 - Improved gun-based targeting and grapple.
 - 6DOF arm cannon tracking.
 - One-click height calibration.
-- Cannon position, rotation calibration.
+- Cannon position and rotation calibration.
 - Easy cannon texture swapping tool.
 - In-headset settings menu.
 
@@ -53,7 +53,8 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 - Meta's own OpenXR environment is not recommended; try SteamVR or Virtual Desktop instead.
 - Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.
 - Check the Layout tab for controller bindings.
-- To transfer your old saves go to `User\GC` then go to Dolphin settings then gamecube tab and select the save in there.
+- To transfer your old saves, go to `User\GC`, copy your memory card, and place it into the new folder. Then go to Dolphin Settings, open the GameCube tab, and select the save there.
+- Do not transfer save states across versions. Make sure to save normally before you transfer.
 - Once in game, click the right stick to set your height.
 - Click the left thumbstick to open or close the in-headset settings menu.
 - Try to stay in the centre of your play space and face forward for the best interaction.
@@ -65,7 +66,7 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 
 PrimedGun sets up the recommended controls automatically, but you can disable parts of that setup from the Controller tab. Turn off auto controller bindings, visor gesture input, or PrimedGun grip inputs there if you want to bind those controls manually.
 
-By default, PrimedGun maps GameCube `Z` to the map and GameCube `Y` to missiles.
+By default, PrimedGun maps GameCube `Z` to the map, `Y` to missiles, and the D-Pad to visors.
 
 To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then choose Configure. Select `OpenXR Controller` at the top of the mapping window. Right-click any input you want to change, choose Clear, then assign the new input. When finished, name the profile and save it.
 
