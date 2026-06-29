@@ -2055,6 +2055,114 @@ bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
   return found;
 }
 
+bool TryPreferPairedGrapplePoint(const Core::CPUThreadGuard& guard, u32 object_list, u32 player,
+                                 u32 gun, float ray_x, float ray_y, float ray_z, float dir_x,
+                                 float dir_y, float dir_z, float max_along, float max_perp,
+                                 bool strict_lock_aim, GunTargetPick* pick)
+{
+  if (pick == nullptr || pick->grapple_point || pick->obj < 0x80000000u ||
+      object_list < 0x80000000u)
+  {
+    return false;
+  }
+
+  float target_x = 0.0f;
+  float target_y = 0.0f;
+  float target_z = 0.0f;
+  if (!ReadTransformTranslation(guard, pick->obj + ADDRESS.transform_offset, &target_x, &target_y,
+                                &target_z))
+  {
+    return false;
+  }
+
+  bool found = false;
+  GunTargetPick grapple_pick = {};
+  grapple_pick.score = std::numeric_limits<float>::max();
+
+  for (u32 i = 0; i < 1024u; ++i)
+  {
+    u32 obj = 0;
+    if (!TryReadU32(guard, object_list + (i << 3) + 4u, &obj) || obj == player || obj == gun ||
+        obj == pick->obj || !PrimeGameObjectPointerLooksValid(obj, ADDRESS.transform_offset + 0x30u))
+    {
+      continue;
+    }
+
+    if (!ActorIsGrapplePoint(guard, obj) || !ActorHasMaterial(guard, obj, 41) ||
+        !LooksLikeTransformMatrix(guard, obj + ADDRESS.transform_offset))
+    {
+      continue;
+    }
+
+    float grapple_x = 0.0f;
+    float grapple_y = 0.0f;
+    float grapple_z = 0.0f;
+    if (!ReadTransformTranslation(guard, obj + ADDRESS.transform_offset, &grapple_x, &grapple_y,
+                                  &grapple_z))
+    {
+      continue;
+    }
+
+    const float dx = grapple_x - target_x;
+    const float dy = grapple_y - target_y;
+    const float dz = grapple_z - target_z;
+    const float paired_dist_sq = dx * dx + dy * dy + dz * dz;
+    if (!std::isfinite(paired_dist_sq) || paired_dist_sq > 2.25f)
+      continue;
+
+    const RayCandidateMetrics metrics =
+        ResolveActorRayMetrics(guard, obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, max_along);
+    if (!metrics.valid || metrics.perp > max_perp)
+      continue;
+
+    float aim_cone_perp = max_perp;
+    if (strict_lock_aim)
+    {
+      const float strict_cone = 0.45f + metrics.along * 0.075f;
+      const float bounds_slack = std::min(metrics.radius * 0.60f, max_perp * 0.50f);
+      aim_cone_perp = std::min(max_perp, strict_cone * 1.30f + bounds_slack);
+      if (metrics.perp > aim_cone_perp)
+        continue;
+    }
+
+    const float score = metrics.perp + metrics.along * 0.001f + paired_dist_sq * 0.25f;
+    if (found && score >= grapple_pick.score)
+      continue;
+
+    u32 uid_word = 0;
+    if (!TryReadU32(guard, obj + 0x8u, &uid_word))
+      continue;
+
+    const u16 uid = static_cast<u16>(uid_word >> 16);
+    if (uid == 0xffffu)
+      continue;
+
+    found = true;
+    grapple_pick = *pick;
+    grapple_pick.uid = uid;
+    grapple_pick.obj = obj;
+    grapple_pick.x = metrics.x;
+    grapple_pick.y = metrics.y;
+    grapple_pick.z = metrics.z;
+    grapple_pick.along = metrics.along;
+    grapple_pick.perp = metrics.perp;
+    grapple_pick.score = score;
+    grapple_pick.has_target = false;
+    grapple_pick.has_character = false;
+    grapple_pick.has_orbit = true;
+    grapple_pick.has_scan = false;
+    grapple_pick.targetable = ActorIsTargetable(guard, obj);
+    grapple_pick.grapple_point = true;
+    grapple_pick.suppress_orbit_hook = false;
+  }
+
+  if (!found)
+    return false;
+
+  *pick = grapple_pick;
+  return true;
+}
+
 bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player, u32 gun,
                       u32 world_xf, const Matrix3x4& mat, const RuntimeSettings& settings,
                       bool strict_lock_aim, GunTargetPick* pick)
@@ -2190,7 +2298,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
     float score = cone_fraction * 1.50f + metrics.perp * 0.35f +
                   metrics.along * 0.003f - metrics.radius * 0.015f;
     if (grapple_candidate)
-      score -= 0.15f;
+      score -= 0.35f;
     if (vanilla_orbit_candidate)
       score -= 0.08f;
     if (scan_mode)
@@ -2203,7 +2311,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
         score -= 0.10f;
       else if (has_scan)
         score += 0.10f;
-      else if (!has_character)
+      else if (!has_character && !grapple_candidate)
         score += 0.15f;
       if (nearby_orbit_candidate)
         score -= 0.12f;
@@ -2228,6 +2336,12 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       pick->grapple_point = grapple_point;
       pick->suppress_orbit_hook = false;
     }
+  }
+
+  if (found && !scan_mode && pick->has_target)
+  {
+    TryPreferPairedGrapplePoint(guard, object_list, player, gun, ray_x, ray_y, ray_z, dir_x, dir_y,
+                                dir_z, max_along, grapple_max_perp, strict_lock_aim, pick);
   }
 
   return found;
