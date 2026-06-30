@@ -87,6 +87,7 @@ struct PrimedGunVrOverlayState
   uint32_t cannon_texture_slot = 0;
   bool cannon_texture_notice = false;
   uint32_t state_confirm_action = 0;
+  uint32_t reset_confirm_action = 0;
   uint32_t weapon_selected_index = 0;
   std::array<float, 3> weapon_panel_position{};
   std::array<float, 4> weapon_panel_orientation{0.0f, 0.0f, 0.0f, 1.0f};
@@ -102,6 +103,7 @@ struct PrimedGunVrOverlayState
   bool primegun_grip_inputs_enabled = true;
   bool primegun_grip_inputs_use_trackpad = false;
   float primegun_trackpad_press_threshold = 0.5f;
+  bool combat_jump_use_primary_button = false;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
   float gun_targeting_radius = 4.0f;

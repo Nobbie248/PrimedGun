@@ -1596,10 +1596,8 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/rot_offset_z"), runtime.rot_offset_z).toFloat();
     runtime.world_scale =
         settings.value(QStringLiteral("primegun/world_scale"), runtime.world_scale).toFloat();
-    runtime.require_trigger =
-        settings.value(QStringLiteral("primegun/require_trigger"), runtime.require_trigger).toBool();
-    runtime.trigger_threshold =
-        settings.value(QStringLiteral("primegun/trigger_threshold"), runtime.trigger_threshold).toFloat();
+    runtime.require_trigger = false;
+    runtime.trigger_threshold = 0.5f;
     runtime.rumble_enabled =
         settings.value(QStringLiteral("primegun/rumble_enabled"), runtime.rumble_enabled).toBool();
     runtime.rumble_intensity =
@@ -1618,6 +1616,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
                        runtime.primegun_trackpad_press_threshold)
             .toFloat();
+    runtime.combat_jump_use_primary_button =
+        settings.value(QStringLiteral("primegun/combat_jump_use_primary_button"),
+                       runtime.combat_jump_use_primary_button)
+            .toBool();
     runtime.gun_targeting_enabled =
         settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
@@ -1727,6 +1729,8 @@ void MainWindow::ConnectStack()
                       runtime.primegun_grip_inputs_use_trackpad);
     settings.setValue(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
                       runtime.primegun_trackpad_press_threshold);
+    settings.setValue(QStringLiteral("primegun/combat_jump_use_primary_button"),
+                      runtime.combat_jump_use_primary_button);
     settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
@@ -2070,6 +2074,9 @@ void MainWindow::ConnectStack()
   auto* vr_overlays_enabled = new QCheckBox(tr("In-headset overlays"), game_tab);
   vr_overlays_enabled->setChecked(runtime->vr_overlays_enabled);
   controller_layout->addWidget(vr_overlays_enabled);
+  auto* combat_jump_use_primary_button = new QCheckBox(tr("Use A button for jump"), game_tab);
+  combat_jump_use_primary_button->setChecked(runtime->combat_jump_use_primary_button);
+  controller_layout->addWidget(combat_jump_use_primary_button);
   auto* rumble_enabled = new QCheckBox(tr("Rumble"), game_tab);
   rumble_enabled->setChecked(runtime->rumble_enabled);
   auto* rumble_hand_mode = new QComboBox(game_tab);
@@ -2229,19 +2236,19 @@ void MainWindow::ConnectStack()
                     [runtime](float v) { runtime->look_yaw_sensitivity = v; });
   controller_layout->addStretch();
 
-  auto* aiming_layout = make_scroll_tab(tr("Aiming"));
-  aiming_layout->addWidget(section_label(tr("Aiming"), game_tab));
-  auto* reset_aiming = new QPushButton(tr("Reset Aiming"), game_tab);
-  aiming_layout->addWidget(reset_aiming);
+  auto* calibration_layout = make_scroll_tab(tr("Calibration"));
+  calibration_layout->addWidget(section_label(tr("Targeting"), game_tab));
+  auto* reset_aiming = new QPushButton(tr("Reset Targeting"), game_tab);
+  calibration_layout->addWidget(reset_aiming);
   auto* targeting_enabled = new QCheckBox(tr("Gun selects lock/scan target"), game_tab);
   targeting_enabled->setChecked(runtime->gun_targeting_enabled);
-  aiming_layout->addWidget(targeting_enabled);
+  calibration_layout->addWidget(targeting_enabled);
   auto* target_distance_spin =
-      add_float_row(aiming_layout, tr("Target distance"), 10.0, 120.0, 1.0,
+      add_float_row(calibration_layout, tr("Target distance"), 10.0, 120.0, 1.0,
                     runtime->gun_targeting_distance,
                     [runtime](float v) { runtime->gun_targeting_distance = v; });
   auto* target_radius_spin =
-      add_float_row(aiming_layout, tr("Target radius"), 0.5, 8.0, 0.1,
+      add_float_row(calibration_layout, tr("Target radius"), 0.5, 8.0, 0.1,
                     runtime->gun_targeting_radius,
                     [runtime](float v) { runtime->gun_targeting_radius = v; });
   auto* visor_helmet_enabled = new QCheckBox(tr("Enable visor helmet"), game_tab);
@@ -2253,10 +2260,9 @@ void MainWindow::ConnectStack()
   visor_helmet_note->setObjectName(QStringLiteral("PrimedGunMuted"));
   visor_helmet_row->addWidget(visor_helmet_note);
   visor_helmet_row->addStretch();
-  aiming_layout->addLayout(visor_helmet_row);
-  aiming_layout->addStretch();
+  calibration_layout->addLayout(visor_helmet_row);
 
-  auto* calibration_layout = make_scroll_tab(tr("Calibration"));
+  separator(calibration_layout);
   calibration_layout->addWidget(section_label(tr("Offset Tuning"), game_tab));
   auto* position_marker_enabled = new QCheckBox(tr("Show floor position marker"), game_tab);
   position_marker_enabled->setChecked(runtime->position_marker_enabled);
@@ -2713,6 +2719,8 @@ void MainWindow::ConnectStack()
     const QSignalBlocker rumble_enabled_blocker{rumble_enabled};
     const QSignalBlocker rumble_hand_mode_blocker{rumble_hand_mode};
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
+    const QSignalBlocker combat_jump_use_primary_button_blocker{
+        combat_jump_use_primary_button};
     const QSignalBlocker primegun_grip_inputs_enabled_blocker{primegun_grip_inputs_enabled};
     const QSignalBlocker primegun_grip_inputs_use_trackpad_blocker{
         primegun_grip_inputs_use_trackpad};
@@ -2750,6 +2758,7 @@ void MainWindow::ConnectStack()
     rumble_enabled->setChecked(runtime->rumble_enabled);
     rumble_hand_mode->setCurrentIndex(std::clamp(runtime->rumble_hand_mode, 0, 2));
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
+    combat_jump_use_primary_button->setChecked(runtime->combat_jump_use_primary_button);
     primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
     primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
     movement_enabled->setChecked(runtime->directional_movement_enabled);
@@ -2798,6 +2807,7 @@ void MainWindow::ConnectStack()
     runtime->rumble_intensity = 0.35f;
     runtime->rumble_hand_mode = 2;
     runtime->xr_dpad_enabled = true;
+    runtime->combat_jump_use_primary_button = false;
     runtime->primegun_grip_inputs_enabled = true;
     runtime->primegun_grip_inputs_use_trackpad = false;
     runtime->primegun_trackpad_press_threshold = 0.5f;
@@ -2854,6 +2864,11 @@ void MainWindow::ConnectStack()
   });
   connect(dpad_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
     runtime->xr_dpad_enabled = checked;
+    apply_runtime();
+  });
+  connect(combat_jump_use_primary_button, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->combat_jump_use_primary_button = checked;
     apply_runtime();
   });
   connect(primegun_grip_inputs_enabled, &QCheckBox::toggled, this,

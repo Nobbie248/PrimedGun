@@ -183,17 +183,24 @@ constexpr u32 UPDATE_SCAN_OBJECT_INDICATORS = 0x80112508u;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS = 0x801122CCu;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL = 0xC0410074u;
 
-constexpr u32 VR_MENU_TAB_COUNT = 7;
-constexpr u32 VR_MENU_CONTROL_TAB = 2;
-constexpr u32 VR_MENU_CANNON_TAB = 5;
-constexpr u32 VR_MENU_STATE_TAB = 6;
-constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 7;
+constexpr u32 VR_MENU_TAB_COUNT = 5;
+constexpr u32 VR_MENU_CONTROL_TAB = 1;
+constexpr u32 VR_MENU_MOVEMENT_TAB = 2;
+constexpr u32 VR_MENU_CANNON_TAB = 3;
+constexpr u32 VR_MENU_STATE_TAB = 4;
+constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 6;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
-constexpr float VR_MENU_ROW_TEXT_Y = 156.0f;
-constexpr float VR_MENU_ROW_STEP_Y = 25.0f;
-constexpr float VR_MENU_ROW_HIT_HALF_HEIGHT = 15.5f;
-constexpr float VR_MENU_STATE_ROW_GAP_Y = 20.0f;
+constexpr float VR_MENU_ROW_TEXT_Y = 146.0f;
+constexpr float VR_MENU_ROW_STEP_Y = 22.0f;
+constexpr float VR_MENU_ROW_HIT_HALF_HEIGHT = 13.0f;
+constexpr float VR_MENU_STATE_ROW_GAP_Y = 18.0f;
 constexpr u64 VR_MENU_STATE_CONFIRM_FRAMES = 360;
+constexpr u64 VR_MENU_RESET_CONFIRM_FRAMES = 360;
+constexpr u32 VR_MENU_RESET_ALL_ACTION = 1;
+constexpr u32 VR_MENU_RESET_TARGETING_ACTION = 2;
+constexpr u32 VR_MENU_RESET_CALIBRATION_ACTION = 3;
+constexpr u32 VR_MENU_RESET_CONTROLLER_ACTION = 4;
+constexpr u32 VR_MENU_RESET_MOVEMENT_ACTION = 5;
 constexpr const char* PRIMEGUN_CANNON_GAME_ID = "GM8E01";
 constexpr const char* PRIMEGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
 constexpr const char* PRIMEGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
@@ -307,6 +314,8 @@ std::atomic_bool s_vr_state_load_requested{false};
 std::atomic_bool s_vr_state_save_requested{false};
 u32 s_vr_state_confirm_action = 0;
 u64 s_vr_state_confirm_until_frame = 0;
+u32 s_vr_reset_confirm_action = 0;
+u64 s_vr_reset_confirm_until_frame = 0;
 u64 s_height_prompt_until_frame = 0;
 u64 s_prompt_gameplay_ready_since_frame = 0;
 u64 s_prompt_first_ready_timeout_frame = 0;
@@ -998,7 +1007,7 @@ bool PlayerIsFirstPersonUnmorphed(const Core::CPUThreadGuard& guard, u32 player)
   {
     u32 movement_state = 0xffffffffu;
     return TryReadU32(guard, player + PLAYER_MOVEMENT_STATE_OFFSET, &movement_state) &&
-           movement_state <= 6;
+           movement_state <= 16;
   }
 
   u8 input_flags = 0;
@@ -3360,7 +3369,8 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
     return;
   }
 
-  if (OrbitLockButtonHeld(guard, ADDRESS.state_manager))
+  const bool scan_active = ScanVisorActive(guard, player);
+  if (!scan_active && OrbitLockButtonHeld(guard, ADDRESS.state_manager))
   {
     s_directional_move_speed = 0.0f;
     return;
@@ -3560,21 +3570,19 @@ u32 VrMenuItemCountForTab(u32 tab)
 {
   switch (tab)
   {
-  case 1:
-    return 8;
+  case 0:
+    return 15;
   case VR_MENU_CONTROL_TAB:
     return s_vr_menu_control_page == 0 ? VR_MENU_CONTROL_FIRST_PAGE_ITEMS + 1 :
-                                         15 - VR_MENU_CONTROL_FIRST_PAGE_ITEMS + 1;
-  case 3:
+                                         14 - VR_MENU_CONTROL_FIRST_PAGE_ITEMS + 1;
+  case VR_MENU_MOVEMENT_TAB:
     return 9;
-  case 4:
-    return 2;
   case VR_MENU_CANNON_TAB:
     return 6;
   case VR_MENU_STATE_TAB:
     return 2;
   default:
-    return 5;
+    return 0;
   }
 }
 
@@ -3612,10 +3620,53 @@ void ClearVrStateConfirmation()
   ++s_vr_menu_generation;
 }
 
+void ClearVrResetConfirmation()
+{
+  if (s_vr_reset_confirm_action == 0)
+    return;
+
+  s_vr_reset_confirm_action = 0;
+  s_vr_reset_confirm_until_frame = 0;
+  ++s_vr_menu_generation;
+}
+
+void ClearVrMenuConfirmations()
+{
+  ClearVrStateConfirmation();
+  ClearVrResetConfirmation();
+}
+
 void RefreshVrStateConfirmation()
 {
   if (s_vr_state_confirm_action != 0 && s_frame_counter >= s_vr_state_confirm_until_frame)
     ClearVrStateConfirmation();
+}
+
+void RefreshVrResetConfirmation()
+{
+  if (s_vr_reset_confirm_action != 0 && s_frame_counter >= s_vr_reset_confirm_until_frame)
+    ClearVrResetConfirmation();
+}
+
+bool ConfirmVrResetAction(u32 action)
+{
+  if (action == 0)
+    return true;
+
+  RefreshVrResetConfirmation();
+  if (s_vr_reset_confirm_action == action)
+  {
+    s_vr_reset_confirm_action = 0;
+    s_vr_reset_confirm_until_frame = 0;
+    ClearVrStateConfirmation();
+    return true;
+  }
+
+  ClearVrStateConfirmation();
+  s_vr_reset_confirm_action = action;
+  s_vr_reset_confirm_until_frame = s_frame_counter + VR_MENU_RESET_CONFIRM_FRAMES;
+  ++s_vr_menu_generation;
+  return false;
 }
 
 int VrMenuControlActualIndex(u32 local_index)
@@ -3628,24 +3679,38 @@ int VrMenuControlActualIndex(u32 local_index)
              static_cast<int>(VR_MENU_CONTROL_FIRST_PAGE_ITEMS + local_index - 1);
 }
 
+u32 VrMenuResetActionForSelection()
+{
+  if (s_vr_menu_tab == 0 && s_vr_menu_selected_index == 4)
+    return VR_MENU_RESET_TARGETING_ACTION;
+  if (s_vr_menu_tab == 0 && s_vr_menu_selected_index == 12)
+    return VR_MENU_RESET_CALIBRATION_ACTION;
+  if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 13)
+  {
+    return VR_MENU_RESET_CONTROLLER_ACTION;
+  }
+  if (s_vr_menu_tab == VR_MENU_MOVEMENT_TAB && s_vr_menu_selected_index == 8)
+    return VR_MENU_RESET_MOVEMENT_ACTION;
+  return 0;
+}
+
 bool VrMenuRowIsNumeric(u32 tab, u32 index)
 {
   switch (tab)
   {
   case 0:
-    return index == 1 || index == 2;
-  case 1:
-    return index <= 5;
+    return index == 1 || index == 2 || (index >= 5 && index <= 10);
   case VR_MENU_CONTROL_TAB:
   {
     if (index == 0)
       return true;
 
     const int actual_index = VrMenuControlActualIndex(index);
-    return actual_index == 2 || actual_index == 5 || actual_index == 8 ||
-           actual_index == 11 || actual_index == 12 || actual_index == 13;
+    return actual_index == 3 || actual_index == 7 || actual_index == 10 ||
+           actual_index == 11 || actual_index == 12;
   }
-  case 3:
+  case VR_MENU_MOVEMENT_TAB:
     return index >= 3 && index <= 7;
   default:
     return false;
@@ -3762,6 +3827,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->primegun_grip_inputs_enabled = true;
   settings->primegun_grip_inputs_use_trackpad = false;
   settings->primegun_trackpad_press_threshold = 0.5f;
+  settings->combat_jump_use_primary_button = false;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -3810,25 +3876,33 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
   const float sign = direction < 0 ? -1.0f : 1.0f;
   switch (s_vr_menu_tab)
   {
-  case 1:
+  case 0:
     switch (s_vr_menu_selected_index)
     {
-    case 0:
-      settings->model_offset_x += sign * 0.01f;
-      break;
     case 1:
-      settings->model_offset_y += sign * 0.01f;
+      settings->gun_targeting_distance =
+          std::clamp(settings->gun_targeting_distance + sign * 1.0f, 1.0f, 200.0f);
       break;
     case 2:
-      settings->model_offset_z += sign * 0.01f;
-      break;
-    case 3:
-      settings->rot_offset_x += sign * 1.0f;
-      break;
-    case 4:
-      settings->rot_offset_y += sign * 1.0f;
+      settings->gun_targeting_radius =
+          std::clamp(settings->gun_targeting_radius + sign * 0.1f, 0.1f, 25.0f);
       break;
     case 5:
+      settings->model_offset_x += sign * 0.01f;
+      break;
+    case 6:
+      settings->model_offset_y += sign * 0.01f;
+      break;
+    case 7:
+      settings->model_offset_z += sign * 0.01f;
+      break;
+    case 8:
+      settings->rot_offset_x += sign * 1.0f;
+      break;
+    case 9:
+      settings->rot_offset_y += sign * 1.0f;
+      break;
+    case 10:
       settings->rot_offset_z += sign * 1.0f;
       break;
     default:
@@ -3846,27 +3920,23 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
 
     switch (VrMenuControlActualIndex(s_vr_menu_selected_index))
     {
-    case 2:
-      settings->trigger_threshold =
-          std::clamp(settings->trigger_threshold + sign * 0.05f, 0.0f, 1.0f);
-      break;
-    case 5:
+    case 3:
       settings->rumble_intensity =
           std::clamp(settings->rumble_intensity + sign * 0.05f, 0.0f, 1.0f);
       break;
-    case 8:
+    case 7:
       settings->primegun_trackpad_press_threshold =
           std::clamp(settings->primegun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
       break;
-    case 11:
+    case 10:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 12:
+    case 11:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 13:
+    case 12:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -3875,7 +3945,7 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
     }
     break;
   }
-  case 3:
+  case VR_MENU_MOVEMENT_TAB:
     switch (s_vr_menu_selected_index)
     {
     case 3:
@@ -3903,21 +3973,16 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
     }
     break;
   default:
-    if (s_vr_menu_tab == 0)
-    {
-      if (s_vr_menu_selected_index == 1)
-        settings->gun_targeting_distance =
-            std::clamp(settings->gun_targeting_distance + sign * 1.0f, 1.0f, 200.0f);
-      else if (s_vr_menu_selected_index == 2)
-        settings->gun_targeting_radius =
-            std::clamp(settings->gun_targeting_radius + sign * 0.1f, 0.1f, 25.0f);
-    }
     break;
   }
 }
 
 void ActivateVrMenuSelection(RuntimeSettings* settings)
 {
+  const u32 reset_action = VrMenuResetActionForSelection();
+  if (reset_action == 0)
+    ClearVrResetConfirmation();
+
   if (s_vr_menu_tab == 0)
   {
     if (s_vr_menu_selected_index == 0)
@@ -3926,26 +3991,51 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->visor_helmet_enabled = !settings->visor_helmet_enabled;
     else if (s_vr_menu_selected_index == 4)
     {
+      if (!ConfirmVrResetAction(reset_action))
+        return;
+
       settings->gun_targeting_enabled = true;
       settings->gun_targeting_distance = 60.0f;
       settings->gun_targeting_radius = 4.0f;
       settings->visor_helmet_enabled = false;
     }
-    return;
-  }
-
-  if (s_vr_menu_tab == 1)
-  {
-    if (s_vr_menu_selected_index == 6)
+    else if (s_vr_menu_selected_index == 11)
       settings->position_marker_enabled = !settings->position_marker_enabled;
-    else if (s_vr_menu_selected_index == 7)
+    else if (s_vr_menu_selected_index == 12)
     {
+      if (!ConfirmVrResetAction(reset_action))
+        return;
+
       settings->model_offset_x = DEFAULT_MODEL_OFFSET_X;
       settings->model_offset_y = DEFAULT_MODEL_OFFSET_Y;
       settings->model_offset_z = DEFAULT_MODEL_OFFSET_Z;
       settings->rot_offset_x = DEFAULT_ROT_OFFSET_X;
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
+    }
+    else if (s_vr_menu_selected_index == 13)
+    {
+      settings->offset_x = 0.0f;
+      settings->offset_y = 0.0f;
+      settings->offset_z = 0.0f;
+      settings->model_offset_x = DEFAULT_MODEL_OFFSET_X;
+      settings->model_offset_y = DEFAULT_MODEL_OFFSET_Y;
+      settings->model_offset_z = DEFAULT_MODEL_OFFSET_Z;
+      settings->rot_offset_x = DEFAULT_ROT_OFFSET_X;
+      settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
+      settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
+    }
+    else if (s_vr_menu_selected_index == 14)
+    {
+      settings->offset_x = 0.0f;
+      settings->offset_y = 0.0f;
+      settings->offset_z = 0.0f;
+      settings->model_offset_x = 0.0f;
+      settings->model_offset_y = -0.300f;
+      settings->model_offset_z = 0.0f;
+      settings->rot_offset_x = 0.0f;
+      settings->rot_offset_y = 20.0f;
+      settings->rot_offset_z = -90.0f;
     }
     return;
   }
@@ -3962,23 +4052,28 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     if (actual_index == 0)
       settings->use_right_hand = !settings->use_right_hand;
     else if (actual_index == 1)
-      settings->require_trigger = !settings->require_trigger;
-    else if (actual_index == 3)
       settings->rumble_enabled = !settings->rumble_enabled;
-    else if (actual_index == 4)
+    else if (actual_index == 2)
       settings->rumble_hand_mode = (std::clamp(settings->rumble_hand_mode, 0, 2) + 1) % 3;
-    else if (actual_index == 6)
+    else if (actual_index == 4)
       settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
-    else if (actual_index == 7)
+    else if (actual_index == 5)
+      settings->combat_jump_use_primary_button = !settings->combat_jump_use_primary_button;
+    else if (actual_index == 6)
       settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
-    else if (actual_index == 9)
+    else if (actual_index == 8)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (actual_index == 14)
+    else if (actual_index == 13)
+    {
+      if (!ConfirmVrResetAction(reset_action))
+        return;
+
       ResetControllerSettings(settings);
+    }
     return;
   }
 
-  if (s_vr_menu_tab == 3)
+  if (s_vr_menu_tab == VR_MENU_MOVEMENT_TAB)
   {
     if (s_vr_menu_selected_index == 0)
       settings->directional_movement_enabled = !settings->directional_movement_enabled;
@@ -3988,36 +4083,13 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->directional_movement_use_hmd_direction =
           !settings->directional_movement_use_hmd_direction;
     else if (s_vr_menu_selected_index == 8)
-      ResetMovementSettings(settings);
-    return;
-  }
+    {
+      if (!ConfirmVrResetAction(reset_action))
+        return;
 
-  if (s_vr_menu_tab == 4)
-  {
-    if (s_vr_menu_selected_index == 0)
-    {
-      settings->offset_x = 0.0f;
-      settings->offset_y = 0.0f;
-      settings->offset_z = 0.0f;
-      settings->model_offset_x = DEFAULT_MODEL_OFFSET_X;
-      settings->model_offset_y = DEFAULT_MODEL_OFFSET_Y;
-      settings->model_offset_z = DEFAULT_MODEL_OFFSET_Z;
-      settings->rot_offset_x = DEFAULT_ROT_OFFSET_X;
-      settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
-      settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
+      ResetMovementSettings(settings);
     }
-    else if (s_vr_menu_selected_index == 1)
-    {
-      settings->offset_x = 0.0f;
-      settings->offset_y = 0.0f;
-      settings->offset_z = 0.0f;
-      settings->model_offset_x = 0.0f;
-      settings->model_offset_y = -0.300f;
-      settings->model_offset_z = 0.0f;
-      settings->rot_offset_x = 0.0f;
-      settings->rot_offset_y = 20.0f;
-      settings->rot_offset_z = -90.0f;
-    }
+    return;
   }
 
   if (s_vr_menu_tab == VR_MENU_CANNON_TAB)
@@ -4062,6 +4134,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
 
 void SaveVrMenuSettingsNotice()
 {
+  ClearVrMenuConfirmations();
   s_vr_settings_save_requested = true;
   s_vr_menu_saved_notice_until_frame = s_frame_counter + 180;
   ++s_vr_menu_generation;
@@ -4070,6 +4143,7 @@ void SaveVrMenuSettingsNotice()
 void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
 {
   RefreshVrStateConfirmation();
+  RefreshVrResetConfirmation();
   const Common::VR::PrimedGunVrOverlayState previous =
       Common::VR::OpenXRInputState::GetPrimedGunOverlay();
   Common::VR::PrimedGunVrOverlayState overlay{};
@@ -4085,6 +4159,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.cannon_texture_slot = s_vr_cannon_texture_slot;
   overlay.cannon_texture_notice = s_frame_counter < s_vr_cannon_texture_notice_until_frame;
   overlay.state_confirm_action = s_vr_state_confirm_action;
+  overlay.reset_confirm_action = s_vr_reset_confirm_action;
   overlay.weapon_panel_visible = settings.vr_overlays_enabled && previous.weapon_panel_visible;
   overlay.weapon_selected_index = previous.weapon_selected_index;
   overlay.weapon_panel_position = previous.weapon_panel_position;
@@ -4099,6 +4174,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.primegun_grip_inputs_enabled = settings.primegun_grip_inputs_enabled;
   overlay.primegun_grip_inputs_use_trackpad = settings.primegun_grip_inputs_use_trackpad;
   overlay.primegun_trackpad_press_threshold = settings.primegun_trackpad_press_threshold;
+  overlay.combat_jump_use_primary_button = settings.combat_jump_use_primary_button;
   overlay.gun_targeting_enabled = settings.gun_targeting_enabled;
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
@@ -4160,7 +4236,7 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
   {
     s_vr_menu_visible = !s_vr_menu_visible;
     if (!s_vr_menu_visible)
-      ClearVrStateConfirmation();
+      ClearVrMenuConfirmations();
     ++s_vr_menu_generation;
   }
   s_last_vr_menu_thumbstick = menu_toggle;
@@ -4204,8 +4280,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
       {
         constexpr float tab_start_x = 22.0f;
-        constexpr float tab_step = 140.0f;
-        constexpr float tab_width = 130.0f;
+        constexpr float tab_step = 196.0f;
+        constexpr float tab_width = 180.0f;
         const int tab = static_cast<int>((texture_x - tab_start_x) / tab_step);
         const float tab_local_x =
             texture_x - (tab_start_x + static_cast<float>(tab) * tab_step);
@@ -4213,7 +4289,7 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
             tab_local_x <= tab_width &&
             s_vr_menu_tab != static_cast<u32>(tab))
         {
-          ClearVrStateConfirmation();
+          ClearVrMenuConfirmations();
           s_vr_menu_tab = static_cast<u32>(tab);
           s_vr_menu_selected_index = 0;
           ++s_vr_menu_generation;
@@ -4225,7 +4301,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
           SaveVrMenuSettingsNotice();
         else if (texture_x >= 300.0f && texture_x <= 520.0f)
         {
-          ResetVrRuntimeSettings(settings);
+          if (ConfirmVrResetAction(VR_MENU_RESET_ALL_ACTION))
+            ResetVrRuntimeSettings(settings);
           ++s_vr_menu_generation;
         }
       }
@@ -5508,6 +5585,8 @@ void ResetNativeRuntime()
   s_vr_cannon_texture_notice_until_frame = 0;
   s_vr_state_confirm_action = 0;
   s_vr_state_confirm_until_frame = 0;
+  s_vr_reset_confirm_action = 0;
+  s_vr_reset_confirm_until_frame = 0;
   s_height_prompt_until_frame = 0;
   s_prompt_gameplay_ready_since_frame = 0;
   s_prompt_first_ready_timeout_frame = 0;
@@ -5581,8 +5660,8 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
   s_settings.rot_offset_z =
       ClampFinite(s_settings.rot_offset_z, defaults.rot_offset_z, -360.0f, 360.0f);
   s_settings.world_scale = ClampFinite(s_settings.world_scale, defaults.world_scale, 0.1f, 10.0f);
-  s_settings.trigger_threshold =
-      ClampFinite(s_settings.trigger_threshold, defaults.trigger_threshold, 0.0f, 1.0f);
+  s_settings.require_trigger = false;
+  s_settings.trigger_threshold = defaults.trigger_threshold;
   s_settings.primegun_trackpad_press_threshold =
       ClampFinite(s_settings.primegun_trackpad_press_threshold,
                   defaults.primegun_trackpad_press_threshold, 0.05f, 1.0f);

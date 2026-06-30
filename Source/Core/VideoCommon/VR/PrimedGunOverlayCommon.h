@@ -36,12 +36,14 @@ inline std::array<uint8_t, 7> Glyph(char ch)
   case 'G': return {0x0F, 0x10, 0x10, 0x13, 0x11, 0x11, 0x0F};
   case 'H': return {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
   case 'I': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F};
+  case 'J': return {0x01, 0x01, 0x01, 0x01, 0x11, 0x11, 0x0E};
   case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
   case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F};
   case 'M': return {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11};
   case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
   case 'O': return {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E};
   case 'P': return {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10};
+  case 'Q': return {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D};
   case 'R': return {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11};
   case 'S': return {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E};
   case 'T': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
@@ -251,12 +253,23 @@ struct MenuRow
   std::string value;
 };
 
+constexpr uint32_t RESET_ALL_ACTION = 1;
+constexpr uint32_t RESET_TARGETING_ACTION = 2;
+constexpr uint32_t RESET_CALIBRATION_ACTION = 3;
+constexpr uint32_t RESET_CONTROLLER_ACTION = 4;
+constexpr uint32_t RESET_MOVEMENT_ACTION = 5;
+
+inline std::string ConfirmText(const Common::VR::PrimedGunVrOverlayState& s, uint32_t action)
+{
+  return s.reset_confirm_action == action ? "ARE YOU SURE?" : "PRESS";
+}
+
 inline int ControlMenuActualIndex(uint32_t page, int local_index)
 {
   if (local_index <= 0)
     return -1;
 
-  constexpr int first_page_items = 7;
+  constexpr int first_page_items = 6;
   return page == 0 ? local_index - 1 : first_page_items + local_index - 1;
 }
 
@@ -265,20 +278,18 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
   switch (s.tab)
   {
   case 0:
-    return index == 1 || index == 2;
-  case 1:
-    return index >= 0 && index <= 5;
+    return index == 1 || index == 2 || (index >= 5 && index <= 10);
   case 2:
+    return index >= 3 && index <= 7;
+  case 1:
   {
     if (index == 0)
       return true;
 
     const int actual_index = ControlMenuActualIndex(s.control_page, index);
-    return actual_index == 2 || actual_index == 5 || actual_index == 8 ||
-           actual_index == 11 || actual_index == 12 || actual_index == 13;
+    return actual_index == 3 || actual_index == 7 || actual_index == 10 ||
+           actual_index == 11 || actual_index == 12;
   }
-  case 3:
-    return index >= 3 && index <= 7;
   default:
     return false;
   }
@@ -299,9 +310,9 @@ inline std::string RumbleHandModeText(int mode)
 
 inline int MenuRowTextY(const Common::VR::PrimedGunVrOverlayState& s, int index)
 {
-  int y = 156 + index * 25;
-  if (s.tab == 6 && index >= 1)
-    y += 20;
+  int y = 146 + index * 22;
+  if (s.tab == 4 && index >= 1)
+    y += 18;
   return y;
 }
 
@@ -309,16 +320,23 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
 {
   switch (s.tab)
   {
-  case 1:
-    return {{"POS LEFT/RIGHT", FloatText(s.model_offset_x, 3)},
-            {"POS FORWARD/BACK", FloatText(s.model_offset_y, 3)},
-            {"POS UP/DOWN", FloatText(s.model_offset_z, 3)},
-            {"ROT PITCH", FloatText(s.rot_offset_x, 1)},
-            {"ROT YAW", FloatText(s.rot_offset_y, 1)},
-            {"ROT ROLL", FloatText(s.rot_offset_z, 1)},
+  case 0:
+    return {{"TARGETING", s.gun_targeting_enabled ? "ON" : "OFF"},
+            {"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)},
+            {"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)},
+            {"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"},
+            {"RESET TARGETING", ConfirmText(s, RESET_TARGETING_ACTION)},
+            {"POSITION LEFT/RIGHT", FloatText(s.model_offset_x, 3)},
+            {"POSITION FORWARD/BACK", FloatText(s.model_offset_y, 3)},
+            {"POSITION UP/DOWN", FloatText(s.model_offset_z, 3)},
+            {"ROTATION PITCH", FloatText(s.rot_offset_x, 1)},
+            {"ROTATION YAW", FloatText(s.rot_offset_y, 1)},
+            {"ROTATION ROLL", FloatText(s.rot_offset_z, 1)},
             {"FLOOR POSITION MARKER", s.position_marker_visible ? "ON" : "OFF"},
-            {"RESET CALIBRATION", "PRESS"}};
-  case 2:
+            {"RESET CALIBRATION", ConfirmText(s, RESET_CALIBRATION_ACTION)},
+            {"DEFAULT ARM PRESET", "APPLY"},
+            {"SAMUS ARM PRESET", "APPLY"}};
+  case 1:
   {
     std::vector<MenuRow> rows;
     rows.push_back({"PAGE", s.control_page == 0 ? "1/2" : "2/2"});
@@ -326,12 +344,11 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
     if (s.control_page == 0)
     {
       rows.push_back({"RIGHT HAND", s.use_right_hand ? "ON" : "OFF"});
-      rows.push_back({"REQUIRE R TRIGGER", s.require_trigger ? "ON" : "OFF"});
-      rows.push_back({"R TRIGGER", FloatText(s.trigger_threshold, 2)});
       rows.push_back({"RUMBLE", s.rumble_enabled ? "ON" : "OFF"});
       rows.push_back({"RUMBLE TARGET", RumbleHandModeText(s.rumble_hand_mode)});
       rows.push_back({"RUMBLE INTENSITY", FloatText(s.rumble_intensity, 2)});
       rows.push_back({"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"});
+      rows.push_back({"A BUTTON JUMP", s.combat_jump_use_primary_button ? "ON" : "OFF"});
     }
     else
     {
@@ -339,28 +356,27 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
           {"GRIP INPUT SOURCE", s.primegun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
       rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)});
       rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
-      rows.push_back({"D-PAD ENABLED", s.xr_dpad_enabled ? "ON" : "OFF"});
+      rows.push_back({"DIRECTION PAD", s.xr_dpad_enabled ? "ON" : "OFF"});
       rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
       rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
       rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});
-      rows.push_back({"RESET CONTROLLER", "PRESS"});
+      rows.push_back({"RESET CONTROLLER", ConfirmText(s, RESET_CONTROLLER_ACTION)});
     }
 
     return rows;
   }
-  case 3:
+  case 2:
     return {{"LEFT STICK STRAFE", s.directional_movement_enabled ? "ON" : "OFF"},
             {"MOVEMENT STICK", s.directional_movement_use_right_stick ? "RIGHT" : "LEFT"},
-            {"MOVE DIRECTION", s.directional_movement_use_hmd_direction ? "HMD" : "CONTROLLER"},
-            {"MOVE DEADZONE", FloatText(s.directional_movement_deadzone, 2)},
-            {"MOVE SPEED", FloatText(s.directional_movement_speed, 1)},
-            {"MOVE ACCEL", FloatText(s.directional_movement_accel, 1)},
-            {"AIR ACCEL", FloatText(s.directional_movement_air_accel, 1)},
+            {"MOVEMENT DIRECTION",
+             s.directional_movement_use_hmd_direction ? "HEADSET" : "CONTROLLER"},
+            {"MOVEMENT DEADZONE", FloatText(s.directional_movement_deadzone, 2)},
+            {"MOVEMENT SPEED", FloatText(s.directional_movement_speed, 1)},
+            {"MOVEMENT ACCELERATION", FloatText(s.directional_movement_accel, 1)},
+            {"AIR ACCELERATION", FloatText(s.directional_movement_air_accel, 1)},
             {"LOOK YAW SENSITIVITY", FloatText(s.look_yaw_sensitivity, 2)},
-            {"RESET MOVEMENT", "PRESS"}};
-  case 4:
-    return {{"DEFAULT ARM PRESET", "APPLY"}, {"SAMUS ARM PRESET", "APPLY"}};
-  case 5:
+            {"RESET MOVEMENT", ConfirmText(s, RESET_MOVEMENT_ACTION)}};
+  case 3:
   {
     auto slot_status = [&](uint32_t slot) {
       return s.cannon_texture_slot == slot ? std::string("SELECTED") : std::string("SELECT");
@@ -369,15 +385,11 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"SLOT 2", slot_status(2)}, {"SLOT 3", slot_status(3)},
             {"SLOT 4", slot_status(4)}, {"CUSTOM", slot_status(5)}};
   }
-  case 6:
+  case 4:
     return {{"LOAD STATE", s.state_confirm_action == 1 ? "ARE YOU SURE?" : "PRESS"},
             {"SAVE STATE", s.state_confirm_action == 2 ? "ARE YOU SURE?" : "PRESS"}};
   default:
-    return {{"TARGETING", s.gun_targeting_enabled ? "ON" : "OFF"},
-            {"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)},
-            {"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)},
-            {"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"},
-            {"RESET TARGETING", "PRESS"}};
+    return {};
   }
 }
 
@@ -412,10 +424,9 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   if (s.saved_notice)
     DrawText(pixels, width, height, "SETTINGS SAVED", 760, 34, 2, 0xFFFFE6B8u);
 
-  constexpr const char* tabs[] = {"AIMING",  "CALIB",   "CONTROL", "MOVE",
-                                  "PRESETS", "TEXTURE", "STATE"};
-  constexpr int tab_width = 130;
-  constexpr int tab_step = 140;
+  constexpr const char* tabs[] = {"CALIBRATION", "CONTROL", "MOVEMENT", "TEXTURES", "STATES"};
+  constexpr int tab_width = 180;
+  constexpr int tab_step = 196;
   for (int i = 0; i < static_cast<int>(std::size(tabs)); ++i)
   {
     const int x = 22 + i * tab_step;
@@ -433,7 +444,8 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
              0xFFFFE6B8u);
   };
   draw_button("SAVE SETTINGS", 52, 108, 220);
-  draw_button("RESET ALL", 300, 108, 220);
+  draw_button(s.reset_confirm_action == RESET_ALL_ACTION ? "ARE YOU SURE?" : "RESET ALL", 300,
+              108, 220);
 
   const auto rows = BuildMenuRows(s);
   const int row_x = 52;
@@ -442,15 +454,15 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   {
     const int y = MenuRowTextY(s, i);
     const bool selected = i == static_cast<int>(s.selected_index);
-    FillRect(pixels, width, height, row_x, y - 9, row_w, 31,
+    FillRect(pixels, width, height, row_x, y - 8, row_w, 24,
              selected ? 0xE04A2C12u : 0x70201810u);
-    FillRect(pixels, width, height, row_x, y - 9, 6, 31,
+    FillRect(pixels, width, height, row_x, y - 8, 6, 24,
              selected ? 0xFFFFB030u : 0x80FFB030u);
     DrawText(pixels, width, height, rows[i].label, row_x + 16, y, 2,
              selected ? 0xFFFFE6B8u : 0xFFD8C0A0u);
     const int value_x = row_x + row_w - 190;
     const bool numeric = MenuRowIsNumeric(s, i);
-    FillRect(pixels, width, height, value_x, y - 5, 170, 23,
+    FillRect(pixels, width, height, value_x, y - 4, 170, 20,
              selected ? 0xD030180Cu : 0x9030180Cu);
     if (numeric)
     {
