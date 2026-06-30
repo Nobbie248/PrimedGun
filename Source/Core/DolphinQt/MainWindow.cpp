@@ -766,8 +766,8 @@ void PrimedGunDumpMem1(QWidget* parent)
     for (const u32 address :
          {0x8000E548u, 0x80041A8Cu, 0x8000E7B4u, 0x8000E808u, 0x8000E83Cu,
           0x8000FA50u, 0x800BD808u, 0x800BE25Cu, 0x80112508u, 0x801122CCu,
-          0x800E0434u, 0x801B9070u, 0x800243CCu, 0x80024414u, 0x80024450u,
-          0x8002448Cu, 0x800244C8u, 0x80024504u})
+          0x800E0434u, 0x801B9070u, 0x8018C950u, 0x8018C988u, 0x800243CCu,
+          0x80024414u, 0x80024450u, 0x8002448Cu, 0x800244C8u, 0x80024504u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
       context += fmt::format("{:08X}={}\n", address, format_u32(value));
