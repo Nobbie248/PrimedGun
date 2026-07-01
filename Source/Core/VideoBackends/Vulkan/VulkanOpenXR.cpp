@@ -93,6 +93,16 @@ bool PrimedGunOverlayFormatIsBgra(VkFormat format)
   return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
 }
 
+bool UseIntelOpenXRCompatibility()
+{
+  if (!g_vulkan_context)
+    return false;
+
+  const auto& info = g_vulkan_context->GetDeviceInfo();
+  const std::string device_name = info.deviceName;
+  return info.vendorID == 0x8086 || device_name.find("Intel") != std::string::npos;
+}
+
 std::vector<uint32_t> ConvertPrimedGunOverlayPixelsForVkFormat(const uint32_t* pixels,
                                                               size_t pixel_count,
                                                               VkFormat format)
@@ -255,8 +265,25 @@ static bool SelectSwapchainFormat(XrSession session, int64_t* out_format)
       VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
       VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
 #endif
+  static constexpr std::array<VkFormat, 6> intel_preferred_formats = {
+      VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
+      VK_FORMAT_R8G8B8A8_SRGB,            VK_FORMAT_B8G8R8A8_SRGB,
+      VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
 
-  for (const VkFormat preferred : preferred_formats)
+  const bool intel_compatibility = UseIntelOpenXRCompatibility();
+  if (intel_compatibility)
+  {
+    const auto& info = g_vulkan_context->GetDeviceInfo();
+    INFO_LOG_FMT(VIDEO,
+                 "OpenXR Vulkan: Intel compatibility mode enabled for '{}' vendor {:#06x}; "
+                 "preferring plain UNORM swapchains.",
+                 info.deviceName, info.vendorID);
+  }
+
+  const auto& selected_preferred_formats =
+      intel_compatibility ? intel_preferred_formats : preferred_formats;
+
+  for (const VkFormat preferred : selected_preferred_formats)
   {
     const int64_t wanted = static_cast<int64_t>(preferred);
     if (std::find(runtime_formats.begin(), runtime_formats.end(), wanted) != runtime_formats.end())

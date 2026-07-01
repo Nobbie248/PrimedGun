@@ -17,6 +17,11 @@
 
 namespace VR::D3D11OpenXR
 {
+namespace
+{
+bool s_intel_compatibility_mode = false;
+}
+
 bool QueryGraphicsRequirements(XrInstance instance, XrSystemId system_id,
                                XrGraphicsRequirementsD3D11KHR* requirements)
 {
@@ -65,6 +70,28 @@ bool CreateSessionFromRequirements(XrInstance instance, XrSystemId system_id,
   return true;
 }
 
+void SetIntelCompatibilityMode(bool enabled)
+{
+  s_intel_compatibility_mode = enabled;
+  if (enabled)
+  {
+    INFO_LOG_FMT(VIDEO,
+                 "OpenXR D3D11: Intel compatibility mode enabled; preferring plain UNORM "
+                 "swapchains.");
+  }
+}
+
+bool IsIntelCompatibilityModeEnabled()
+{
+  return s_intel_compatibility_mode;
+}
+
+bool IsSRGBSwapchainFormat(int64_t format)
+{
+  return format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+         format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+}
+
 bool SelectSwapchainFormat(XrSession session, int64_t* format)
 {
   uint32_t count = 0;
@@ -85,9 +112,15 @@ bool SelectSwapchainFormat(XrSession session, int64_t* format)
     return false;
   }
 
-  constexpr std::array<int64_t, 4> preferred_formats = {
+  constexpr std::array<int64_t, 4> standard_preferred_formats = {
       DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
       DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
+  constexpr std::array<int64_t, 4> intel_preferred_formats = {
+      DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM,
+      DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB};
+
+  const auto& preferred_formats =
+      s_intel_compatibility_mode ? intel_preferred_formats : standard_preferred_formats;
 
   for (const int64_t preferred : preferred_formats)
   {
@@ -96,12 +129,18 @@ bool SelectSwapchainFormat(XrSession session, int64_t* format)
       if (available == preferred)
       {
         *format = preferred;
+        INFO_LOG_FMT(VIDEO, "OpenXR D3D11: Selected swapchain format {}{}.",
+                     static_cast<long long>(*format),
+                     s_intel_compatibility_mode ? " (Intel compatibility)" : "");
         return true;
       }
     }
   }
 
   *format = formats.front();
+  WARN_LOG_FMT(VIDEO, "OpenXR D3D11: Falling back to runtime swapchain format {}{}.",
+               static_cast<long long>(*format),
+               s_intel_compatibility_mode ? " (Intel compatibility)" : "");
   return true;
 }
 }  // namespace VR::D3D11OpenXR

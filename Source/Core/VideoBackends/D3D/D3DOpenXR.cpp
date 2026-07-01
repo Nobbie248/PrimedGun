@@ -35,6 +35,39 @@ namespace DX11
 {
 std::unique_ptr<D3DOpenXR> g_openxr_d3d;
 
+namespace
+{
+std::string NarrowAdapterDescription(const WCHAR* text)
+{
+  std::string out;
+  for (size_t i = 0; text[i] != L'\0' && i < 127; ++i)
+    out.push_back(text[i] >= 0 && text[i] <= 0x7f ? static_cast<char>(text[i]) : '?');
+  return out;
+}
+
+bool GetD3DAdapterDesc(DXGI_ADAPTER_DESC* out_desc)
+{
+  if (!D3D::device || !out_desc)
+    return false;
+
+  ComPtr<IDXGIDevice> dxgi_device;
+  if (FAILED(D3D::device.As(&dxgi_device)))
+    return false;
+
+  ComPtr<IDXGIAdapter> adapter;
+  if (FAILED(dxgi_device->GetAdapter(&adapter)) || !adapter)
+    return false;
+
+  return SUCCEEDED(adapter->GetDesc(out_desc));
+}
+
+bool IsIntelAdapter(const DXGI_ADAPTER_DESC& desc)
+{
+  return desc.VendorId == 0x8086 ||
+         NarrowAdapterDescription(desc.Description).find("Intel") != std::string::npos;
+}
+}  // namespace
+
 D3DOpenXR::D3DOpenXR() = default;
 
 D3DOpenXR::~D3DOpenXR()
@@ -98,6 +131,8 @@ bool D3DOpenXR::Initialize()
 
 void D3DOpenXR::Shutdown()
 {
+  VR::D3D11OpenXR::SetIntelCompatibilityMode(false);
+
   // Clear swapchain pointer before destroying swapchains so no dangling use occurs.
   if (VR::g_openxr)
     VR::g_openxr->SetSwapchain(nullptr);
@@ -124,6 +159,33 @@ bool D3DOpenXR::CreateSessionD3D11()
                "min feature level {:#x}",
                requirements.adapterLuid.HighPart, requirements.adapterLuid.LowPart,
                static_cast<int>(requirements.minFeatureLevel));
+
+  DXGI_ADAPTER_DESC adapter_desc{};
+  if (GetD3DAdapterDesc(&adapter_desc))
+  {
+    const std::string adapter_name = NarrowAdapterDescription(adapter_desc.Description);
+    const bool luid_matches =
+        adapter_desc.AdapterLuid.HighPart == requirements.adapterLuid.HighPart &&
+        adapter_desc.AdapterLuid.LowPart == requirements.adapterLuid.LowPart;
+    INFO_LOG_FMT(VIDEO,
+                 "OpenXR D3D11: Dolphin adapter '{}' vendor {:#06x} LUID {:#010x}{:08x} "
+                 "({}).",
+                 adapter_name, adapter_desc.VendorId, adapter_desc.AdapterLuid.HighPart,
+                 adapter_desc.AdapterLuid.LowPart,
+                 luid_matches ? "matches OpenXR runtime" : "does not match OpenXR runtime");
+    if (!luid_matches)
+    {
+      WARN_LOG_FMT(VIDEO,
+                   "OpenXR D3D11: Adapter mismatch may cause black frames on some runtimes.");
+    }
+
+    VR::D3D11OpenXR::SetIntelCompatibilityMode(IsIntelAdapter(adapter_desc));
+  }
+  else
+  {
+    WARN_LOG_FMT(VIDEO, "OpenXR D3D11: Could not query Dolphin D3D adapter.");
+    VR::D3D11OpenXR::SetIntelCompatibilityMode(false);
+  }
 
   XrSession session = XR_NULL_HANDLE;
   if (!VR::D3D11OpenXR::CreateSessionFromRequirements(VR::g_openxr->GetInstance(),
@@ -167,8 +229,12 @@ bool D3DOpenXR::CreateSwapchains()
     // decodes correctly) while creating a UNORM RTV on the underlying texture, so
     // BlitFromTexture writes raw sRGB-encoded bytes without a double gamma encode.
     // With this flag the runtime must back the texture with a DXGI _TYPELESS format.
-    info.usageFlags =
-        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+    info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    if (!VR::D3D11OpenXR::IsIntelCompatibilityModeEnabled() &&
+        VR::D3D11OpenXR::IsSRGBSwapchainFormat(swapchain_format))
+    {
+      info.usageFlags |= XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+    }
 
     XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
     if (XR_FAILED(result))
