@@ -51,6 +51,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <cstring>
 #include <future>
 #include <functional>
 #include <iterator>
@@ -755,19 +756,139 @@ void PrimedGunDumpMem1(QWidget* parent)
 
       return *(begin + offset);
     };
+    const auto read_mem1_f32 = [&read_mem1_u32](u32 address) -> std::optional<float> {
+      const std::optional<u32> word = read_mem1_u32(address);
+      if (!word)
+        return std::nullopt;
+
+      float value = 0.0f;
+      const u32 bits = *word;
+      std::memcpy(&value, &bits, sizeof(value));
+      return value;
+    };
     const auto format_u32 = [](std::optional<u32> value) {
       return value ? fmt::format("{:08X}", *value) : std::string{"unreadable"};
     };
     const auto format_u8 = [](std::optional<u8> value) {
       return value ? fmt::format("{:02X}", *value) : std::string{"unreadable"};
     };
+    const auto format_f32 = [](std::optional<float> value) {
+      return value ? fmt::format("{:.6f}", *value) : std::string{"unreadable"};
+    };
+    const auto ppc_branch = [](u32 from, u32 to) {
+      const s32 offset = static_cast<s32>(to - from);
+      return 0x48000000u | (static_cast<u32>(offset) & 0x03FFFFFCu);
+    };
+    const auto append_words = [&](const char* label, u32 base, int count) {
+      context += fmt::format("{} base={:08X}", label, base);
+      for (int i = 0; i < count; ++i)
+      {
+        const u32 address = base + static_cast<u32>(i * 4);
+        context += fmt::format(" +{:02X}={}", i * 4, format_u32(read_mem1_u32(address)));
+      }
+      context += "\n";
+    };
+    const auto append_transform = [&](const char* label, std::optional<u32> transform) {
+      context += fmt::format("{}={}\n", label, format_u32(transform));
+      if (!transform || *transform < 0x80000000u)
+        return;
+
+      for (u32 row = 0; row < 3; ++row)
+      {
+        const u32 base = *transform + row * 0x10u;
+        context += fmt::format(
+            "{} row{} raw={} {} {} {} f32={} {} {} {}\n", label, row,
+            format_u32(read_mem1_u32(base + 0x00u)), format_u32(read_mem1_u32(base + 0x04u)),
+            format_u32(read_mem1_u32(base + 0x08u)), format_u32(read_mem1_u32(base + 0x0Cu)),
+            format_f32(read_mem1_f32(base + 0x00u)), format_f32(read_mem1_f32(base + 0x04u)),
+            format_f32(read_mem1_f32(base + 0x08u)), format_f32(read_mem1_f32(base + 0x0Cu)));
+      }
+    };
+    const auto append_branch_watch = [&](const char* label, u32 site, u32 original, u32 cave) {
+      const u32 branch = ppc_branch(site, cave);
+      const std::optional<u32> actual = read_mem1_u32(site);
+      std::string status = "unreadable";
+      if (actual)
+      {
+        if (*actual == original)
+          status = "original";
+        else if (*actual == branch)
+          status = "branch-installed";
+        else
+          status = "changed";
+      }
+      context += fmt::format("{} site={:08X} actual={} original={:08X} branch={:08X} "
+                             "cave={:08X} status={}\n",
+                             label, site, format_u32(actual), original, branch, cave, status);
+    };
+    const auto append_code_window = [&](const char* label, u32 center, int before_words,
+                                        int after_words) {
+      if (center < 0x80000000u || center > 0x817FFFFFu)
+      {
+        context += fmt::format("{} center={:08X} outside_mem1\n", label, center);
+        return;
+      }
+
+      const u32 aligned = center & ~3u;
+      const u32 start = aligned - static_cast<u32>(std::max(before_words, 0) * 4);
+      const u32 end = aligned + static_cast<u32>(std::max(after_words, 0) * 4);
+      context += fmt::format("{} center={:08X} range={:08X}-{:08X}\n", label, center, start, end);
+      for (u32 address = start; address <= end; address += 4u)
+      {
+        const std::optional<u32> value = read_mem1_u32(address);
+        context += fmt::format("{}{:08X}={}", address == aligned ? ">" : " ", address,
+                               format_u32(value));
+        if (((address - start) / 4u % 4u) == 3u || address == end)
+          context += "\n";
+        else
+          context += " ";
+      }
+    };
+    const auto append_vtable = [&](const char* label, std::optional<u32> vtable, int entries) {
+      context += fmt::format("{}={}\n", label, format_u32(vtable));
+      if (!vtable || *vtable < 0x80000000u)
+        return;
+
+      for (int i = 0; i < entries; ++i)
+      {
+        const u32 entry_address = *vtable + static_cast<u32>(i * 4);
+        const std::optional<u32> function = read_mem1_u32(entry_address);
+        context += fmt::format("{}[{:02}]@{:08X}={}\n", label, i, entry_address,
+                               format_u32(function));
+        if (i < 6 && function && *function >= 0x80000000u)
+        {
+          const std::string code_label = fmt::format("{}[{:02}]code", label, i);
+          append_code_window(code_label.c_str(), *function, 0, 7);
+        }
+      }
+    };
+    const auto append_object_deep = [&](const char* label, std::optional<u32> object) {
+      context += fmt::format("{}={}\n", label, format_u32(object));
+      if (!object || *object < 0x80000000u)
+        return;
+
+      const std::optional<u32> vtable = read_mem1_u32(*object);
+      append_words(fmt::format("{}+000", label).c_str(), *object, 32);
+      append_words(fmt::format("{}+080", label).c_str(), *object + 0x80u, 24);
+      append_transform(fmt::format("{}Transform+34", label).c_str(), *object + 0x34u);
+      append_vtable(fmt::format("{}VTable", label).c_str(), vtable, 16);
+    };
+
+    context += "\nCPU path code windows\n";
+    append_code_window("PCWindow", ppc_state.pc, 8, 12);
+    append_code_window("NPCWindow", ppc_state.npc, 4, 8);
+    append_code_window("LRWindow", ppc_state.spr[SPR_LR], 8, 12);
+    append_code_window("CTRWindow", ppc_state.spr[SPR_CTR], 4, 8);
+    append_code_window("SRR0Window", ppc_state.spr[SPR_SRR0], 8, 12);
 
     context += "\nPatch sites\n";
     for (const u32 address :
-         {0x8000E548u, 0x80041A8Cu, 0x8000E7B4u, 0x8000E808u, 0x8000E83Cu,
+         {0x8000A968u, 0x8000A9B4u, 0x8000E548u, 0x80041A8Cu, 0x8000E7B4u,
+          0x8000E808u, 0x8000E83Cu,
           0x8000FA50u, 0x800BD808u, 0x800BE25Cu, 0x80112508u, 0x801122CCu,
-          0x800E0434u, 0x801B9070u, 0x8018C950u, 0x8018C988u, 0x800243CCu,
-          0x80024414u, 0x80024450u, 0x8002448Cu, 0x800244C8u, 0x80024504u})
+          0x800E0434u, 0x801B9070u, 0x800830A0u, 0x8026529Cu, 0x80345200u,
+          0x8018C950u, 0x8018C988u, 0x800243CCu, 0x80024414u, 0x80024450u,
+          0x8002448Cu, 0x800244C8u, 0x80024504u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
       context += fmt::format("{:08X}={}\n", address, format_u32(value));
@@ -778,18 +899,47 @@ void PrimedGunDumpMem1(QWidget* parent)
          {0x80001C00u, 0x80001C80u, 0x80001D00u, 0x80001D40u, 0x80001D80u,
           0x80001DC0u, 0x80001E00u, 0x80001E80u, 0x80001F00u, 0x80001FA0u,
           0x80002000u, 0x80002180u, 0x80002200u, 0x80002280u, 0x80002300u,
-          0x800023A0u, 0x80002400u, 0x80002620u, 0x80002660u, 0x800026D0u})
+          0x800023A0u, 0x80002400u, 0x80002620u, 0x80002660u, 0x800026D0u,
+          0x80002740u, 0x80002780u})
     {
       const std::optional<u32> value = read_mem1_u32(address);
       context += fmt::format("{:08X}={}\n", address, format_u32(value));
     }
 
+    context += "\nPPC/ASM watchdog\n";
+    append_branch_watch("CameraReturnLegacyUnsafe", 0x8000A9B4u, 0x80010054u, 0x80002280u);
+    append_branch_watch("FirstPersonPitchLoad", 0x8000E548u, 0xC3FE03ECu, 0x80001C00u);
+    append_branch_watch("CombatPitch0", 0x8000E7B4u, 0xEC21E828u, 0x80001D40u);
+    append_branch_watch("CombatPitch1", 0x8000E808u, 0xEC21E828u, 0x80001D80u);
+    append_branch_watch("CombatPitch2", 0x8000E83Cu, 0xEC21E828u, 0x80001DC0u);
+    append_branch_watch("CombatElevationPitch", 0x8000FA50u, 0xD01D01C0u, 0x80001E00u);
+    append_branch_watch("ScanIndicatorViewBasis", 0x801122CCu, 0xC0410074u, 0x80002200u);
+    append_branch_watch("BallCameraLevel", 0x800830A0u, 0x387F0034u, 0x80002740u);
+    append_branch_watch("InterpolationCameraLevel", 0x8026529Cu, 0x887E00E4u, 0x80002780u);
+    append_words("FirstPersonPitchCave", 0x80001C00u, 8);
+    append_words("CombatPitchCave0", 0x80001D40u, 8);
+    append_words("CombatPitchCave1", 0x80001D80u, 8);
+    append_words("CombatPitchCave2", 0x80001DC0u, 8);
+    append_words("CombatElevationPitchCave", 0x80001E00u, 12);
+    append_words("ScanIndicatorViewBasisCave", 0x80002200u, 8);
+    append_words("DisableFrustumCullingCave", 0x80002280u, 10);
+    append_words("BallCameraLevelCave", 0x80002740u, 16);
+    append_words("InterpolationCameraLevelCave", 0x80002780u, 20);
+
     constexpr u32 state_manager = 0x8045A1A8u;
     constexpr u32 player_offset = 0x84Cu;
+    constexpr u32 camera_manager_offset = 0x86Cu;
+    constexpr u32 object_list_offset = 0x810u;
+    constexpr u32 transform_offset = 0x34u;
     const std::optional<u32> player = read_mem1_u32(state_manager + player_offset);
 
     context += "\nState snapshot\n";
     context += fmt::format("StateManagerPlayer={}\n", format_u32(player));
+    const std::optional<u32> camera_manager =
+        read_mem1_u32(state_manager + camera_manager_offset);
+    const std::optional<u32> object_list = read_mem1_u32(state_manager + object_list_offset);
+    context += fmt::format("StateManagerCameraManager={}\n", format_u32(camera_manager));
+    context += fmt::format("StateManagerObjectList={}\n", format_u32(object_list));
     context += fmt::format("PlayerState={}\n", format_u32(read_mem1_u32(state_manager + 0x8B8u)));
     context += fmt::format("GpGameState={}\n", format_u32(read_mem1_u32(0x805A8C40u)));
     context += fmt::format("AramActiveDmasHead={}\n", format_u32(read_mem1_u32(0x805A679Cu + 4u)));
@@ -812,11 +962,84 @@ void PrimedGunDumpMem1(QWidget* parent)
       context += fmt::format("PlayerInputFlags={}\n", format_u8(read_mem1_u8(*player + 0x9C6u)));
     }
 
+    context += "\nCamera snapshot\n";
+    std::optional<u32> camera_uid_word;
+    std::optional<u32> active_camera;
+    std::optional<u32> active_camera_transform;
+    if (camera_manager && *camera_manager >= 0x80000000u)
+      camera_uid_word = read_mem1_u32(*camera_manager);
+    if (camera_uid_word && object_list && *object_list >= 0x80000000u)
+    {
+      const u32 camera_uid = (*camera_uid_word >> 16) & 0xffffu;
+      if (camera_uid != 0xffffu)
+        active_camera = read_mem1_u32(*object_list + ((camera_uid & 0x03ffu) << 3) + 4u);
+    }
+    if (active_camera && *active_camera >= 0x80000000u)
+      active_camera_transform = *active_camera + transform_offset;
+
+    context += fmt::format("CameraUidWord={}\n", format_u32(camera_uid_word));
+    context += fmt::format("ActiveCameraObject={}\n", format_u32(active_camera));
+    if (camera_uid_word && object_list && *object_list >= 0x80000000u)
+    {
+      const u32 camera_uid = (*camera_uid_word >> 16) & 0xffffu;
+      if (camera_uid != 0xffffu)
+      {
+        append_words("ActiveCameraObjectListEntry",
+                     *object_list + ((camera_uid & 0x03ffu) << 3), 2);
+      }
+    }
+    append_transform("ActiveCameraTransform", active_camera_transform);
+    if (camera_manager && *camera_manager >= 0x80000000u)
+    {
+      append_words("CameraManager+000", *camera_manager, 12);
+      append_words("CameraManager+080", *camera_manager + 0x80u, 12);
+      for (const u32 slot_offset : {0x10u, 0x80u, 0x84u, 0x88u, 0x8Cu, 0x90u})
+      {
+        const std::optional<u32> candidate = read_mem1_u32(*camera_manager + slot_offset);
+        context += fmt::format("CameraManagerSlot+{:02X}={}\n", slot_offset,
+                               format_u32(candidate));
+        if (candidate && *candidate >= 0x80000000u)
+        {
+          const std::string label = fmt::format("CameraSlot+{:02X}Transform", slot_offset);
+          append_transform(label.c_str(), *candidate + transform_offset);
+        }
+      }
+    }
+
+    context += "\nDeep pointer paths\n";
+    append_words("StateManager+800", state_manager + 0x800u, 32);
+    append_object_deep("PlayerDeep", player);
+    if (player && *player >= 0x80000000u)
+    {
+      const std::optional<u32> cannon = read_mem1_u32(*player + 0x490u);
+      append_object_deep("PlayerCannonDeep", cannon);
+      if (cannon && *cannon >= 0x80000000u)
+      {
+        append_transform("PlayerCannonGunXF+3E8", *cannon + 0x3E8u);
+        append_transform("PlayerCannonBeamXF+418", *cannon + 0x418u);
+        append_transform("PlayerCannonWorldXF+4A8", *cannon + 0x4A8u);
+        append_transform("PlayerCannonLocalXF+4D8", *cannon + 0x4D8u);
+      }
+    }
+    append_object_deep("ActiveCameraDeep", active_camera);
+    if (camera_manager && *camera_manager >= 0x80000000u)
+    {
+      for (const u32 slot_offset : {0x10u, 0x80u, 0x84u, 0x88u, 0x8Cu, 0x90u})
+      {
+        const std::optional<u32> candidate = read_mem1_u32(*camera_manager + slot_offset);
+        if (candidate && *candidate >= 0x80000000u && *candidate <= 0x817FFFFFu)
+        {
+          const std::string label = fmt::format("CameraSlot+{:02X}Deep", slot_offset);
+          append_object_deep(label.c_str(), candidate);
+        }
+      }
+    }
+
     context += "\nPrimedGun scratch\n";
     for (const u32 address :
          {0x80002800u, 0x80002838u, 0x80002840u, 0x80002850u, 0x80002C00u,
           0x80002D00u, 0x80002D40u, 0x80002DA0u, 0x80002E80u, 0x80002E84u,
-          0x80002E88u, 0x80002E8Cu, 0x80002E90u})
+          0x80002E88u, 0x80002E8Cu, 0x80002E90u, 0x80002E94u})
     {
       context += fmt::format("{:08X}={}\n", address, format_u32(read_mem1_u32(address)));
     }
@@ -1620,6 +1843,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primegun/combat_jump_use_primary_button"),
                        runtime.combat_jump_use_primary_button)
             .toBool();
+    runtime.vr_menu_hold_left_stick =
+        settings.value(QStringLiteral("primegun/vr_menu_hold_left_stick"),
+                       runtime.vr_menu_hold_left_stick)
+            .toBool();
     runtime.gun_targeting_enabled =
         settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
@@ -1731,6 +1958,8 @@ void MainWindow::ConnectStack()
                       runtime.primegun_trackpad_press_threshold);
     settings.setValue(QStringLiteral("primegun/combat_jump_use_primary_button"),
                       runtime.combat_jump_use_primary_button);
+    settings.setValue(QStringLiteral("primegun/vr_menu_hold_left_stick"),
+                      runtime.vr_menu_hold_left_stick);
     settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
     settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
@@ -2074,6 +2303,10 @@ void MainWindow::ConnectStack()
   auto* vr_overlays_enabled = new QCheckBox(tr("In-headset overlays"), game_tab);
   vr_overlays_enabled->setChecked(runtime->vr_overlays_enabled);
   controller_layout->addWidget(vr_overlays_enabled);
+  auto* vr_menu_hold_left_stick =
+      new QCheckBox(tr("Hold left stick 1s for menu"), game_tab);
+  vr_menu_hold_left_stick->setChecked(runtime->vr_menu_hold_left_stick);
+  controller_layout->addWidget(vr_menu_hold_left_stick);
   auto* combat_jump_use_primary_button = new QCheckBox(tr("Use A button for jump"), game_tab);
   combat_jump_use_primary_button->setChecked(runtime->combat_jump_use_primary_button);
   controller_layout->addWidget(combat_jump_use_primary_button);
@@ -2716,6 +2949,7 @@ void MainWindow::ConnectStack()
     const QSignalBlocker right_hand_blocker{right_hand};
     const QSignalBlocker left_hand_blocker{left_hand};
     const QSignalBlocker vr_overlays_enabled_blocker{vr_overlays_enabled};
+    const QSignalBlocker vr_menu_hold_left_stick_blocker{vr_menu_hold_left_stick};
     const QSignalBlocker rumble_enabled_blocker{rumble_enabled};
     const QSignalBlocker rumble_hand_mode_blocker{rumble_hand_mode};
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
@@ -2755,6 +2989,7 @@ void MainWindow::ConnectStack()
     right_hand->setChecked(runtime->use_right_hand);
     left_hand->setChecked(!runtime->use_right_hand);
     vr_overlays_enabled->setChecked(runtime->vr_overlays_enabled);
+    vr_menu_hold_left_stick->setChecked(runtime->vr_menu_hold_left_stick);
     rumble_enabled->setChecked(runtime->rumble_enabled);
     rumble_hand_mode->setCurrentIndex(std::clamp(runtime->rumble_hand_mode, 0, 2));
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
@@ -2803,6 +3038,7 @@ void MainWindow::ConnectStack()
           [runtime, refresh_visible_settings, apply_runtime] {
     runtime->use_right_hand = true;
     runtime->vr_overlays_enabled = true;
+    runtime->vr_menu_hold_left_stick = false;
     runtime->rumble_enabled = true;
     runtime->rumble_intensity = 0.35f;
     runtime->rumble_hand_mode = 2;
@@ -2851,6 +3087,11 @@ void MainWindow::ConnectStack()
   connect(vr_overlays_enabled, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
     runtime->vr_overlays_enabled = checked;
+    apply_runtime();
+  });
+  connect(vr_menu_hold_left_stick, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->vr_menu_hold_left_stick = checked;
     apply_runtime();
   });
   connect(rumble_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {

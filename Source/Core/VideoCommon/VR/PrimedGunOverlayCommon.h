@@ -349,6 +349,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"RUMBLE INTENSITY", FloatText(s.rumble_intensity, 2)});
       rows.push_back({"PRIMEDGUN GRIP INPUTS", s.primegun_grip_inputs_enabled ? "ON" : "OFF"});
       rows.push_back({"A BUTTON JUMP", s.combat_jump_use_primary_button ? "ON" : "OFF"});
+      rows.push_back({"HOLD LEFT STICK 1S FOR MENU", s.vr_menu_hold_left_stick ? "ON" : "OFF"});
     }
     else
     {
