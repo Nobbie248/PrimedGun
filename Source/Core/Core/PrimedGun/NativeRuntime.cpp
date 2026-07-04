@@ -265,6 +265,11 @@ constexpr u32 PLAYER_FREE_LOOK_YAW_ANGLE_OFFSET = 0x3E4u;
 constexpr u32 PLAYER_FREE_LOOK_YAW_VEL_OFFSET = 0x3E8u;
 constexpr u32 PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET = 0x3ECu;
 constexpr u32 PLAYER_VISOR_STATE_OFFSET = 0x330u;
+constexpr u32 PLAYER_VISOR_SCAN_TARGETS_OFFSET = 0x13Cu;
+constexpr u32 PLAYER_VISOR_SCAN_TARGET_DATA_OFFSET = PLAYER_VISOR_SCAN_TARGETS_OFFSET + 4u;
+constexpr u32 PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE = 0x10u;
+constexpr u32 PLAYER_VISOR_SCAN_TARGET_CAPACITY = 64u;
+constexpr float PLAYER_VISOR_SCAN_TARGET_SEED_TIMER = 0.35f;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
 constexpr u64 GAMEPLAY_INPUT_LOSS_HOLD_FRAMES = 18u;
@@ -1997,6 +2002,20 @@ bool ObjectLooksLikeVanillaTarget(const Core::CPUThreadGuard& guard, u32 obj)
           ActorHasMaterial(guard, obj, 39) || ActorIsGrapplePoint(guard, obj));
 }
 
+bool EntityLooksActive(const Core::CPUThreadGuard& guard, u32 obj)
+{
+  u8 flags = 0;
+  return PrimeGameObjectPointerLooksValid(obj, 0x31u) && TryReadU8(guard, obj + 0x30u, &flags) &&
+         (flags & 0x80u) != 0;
+}
+
+bool ActorHasScanInfo(const Core::CPUThreadGuard& guard, u32 obj)
+{
+  u32 scan_info = 0;
+  return PrimeGameObjectPointerLooksValid(obj, 0x9cu) &&
+         TryReadU32(guard, obj + 0x98u, &scan_info) && scan_info >= 0x80000000u;
+}
+
 bool ReadVanillaTargetUid(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
                           u32 gun, u16* uid)
 {
@@ -2078,6 +2097,222 @@ bool CandidateListContainsUid(const std::vector<ScanTargetCandidate>& candidates
       return true;
   }
   return false;
+}
+
+void EnsureUidInScanVisorTargets(const Core::CPUThreadGuard& guard, u32 visor, u16 uid)
+{
+  if (visor < 0x80000000u || uid == 0xffffu ||
+      !PrimeDataPointerLooksValid(visor + PLAYER_VISOR_SCAN_TARGETS_OFFSET,
+                                  4u + PLAYER_VISOR_SCAN_TARGET_CAPACITY *
+                                           PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE))
+  {
+    return;
+  }
+
+  u32 count = 0;
+  if (!TryReadU32(guard, visor + PLAYER_VISOR_SCAN_TARGETS_OFFSET, &count) ||
+      count > PLAYER_VISOR_SCAN_TARGET_CAPACITY)
+  {
+    return;
+  }
+
+  const u32 data = visor + PLAYER_VISOR_SCAN_TARGET_DATA_OFFSET;
+  u32 inactive_entry = 0;
+  for (u32 i = 0; i < count; ++i)
+  {
+    const u32 entry = data + i * PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE;
+    u16 existing_uid = 0xffffu;
+    float timer = 0.0f;
+    const bool have_uid = TryReadU16(guard, entry, &existing_uid);
+    const bool have_timer = TryReadFloat(guard, entry + 0x04u, &timer) && std::isfinite(timer);
+    if (inactive_entry == 0 && (!have_uid || existing_uid == 0xffffu || !have_timer || timer <= 0.0f))
+      inactive_entry = entry;
+
+    if (!have_uid || existing_uid != uid)
+      continue;
+
+    if (!have_timer || timer < PLAYER_VISOR_SCAN_TARGET_SEED_TIMER)
+    {
+      TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+    }
+    TryWriteFloat(guard, entry + 0x08u, 0.0f);
+    TryWriteU8(guard, entry + 0x0Cu, 1);
+    return;
+  }
+
+  if (inactive_entry != 0)
+  {
+    TryWriteU16(guard, inactive_entry, uid);
+    TryWriteFloat(guard, inactive_entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+    TryWriteFloat(guard, inactive_entry + 0x08u, 0.0f);
+    TryWriteU8(guard, inactive_entry + 0x0Cu, 1);
+    return;
+  }
+
+  if (count >= PLAYER_VISOR_SCAN_TARGET_CAPACITY)
+    return;
+
+  const u32 entry = data + count * PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE;
+  TryWriteU16(guard, entry, uid);
+  TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+  TryWriteFloat(guard, entry + 0x08u, 0.0f);
+  TryWriteU8(guard, entry + 0x0Cu, 1);
+  TryWriteU32(guard, visor + PLAYER_VISOR_SCAN_TARGETS_OFFSET, count + 1u);
+}
+
+bool SeedScanIndicatorTargetsFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
+                                     u32 player, u32 visor, const Matrix3x4& hmd,
+                                     const RuntimeSettings& settings, GunTargetPick* pick)
+{
+  if (state_manager < 0x80000000u || !PlayerObjectLooksValid(guard, player) ||
+      visor < 0x80000000u)
+  {
+    return false;
+  }
+
+  u32 object_list = 0;
+  u32 player_uid_word = 0;
+  u32 player_area = 0xffffffffu;
+  if (!TryReadU32(guard, state_manager + 0x810u, &object_list) ||
+      object_list < 0x80000000u || !TryReadU32(guard, player + 0x8u, &player_uid_word) ||
+      !TryReadU32(guard, player + 0x4u, &player_area))
+  {
+    return false;
+  }
+
+  float ray_x = 0.0f;
+  float ray_y = 0.0f;
+  float ray_z = 0.0f;
+  u32 camera_transform = 0;
+  if (!ResolveActiveCameraTransform(guard, &camera_transform) ||
+      !ReadTransformTranslation(guard, camera_transform, &ray_x, &ray_y, &ray_z))
+  {
+    if (!ReadTransformTranslation(guard, player + ADDRESS.transform_offset, &ray_x, &ray_y, &ray_z))
+      return false;
+  }
+
+  float dir_x = 0.0f;
+  float dir_y = 0.0f;
+  float dir_z = 0.0f;
+  if (!GunAimDirectionFromMatrix(hmd, &dir_x, &dir_y, &dir_z))
+    return false;
+
+  struct Candidate
+  {
+    u16 uid = 0xffffu;
+    u32 obj = 0;
+    RayCandidateMetrics metrics = {};
+    float score = std::numeric_limits<float>::infinity();
+  };
+  std::array<Candidate, 8> best{};
+  const auto insert_candidate = [&](u16 uid, u32 obj, const RayCandidateMetrics& metrics,
+                                    float score) {
+    size_t slot = best.size();
+    float worst = -1.0f;
+    for (size_t i = 0; i < best.size(); ++i)
+    {
+      if (best[i].uid == uid)
+        return;
+      if (best[i].uid == 0xffffu)
+      {
+        slot = i;
+        break;
+      }
+      if (best[i].score > worst)
+      {
+        worst = best[i].score;
+        slot = i;
+      }
+    }
+
+    if (slot >= best.size() || (best[slot].uid != 0xffffu && score >= best[slot].score))
+      return;
+
+    best[slot].uid = uid;
+    best[slot].obj = obj;
+    best[slot].metrics = metrics;
+    best[slot].score = score;
+  };
+
+  const u16 player_uid = static_cast<u16>(player_uid_word >> 16);
+  const float max_along = std::clamp(settings.gun_targeting_distance, 15.0f, 100.0f);
+  const float base_perp = std::max(settings.gun_targeting_radius * 3.0f, 3.0f);
+
+  for (u32 i = 0; i < 1024u; ++i)
+  {
+    u32 obj = 0;
+    if (!TryReadU32(guard, object_list + (i << 3) + 4u, &obj) ||
+        !PrimeGameObjectPointerLooksValid(obj, ADDRESS.transform_offset + 0x30u) ||
+        obj == player || !LooksLikeTransformMatrix(guard, obj + ADDRESS.transform_offset))
+    {
+      continue;
+    }
+
+    u32 uid_word = 0;
+    u32 owner_uid_word = 0;
+    u32 obj_area = 0xffffffffu;
+    if (!TryReadU32(guard, obj + 0x8u, &uid_word) ||
+        !TryReadU32(guard, obj + 0xecu, &owner_uid_word) ||
+        !TryReadU32(guard, obj + 0x4u, &obj_area))
+    {
+      continue;
+    }
+
+    const u16 uid = static_cast<u16>(uid_word >> 16);
+    const u16 owner_uid = static_cast<u16>(owner_uid_word >> 16);
+    if (uid == 0xffffu || uid == player_uid || owner_uid == player_uid || obj_area != player_area ||
+        !EntityLooksActive(guard, obj) || !ActorIsTargetable(guard, obj) ||
+        !ActorHasMaterial(guard, obj, 39) || !ActorHasScanInfo(guard, obj))
+    {
+      continue;
+    }
+
+    const RayCandidateMetrics metrics =
+        ResolveActorRayMetrics(guard, obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, max_along,
+                               true);
+    if (!metrics.valid)
+      continue;
+
+    const float hmd_view_perp = base_perp + metrics.along * 0.55f + metrics.radius * 0.35f;
+    if (metrics.perp > hmd_view_perp)
+      continue;
+
+    const float cone_fraction = metrics.perp / std::max(hmd_view_perp, 0.001f);
+    const float score = cone_fraction * 1.5f + metrics.along * 0.002f - metrics.radius * 0.01f;
+    insert_candidate(uid, obj, metrics, score);
+  }
+
+  const Candidate* selected = nullptr;
+  for (const Candidate& candidate : best)
+  {
+    if (candidate.uid != 0xffffu)
+    {
+      EnsureUidInScanVisorTargets(guard, visor, candidate.uid);
+      if (selected == nullptr || candidate.score < selected->score)
+        selected = &candidate;
+    }
+  }
+
+  if (selected == nullptr || pick == nullptr)
+    return selected != nullptr;
+
+  pick->uid = selected->uid;
+  pick->obj = selected->obj;
+  pick->ray_x = ray_x;
+  pick->ray_y = ray_y;
+  pick->ray_z = ray_z;
+  pick->dir_x = dir_x;
+  pick->dir_y = dir_y;
+  pick->dir_z = dir_z;
+  pick->x = selected->metrics.x;
+  pick->y = selected->metrics.y;
+  pick->z = selected->metrics.z;
+  pick->along = selected->metrics.along;
+  pick->perp = selected->metrics.perp;
+  pick->score = selected->score;
+  pick->has_scan = true;
+  pick->targetable = true;
+  return true;
 }
 
 bool PickScanTargetFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
@@ -3503,8 +3738,24 @@ void UpdateScanTargetingFromHmd(const Core::CPUThreadGuard& guard,
     return;
   }
 
+  u32 visor = 0;
+  u32 visor_valid = 0;
+  const bool have_visor =
+      TryReadU32(guard, SCAN_RETICLE_TRACE_SCRATCH + 0x20u, &visor) &&
+      TryReadU32(guard, SCAN_RETICLE_TRACE_SCRATCH + 0x24u, &visor_valid) && visor_valid == 1u;
+  GunTargetPick marker_pick = {};
+  const bool marker_found =
+      have_visor &&
+      SeedScanIndicatorTargetsFromHmd(guard, state_manager, player, visor, hmd, settings,
+                                      &marker_pick);
+
   GunTargetPick pick = {};
-  const bool found = PickScanTargetFromHmd(guard, state_manager, player, hmd, settings, &pick);
+  bool found = PickScanTargetFromHmd(guard, state_manager, player, hmd, settings, &pick);
+  if (!found && marker_found)
+  {
+    pick = marker_pick;
+    found = true;
+  }
 
   if (found)
   {
@@ -3532,6 +3783,8 @@ void UpdateScanTargetingFromHmd(const Core::CPUThreadGuard& guard,
       s_last_scan_candidate_found = true;
     }
     WriteGunTargetScratch(guard, player, pick.uid);
+    if (have_visor)
+      EnsureUidInScanVisorTargets(guard, visor, pick.uid);
   }
   else
   {
@@ -5315,6 +5568,48 @@ bool ApplyRenderModelOffsetPatch(const Core::CPUThreadGuard& guard)
   return patch.applied;
 }
 
+bool ApplyScanIndicatorPointerPatch(const Core::CPUThreadGuard& guard)
+{
+  auto& patch = s_scan_indicator_update_trace_patch;
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current))
+    return false;
+
+  const u32 branch = PpcBranch(patch.address, patch.cave);
+  if (current == branch)
+  {
+    if (patch.original == 0)
+      TryReadU32(guard, patch.cave + 0x14u, &patch.original);
+    if (patch.original == 0)
+    {
+      patch.applied = false;
+      return false;
+    }
+    current = patch.original;
+  }
+  else if ((current & 0xFFFF0000u) != 0x94210000u)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  patch.original = current;
+  const u32 trace_hi = (SCAN_RETICLE_TRACE_SCRATCH >> 16) & 0xffffu;
+  const u32 trace_lo = SCAN_RETICLE_TRACE_SCRATCH & 0xffffu;
+  const u32 return_addr = patch.address + 4u;
+
+  patch.applied = InstallBranchAfterCaveWrite(
+      guard, patch.address, patch.cave,
+      {{0x00u, 0x3D800000u | trace_hi},
+       {0x04u, 0x618C0000u | trace_lo},
+       {0x08u, 0x906C0020u},
+       {0x0Cu, 0x38000001u},
+       {0x10u, 0x900C0024u},
+       {0x14u, patch.original},
+       {0x18u, PpcBranch(patch.cave + 0x18u, return_addr)}});
+  return patch.applied;
+}
+
 bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
 {
   auto apply_one = [&](DynamicPpcPatch& patch, u32 scratch_offset) {
@@ -5363,48 +5658,6 @@ bool ApplyScanReticleTracePatch(const Core::CPUThreadGuard& guard)
   wrote = apply_one(s_scan_reticle_trace_patch, 0x00u) || wrote;
   wrote = apply_one(s_scan_reticle_trace_curr_patch, 0x10u) || wrote;
 
-  auto& update_patch = s_scan_indicator_update_trace_patch;
-  u32 current = 0;
-  if (TryReadU32(guard, update_patch.address, &current))
-  {
-    const u32 branch = PpcBranch(update_patch.address, update_patch.cave);
-    if (current == branch)
-    {
-      if (update_patch.original == 0)
-        TryReadU32(guard, update_patch.cave + 0x14u, &update_patch.original);
-      if (update_patch.original == 0)
-      {
-        update_patch.applied = false;
-      }
-      else
-      {
-        current = update_patch.original;
-      }
-    }
-    if ((current & 0xFFFF0000u) == 0x94210000u)
-    {
-      update_patch.original = current;
-      const u32 trace_hi = (SCAN_RETICLE_TRACE_SCRATCH >> 16) & 0xffffu;
-      const u32 trace_lo = SCAN_RETICLE_TRACE_SCRATCH & 0xffffu;
-      const u32 return_addr = update_patch.address + 4u;
-
-      update_patch.applied = InstallBranchAfterCaveWrite(
-          guard, update_patch.address, update_patch.cave,
-          {{0x00u, 0x3D800000u | trace_hi},
-           {0x04u, 0x618C0000u | trace_lo},
-           {0x08u, 0x906C0020u},
-           {0x0Cu, 0x38000001u},
-           {0x10u, 0x900C0024u},
-           {0x14u, update_patch.original},
-           {0x18u, PpcBranch(update_patch.cave + 0x18u, return_addr)}});
-      wrote = update_patch.applied || wrote;
-    }
-    else if (current != branch)
-    {
-      update_patch.applied = false;
-    }
-  }
-
   return wrote;
 }
 
@@ -5436,8 +5689,6 @@ bool RestoreScanReticleTracePatches(const Core::CPUThreadGuard& guard)
   bool restored = false;
   restored = RestoreTracePatchIfInstalled(guard, s_scan_reticle_trace_patch, 0x18u) || restored;
   restored = RestoreTracePatchIfInstalled(guard, s_scan_reticle_trace_curr_patch, 0x18u) || restored;
-  restored =
-      RestoreTracePatchIfInstalled(guard, s_scan_indicator_update_trace_patch, 0x14u) || restored;
   return restored;
 }
 
@@ -5958,6 +6209,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyRenderModelOffsetPatch(guard) || wrote;
   wrote = RuntimeLoggingEnabled() ? (ApplyScanReticleTracePatch(guard) || wrote) :
                                     (RestoreScanReticleTracePatches(guard) || wrote);
+  wrote = ApplyScanIndicatorPointerPatch(guard) || wrote;
   wrote = ApplyScanIndicatorViewBasisPatch(guard) || wrote;
   wrote = ApplyFirstPersonPitchLoadPatch(guard) || wrote;
   wrote = ApplyBallCameraLevelPatch(guard) || wrote;
