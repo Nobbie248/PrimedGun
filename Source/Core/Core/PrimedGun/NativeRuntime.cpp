@@ -269,7 +269,9 @@ constexpr u32 PLAYER_VISOR_SCAN_TARGETS_OFFSET = 0x13Cu;
 constexpr u32 PLAYER_VISOR_SCAN_TARGET_DATA_OFFSET = PLAYER_VISOR_SCAN_TARGETS_OFFSET + 4u;
 constexpr u32 PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE = 0x10u;
 constexpr u32 PLAYER_VISOR_SCAN_TARGET_CAPACITY = 64u;
-constexpr float PLAYER_VISOR_SCAN_TARGET_SEED_TIMER = 0.35f;
+constexpr u32 PLAYER_VISOR_SCAN_FRAME_COLOR_INTERP_OFFSET = 0x54Cu;
+constexpr u32 PLAYER_VISOR_SCAN_FRAME_COLOR_IMPULSE_OFFSET = 0x550u;
+constexpr float PLAYER_VISOR_SCAN_TARGET_VALID_TIMER = 1.0f;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
 constexpr u64 GAMEPLAY_INPUT_LOSS_HOLD_FRAMES = 18u;
@@ -2099,6 +2101,18 @@ bool CandidateListContainsUid(const std::vector<ScanTargetCandidate>& candidates
   return false;
 }
 
+void SetScanVisorValidDirectionPhases(const Core::CPUThreadGuard& guard, u32 visor)
+{
+  if (visor < 0x80000000u ||
+      !PrimeDataPointerLooksValid(visor + PLAYER_VISOR_SCAN_FRAME_COLOR_INTERP_OFFSET, 8u))
+  {
+    return;
+  }
+
+  TryWriteFloat(guard, visor + PLAYER_VISOR_SCAN_FRAME_COLOR_INTERP_OFFSET, 1.0f);
+  TryWriteFloat(guard, visor + PLAYER_VISOR_SCAN_FRAME_COLOR_IMPULSE_OFFSET, 1.0f);
+}
+
 void EnsureUidInScanVisorTargets(const Core::CPUThreadGuard& guard, u32 visor, u16 uid)
 {
   if (visor < 0x80000000u || uid == 0xffffu ||
@@ -2131,21 +2145,23 @@ void EnsureUidInScanVisorTargets(const Core::CPUThreadGuard& guard, u32 visor, u
     if (!have_uid || existing_uid != uid)
       continue;
 
-    if (!have_timer || timer < PLAYER_VISOR_SCAN_TARGET_SEED_TIMER)
+    if (!have_timer || timer < PLAYER_VISOR_SCAN_TARGET_VALID_TIMER)
     {
-      TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+      TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_VALID_TIMER);
     }
     TryWriteFloat(guard, entry + 0x08u, 0.0f);
     TryWriteU8(guard, entry + 0x0Cu, 1);
+    SetScanVisorValidDirectionPhases(guard, visor);
     return;
   }
 
   if (inactive_entry != 0)
   {
     TryWriteU16(guard, inactive_entry, uid);
-    TryWriteFloat(guard, inactive_entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+    TryWriteFloat(guard, inactive_entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_VALID_TIMER);
     TryWriteFloat(guard, inactive_entry + 0x08u, 0.0f);
     TryWriteU8(guard, inactive_entry + 0x0Cu, 1);
+    SetScanVisorValidDirectionPhases(guard, visor);
     return;
   }
 
@@ -2154,10 +2170,11 @@ void EnsureUidInScanVisorTargets(const Core::CPUThreadGuard& guard, u32 visor, u
 
   const u32 entry = data + count * PLAYER_VISOR_SCAN_TARGET_SLOT_SIZE;
   TryWriteU16(guard, entry, uid);
-  TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_SEED_TIMER);
+  TryWriteFloat(guard, entry + 0x04u, PLAYER_VISOR_SCAN_TARGET_VALID_TIMER);
   TryWriteFloat(guard, entry + 0x08u, 0.0f);
   TryWriteU8(guard, entry + 0x0Cu, 1);
   TryWriteU32(guard, visor + PLAYER_VISOR_SCAN_TARGETS_OFFSET, count + 1u);
+  SetScanVisorValidDirectionPhases(guard, visor);
 }
 
 bool SeedScanIndicatorTargetsFromHmd(const Core::CPUThreadGuard& guard, u32 state_manager,
