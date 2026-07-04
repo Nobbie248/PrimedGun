@@ -261,6 +261,7 @@ constexpr u32 PLAYER_FREE_LOOK_PITCH_ANGLE_OFFSET = 0x3ECu;
 constexpr u32 PLAYER_VISOR_STATE_OFFSET = 0x330u;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
+constexpr u64 GAMEPLAY_INPUT_LOSS_HOLD_FRAMES = 18u;
 
 bool RuntimeLoggingEnabled()
 {
@@ -356,6 +357,7 @@ u64 s_dpad_last_disable_refresh_frame = 0;
 float s_directional_move_speed = 0.0f;
 std::atomic_bool s_gameplay_input_active{false};
 std::atomic_bool s_orbit_lock_active{false};
+u64 s_gameplay_input_hold_until_frame = 0;
 bool s_last_logged_gameplay_input_active = false;
 bool s_have_logged_gameplay_input_active = false;
 u64 s_last_mode_probe_frame = 0;
@@ -3075,7 +3077,7 @@ bool UpdateSnapTurn(const Core::CPUThreadGuard& guard,
   u32 player = 0;
   if (!TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) ||
       player < 0x80000000u || !PlayerIsFirstPersonUnmorphed(guard, player) ||
-      ScanVisorActive(guard, player) || PlayerIsChangingVisorsInFirstPerson(guard, player))
+      PlayerIsChangingVisorsInFirstPerson(guard, player))
   {
     return false;
   }
@@ -6126,6 +6128,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     s_cinematic_screen_active = false;
     s_cinematic_screen_hold_until_frame = 0;
+    s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
     return;
@@ -6137,6 +6140,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     s_cinematic_screen_active = false;
     s_cinematic_screen_hold_until_frame = 0;
+    s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
     if (s_game_was_active)
@@ -6163,7 +6167,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
       s_patch_reapply_until_frame = s_frame_counter + 180u;
     s_last_patch_player = 0;
     s_patches_applied_this_boot = false;
-    s_gameplay_input_active.store(false, std::memory_order_relaxed);
+    const bool held_gameplay_input_active = s_frame_counter < s_gameplay_input_hold_until_frame;
+    s_gameplay_input_active.store(held_gameplay_input_active, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
     return;
   }
@@ -6207,6 +6212,9 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   const bool default_controls_active = have_player && PlayerIsInMenuMapOrMorphball(guard, player);
+  if (default_controls_active)
+    s_gameplay_input_hold_until_frame = 0;
+
   const bool scan_active = have_player && !default_controls_active && ScanVisorActive(guard, player);
   if (settings.builtin_patches_enabled && have_player)
     FlattenActiveMorphballCameraTransform(guard, player);
@@ -6216,7 +6224,13 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   const bool visor_transition_input_active =
       !raw_gameplay_input_active && have_player && !default_controls_active &&
       PlayerIsChangingVisorsInFirstPerson(guard, player);
-  const bool gameplay_input_active = raw_gameplay_input_active || visor_transition_input_active;
+  const bool direct_gameplay_input_active =
+      raw_gameplay_input_active || visor_transition_input_active;
+  if (direct_gameplay_input_active)
+    s_gameplay_input_hold_until_frame = s_frame_counter + GAMEPLAY_INPUT_LOSS_HOLD_FRAMES;
+  const bool gameplay_input_active =
+      direct_gameplay_input_active ||
+      (!default_controls_active && s_frame_counter < s_gameplay_input_hold_until_frame);
   UpdatePitchZeroHookEnabled(guard, scan_active);
   const bool orbit_lock_active =
       gameplay_input_active && !scan_active && OrbitLockButtonHeld(guard, ADDRESS.state_manager);
@@ -6296,6 +6310,7 @@ void ResetNativeRuntime()
   s_dpad_input_flags_addr = 0;
   s_dpad_last_disable_refresh_frame = 0;
   s_directional_move_speed = 0.0f;
+  s_gameplay_input_hold_until_frame = 0;
   s_gameplay_input_active.store(false, std::memory_order_relaxed);
   s_orbit_lock_active.store(false, std::memory_order_relaxed);
   s_last_logged_gameplay_input_active = false;
