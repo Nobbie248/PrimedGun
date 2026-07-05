@@ -682,9 +682,8 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
   // movement stick Y = forward/back, movement stick X = runtime strafe,
   // look stick X = turn, look stick up or primary button = jump.
   const bool smooth_turn_enabled = !overlay.snap_turn_enabled;
-  pad->stickX = orbit_lock_active && left.connected ?
-                    PrimedGunAxisToPadByte(left.thumbstick_x, GCPadStatus::MAIN_STICK_CENTER_X) :
-                    smooth_turn_enabled && look_stick.connected && !weapon_modifier ?
+  pad->stickX = !orbit_lock_active && smooth_turn_enabled && look_stick.connected &&
+                        !weapon_modifier ?
           PrimedGunAxisToPadByte(look_stick.thumbstick_x *
                                      std::min(overlay.look_yaw_sensitivity, 1.0f),
                                  GCPadStatus::MAIN_STICK_CENTER_X) :

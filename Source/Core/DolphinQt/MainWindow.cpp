@@ -14,6 +14,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -32,6 +33,7 @@
 #include <QMimeData>
 #include <QLabel>
 #include <QKeyEvent>
+#include <QMessageBox>
 #include <QPixmap>
 #include <QSizePolicy>
 #include <QButtonGroup>
@@ -46,6 +48,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 #include <QWindow>
 
 #include <fmt/format.h>
@@ -94,6 +97,7 @@
 #include "Core/Core.h"
 #include "Core/FreeLookManager.h"
 #include "Core/HW/DVD/DVDInterface.h"
+#include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
 #include "Core/HW/GBAPad.h"
 #include "Core/HW/AddressSpace.h"
@@ -113,6 +117,7 @@
 #include "Core/WiiUtils.h"
 
 #include "DiscIO/DirectoryBlob.h"
+#include "DiscIO/Enums.h"
 #include "DiscIO/NANDImporter.h"
 #include "DiscIO/RiivolutionPatcher.h"
 
@@ -229,6 +234,387 @@ QString PrimedGunCannonLibraryFilePath(const QString& relative_path)
     return app_path;
 
   return user_path;
+}
+
+void PrimedGunAddUniquePath(QStringList* paths, const QString& path)
+{
+  const QString clean_path = QDir::cleanPath(path);
+  if (!paths->contains(clean_path, Qt::CaseInsensitive))
+    paths->append(clean_path);
+}
+
+bool PrimedGunLooksLikeMemoryCard(const QFileInfo& file)
+{
+  if (!file.isFile())
+    return false;
+
+  const QString suffix = file.suffix().toLower();
+  if (file.fileName().contains(QStringLiteral(".backup-"), Qt::CaseInsensitive))
+    return false;
+
+  return suffix == QStringLiteral("raw") || suffix == QStringLiteral("gcp");
+}
+
+int PrimedGunMemoryCardScore(const QFileInfo& file)
+{
+  const QString name = file.fileName().toLower();
+  int score = 0;
+  if (name == QStringLiteral("online.usa.raw"))
+    score += 100;
+  if (name == QStringLiteral("memorycarda.usa.raw"))
+    score += 90;
+  if (name.contains(QStringLiteral(".usa.")) || name.endsWith(QStringLiteral(".usa.raw")) ||
+      name.endsWith(QStringLiteral(".usa.gcp")))
+  {
+    score += 50;
+  }
+  if (name.contains(QStringLiteral("memorycarda")) || name.contains(QStringLiteral("online")))
+    score += 25;
+  if (file.suffix().compare(QStringLiteral("raw"), Qt::CaseInsensitive) == 0)
+    score += 10;
+  return score;
+}
+
+QString PrimedGunBestMemoryCardInDir(const QString& dir_path)
+{
+  const QDir dir(dir_path);
+  if (!dir.exists())
+    return {};
+
+  const QFileInfoList files =
+      dir.entryInfoList({QStringLiteral("*.raw"), QStringLiteral("*.gcp")}, QDir::Files,
+                        QDir::Time);
+  QFileInfo best_file;
+  int best_score = -1;
+  for (const QFileInfo& file : files)
+  {
+    if (!PrimedGunLooksLikeMemoryCard(file))
+      continue;
+
+    const int score = PrimedGunMemoryCardScore(file);
+    if (score > best_score)
+    {
+      best_score = score;
+      best_file = file;
+    }
+  }
+
+  return best_file.exists() ? best_file.absoluteFilePath() : QString{};
+}
+
+void PrimedGunAddMemoryCardSearchBase(QStringList* search_dirs, const QString& candidate_base)
+{
+  PrimedGunAddUniquePath(search_dirs, candidate_base);
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/x64/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/Binary/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/Binary/x64/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/build/bin/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/build/bin/x64/User/GC"));
+  PrimedGunAddUniquePath(search_dirs, candidate_base + QStringLiteral("/core/User/GC"));
+}
+
+QStringList PrimedGunOneFolderAboveX64MemoryCardSearchDirs()
+{
+  QStringList search_dirs;
+  const QFileInfo app_dir(QApplication::applicationDirPath());
+  const QString x64_dir = app_dir.absoluteFilePath();
+  const QString install_root = app_dir.absoluteDir().absolutePath();
+
+  // First pass: folders beside x64 in the same release/runtime folder.
+  const QDir install_root_dir(install_root);
+  const QFileInfoList install_root_children =
+      install_root_dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+  for (const QFileInfo& child : install_root_children)
+  {
+    if (QDir::cleanPath(child.absoluteFilePath()) == QDir::cleanPath(x64_dir))
+      continue;
+    PrimedGunAddMemoryCardSearchBase(&search_dirs, child.absoluteFilePath());
+  }
+
+  return search_dirs;
+}
+
+QStringList PrimedGunTwoFoldersAboveX64MemoryCardSearchDirs()
+{
+  QStringList search_dirs;
+  const QFileInfo app_dir(QApplication::applicationDirPath());
+  const QString install_root = app_dir.absoluteDir().absolutePath();
+  const QString install_parent = QFileInfo(install_root).absoluteDir().absolutePath();
+
+  // Fallback pass: folders beside the current release/runtime folder.
+  PrimedGunAddUniquePath(&search_dirs, install_parent + QStringLiteral("/GC"));
+  PrimedGunAddUniquePath(&search_dirs, install_parent + QStringLiteral("/User/GC"));
+  PrimedGunAddUniquePath(&search_dirs, install_parent + QStringLiteral("/core/User/GC"));
+
+  const QDir parent_dir(install_parent);
+  const QFileInfoList siblings =
+      parent_dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+  for (const QFileInfo& sibling : siblings)
+  {
+    if (QDir::cleanPath(sibling.absoluteFilePath()) == QDir::cleanPath(install_root))
+      continue;
+    PrimedGunAddMemoryCardSearchBase(&search_dirs, sibling.absoluteFilePath());
+  }
+
+  return search_dirs;
+}
+
+bool PrimedGunSamePath(const QString& a, const QString& b)
+{
+#ifdef _WIN32
+  constexpr Qt::CaseSensitivity path_case_sensitivity = Qt::CaseInsensitive;
+#else
+  constexpr Qt::CaseSensitivity path_case_sensitivity = Qt::CaseSensitive;
+#endif
+  return QString::compare(QDir::cleanPath(QFileInfo(a).absoluteFilePath()),
+                          QDir::cleanPath(QFileInfo(b).absoluteFilePath()),
+                          path_case_sensitivity) == 0;
+}
+
+QString PrimedGunFindOldMemoryCardInDirs(const QStringList& search_dirs,
+                                         const QString& current_memory_card)
+{
+  QString best_path;
+  int best_score = -1;
+  for (const QString& dir : search_dirs)
+  {
+    const QString candidate = PrimedGunBestMemoryCardInDir(dir);
+    if (candidate.isEmpty())
+      continue;
+    if (PrimedGunSamePath(candidate, current_memory_card))
+      continue;
+
+    const QFileInfo candidate_info(candidate);
+    const int score = PrimedGunMemoryCardScore(candidate_info);
+    if (score > best_score)
+    {
+      best_score = score;
+      best_path = candidate_info.absoluteFilePath();
+    }
+  }
+
+  return best_path;
+}
+
+QString PrimedGunFindNearbyOldMemoryCard(const QString& current_memory_card)
+{
+  QString source = PrimedGunFindOldMemoryCardInDirs(
+      PrimedGunOneFolderAboveX64MemoryCardSearchDirs(), current_memory_card);
+  if (!source.isEmpty())
+    return source;
+
+  return PrimedGunFindOldMemoryCardInDirs(PrimedGunTwoFoldersAboveX64MemoryCardSearchDirs(),
+                                          current_memory_card);
+}
+
+QString PrimedGunUserDirNearMemoryCard(const QString& memory_card_path)
+{
+  const QFileInfo memory_card_info(memory_card_path);
+  const QDir gc_dir = memory_card_info.absoluteDir();
+  const QFileInfo user_dir_info(gc_dir.absolutePath());
+  return user_dir_info.absoluteDir().absolutePath();
+}
+
+QString PrimedGunConfigDirNearMemoryCard(const QString& memory_card_path)
+{
+  const QString user_dir_path = PrimedGunUserDirNearMemoryCard(memory_card_path);
+  if (user_dir_path.isEmpty())
+    return {};
+
+  const QString config_dir_path = QDir(user_dir_path).filePath(QStringLiteral("Config"));
+  return QFileInfo(config_dir_path).isDir() ? config_dir_path : QString{};
+}
+
+QString PrimedGunFindSettingsNearMemoryCard(const QString& memory_card_path)
+{
+  const QString config_dir_path = PrimedGunConfigDirNearMemoryCard(memory_card_path);
+  if (config_dir_path.isEmpty())
+    return {};
+
+  const QString qt_settings_path = QDir(config_dir_path).filePath(QStringLiteral("Qt.ini"));
+  return QFileInfo::exists(qt_settings_path) ? qt_settings_path : QString{};
+}
+
+bool PrimedGunShouldImportSettingKey(const QString& key)
+{
+  // Keep transfer focused on user-facing PrimeGun preferences. Runtime activation and old
+  // path/history fields should stay owned by the current install.
+  return key != QStringLiteral("enabled") &&
+         key != QStringLiteral("last_memcard_transfer_dir");
+}
+
+int PrimedGunImportSettingsFromFile(const QString& settings_path, QSettings* destination_settings)
+{
+  if (settings_path.isEmpty() || destination_settings == nullptr)
+    return 0;
+
+  QSettings source_settings(settings_path, QSettings::IniFormat);
+  source_settings.beginGroup(QStringLiteral("primegun"));
+  const QStringList keys = source_settings.allKeys();
+
+  int imported_count = 0;
+  for (const QString& key : keys)
+  {
+    if (!PrimedGunShouldImportSettingKey(key))
+      continue;
+
+    destination_settings->setValue(QStringLiteral("primegun/%1").arg(key),
+                                   source_settings.value(key));
+    ++imported_count;
+  }
+
+  source_settings.endGroup();
+  const QString selected_game_key = QStringLiteral("mainwindow/selected_metroid_prime_path");
+  if (source_settings.contains(selected_game_key))
+  {
+    destination_settings->setValue(selected_game_key, source_settings.value(selected_game_key));
+    ++imported_count;
+  }
+
+  if (imported_count > 0)
+    destination_settings->sync();
+  return imported_count;
+}
+
+bool PrimedGunShouldTransferDolphinSettingsFile(const QString& relative_path)
+{
+  const QFileInfo file(relative_path);
+  const QString file_name = file.fileName();
+  if (file_name.compare(QStringLiteral("Qt.ini"), Qt::CaseInsensitive) == 0 ||
+      file_name.compare(QStringLiteral("Logger.ini"), Qt::CaseInsensitive) == 0 ||
+      file_name.compare(QStringLiteral("TimePlayed.ini"), Qt::CaseInsensitive) == 0)
+  {
+    return false;
+  }
+
+  if (file_name.contains(QStringLiteral(".backup-"), Qt::CaseInsensitive))
+    return false;
+
+  return file.suffix().compare(QStringLiteral("ini"), Qt::CaseInsensitive) == 0;
+}
+
+bool PrimedGunCopySettingsTree(const QString& source_dir_path, const QString& destination_dir_path,
+                               const QString& timestamp, int* copied_count,
+                               QString* error_message)
+{
+  const QDir source_dir(source_dir_path);
+  if (!source_dir.exists())
+    return true;
+
+  QDir destination_dir(destination_dir_path);
+  if (!destination_dir.exists() && !destination_dir.mkpath(QStringLiteral(".")))
+  {
+    if (error_message != nullptr)
+      *error_message = QObject::tr("Could not create settings folder:\n%1").arg(destination_dir_path);
+    return false;
+  }
+
+  QDirIterator iterator(source_dir_path, QStringList{QStringLiteral("*.ini")}, QDir::Files,
+                        QDirIterator::Subdirectories);
+  while (iterator.hasNext())
+  {
+    const QString source_path = iterator.next();
+    const QString relative_path = source_dir.relativeFilePath(source_path);
+    if (!PrimedGunShouldTransferDolphinSettingsFile(relative_path))
+      continue;
+
+    const QString destination_path = destination_dir.filePath(relative_path);
+    if (PrimedGunSamePath(source_path, destination_path))
+      continue;
+
+    const QFileInfo destination_info(destination_path);
+    QDir destination_file_dir = destination_info.absoluteDir();
+    if (!destination_file_dir.exists() && !destination_file_dir.mkpath(QStringLiteral(".")))
+    {
+      if (error_message != nullptr)
+      {
+        *error_message = QObject::tr("Could not create settings folder:\n%1")
+                             .arg(destination_file_dir.absolutePath());
+      }
+      return false;
+    }
+
+    QString backup_path;
+    if (destination_info.exists())
+    {
+      const QString suffix = destination_info.suffix();
+      const QString backup_name =
+          suffix.isEmpty() ?
+              QStringLiteral("%1.backup-%2").arg(destination_info.fileName(), timestamp) :
+              QStringLiteral("%1.backup-%2.%3")
+                  .arg(destination_info.completeBaseName(), timestamp, suffix);
+      backup_path = destination_file_dir.filePath(backup_name);
+      if (!QFile::rename(destination_path, backup_path))
+      {
+        if (error_message != nullptr)
+          *error_message =
+              QObject::tr("Could not back up current Dolphin setting:\n%1").arg(destination_path);
+        return false;
+      }
+    }
+
+    if (!QFile::copy(source_path, destination_path))
+    {
+      if (!backup_path.isEmpty())
+        QFile::rename(backup_path, destination_path);
+      if (error_message != nullptr)
+        *error_message =
+            QObject::tr("Could not copy Dolphin setting to:\n%1").arg(destination_path);
+      return false;
+    }
+
+    if (copied_count != nullptr)
+      ++*copied_count;
+  }
+
+  return true;
+}
+
+int PrimedGunTransferDolphinSettingsNearMemoryCard(const QString& memory_card_path,
+                                                   QString* source_user_dir,
+                                                   QString* error_message)
+{
+  const QString old_user_dir_path = PrimedGunUserDirNearMemoryCard(memory_card_path);
+  if (old_user_dir_path.isEmpty())
+    return 0;
+
+  const QString current_user_dir_path =
+      QDir::cleanPath(QString::fromStdString(File::GetUserPath(D_USER_IDX)));
+  if (PrimedGunSamePath(old_user_dir_path, current_user_dir_path))
+    return 0;
+
+  if (source_user_dir != nullptr)
+    *source_user_dir = old_user_dir_path;
+
+  const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
+  int copied_count = 0;
+  const QDir old_user_dir(old_user_dir_path);
+  const QDir current_user_dir(current_user_dir_path);
+
+  if (!PrimedGunCopySettingsTree(old_user_dir.filePath(QStringLiteral("Config")),
+                                 current_user_dir.filePath(QStringLiteral("Config")), timestamp,
+                                 &copied_count, error_message))
+  {
+    return -1;
+  }
+
+  if (!PrimedGunCopySettingsTree(old_user_dir.filePath(QStringLiteral("GameSettings")),
+                                 current_user_dir.filePath(QStringLiteral("GameSettings")),
+                                 timestamp, &copied_count, error_message))
+  {
+    return -1;
+  }
+
+  if (!PrimedGunCopySettingsTree(old_user_dir.filePath(QStringLiteral("GameSettingsVR")),
+                                 current_user_dir.filePath(QStringLiteral("GameSettingsVR")),
+                                 timestamp, &copied_count, error_message))
+  {
+    return -1;
+  }
+
+  return copied_count;
 }
 
 QString PrimedGunCannonSlotDir(int slot)
@@ -1716,9 +2102,8 @@ void MainWindow::ConnectStack()
   auto* pause_button = new QPushButton(tr("Pause"), game_tab);
   auto* stop_button = new QPushButton(tr("Stop"), game_tab);
   auto* options_button = new QPushButton(tr("Game Options..."), game_tab);
-  auto* load_state_button = new QPushButton(tr("Load State"), game_tab);
-  auto* save_state_button = new QPushButton(tr("Save State"), game_tab);
   auto* select_state_slot_button = new QPushButton(tr("Select State Slot"), game_tab);
+  auto* transfer_old_save_button = new QPushButton(tr("Transfer Old Memory Card"), game_tab);
   const QString game_button_style = QStringLiteral(R"(
     QPushButton {
       background-color: #242a33;
@@ -1750,22 +2135,25 @@ void MainWindow::ConnectStack()
       border-color: #3e4c5f;
     }
   )");
+  const QString selected_game_button_style = game_button_style + QStringLiteral(R"(
+    QPushButton {
+      color: #f0a12a;
+    }
+  )");
   select_button->setFlat(true);
   play_button->setFlat(true);
   pause_button->setFlat(true);
   stop_button->setFlat(true);
   options_button->setFlat(true);
-  load_state_button->setFlat(true);
-  save_state_button->setFlat(true);
   select_state_slot_button->setFlat(true);
+  transfer_old_save_button->setFlat(true);
   select_button->setStyleSheet(game_button_style);
   play_button->setStyleSheet(primary_game_button_style);
   pause_button->setStyleSheet(game_button_style);
   stop_button->setStyleSheet(game_button_style);
   options_button->setStyleSheet(game_button_style);
-  load_state_button->setStyleSheet(game_button_style);
-  save_state_button->setStyleSheet(game_button_style);
   select_state_slot_button->setStyleSheet(game_button_style);
+  transfer_old_save_button->setStyleSheet(game_button_style);
   QSettings& settings = Settings::GetQSettings();
   const auto load_primegun_runtime_settings = [&settings] {
     PrimedGun::RuntimeSettings runtime = PrimedGun::GetRuntimeSettings();
@@ -2212,66 +2600,81 @@ void MainWindow::ConnectStack()
   const auto apply_runtime = [runtime] { PrimedGun::SetRuntimeSettings(*runtime); };
   const QString assets_dir = QApplication::applicationDirPath() + QStringLiteral("/assets/");
 
-  auto* load_state_menu = new QMenu(load_state_button);
-  load_state_menu->addAction(tr("Load State from File"), this, &MainWindow::StateLoad);
-  load_state_menu->addAction(tr("Load State from Selected Slot"), this, &MainWindow::StateLoadSlot);
-  auto* load_state_slots_menu = load_state_menu->addMenu(tr("Load State from Slot"));
-  load_state_menu->addAction(tr("Undo Load State"), this, &MainWindow::StateLoadUndo);
-
-  auto* save_state_menu = new QMenu(save_state_button);
-  save_state_menu->addAction(tr("Save State to File"), this, &MainWindow::StateSave);
-  save_state_menu->addAction(tr("Save State to Selected Slot"), this, &MainWindow::StateSaveSlot);
-  save_state_menu->addAction(tr("Save State to Oldest Slot"), this, &MainWindow::StateSaveOldest);
-  auto* save_state_slots_menu = save_state_menu->addMenu(tr("Save State to Slot"));
-  save_state_menu->addAction(tr("Undo Save State"), this, &MainWindow::StateSaveUndo);
-
   auto* select_state_slot_menu = new QMenu(select_state_slot_button);
-  auto* select_state_group = new QActionGroup(select_state_slot_menu);
-  QList<QAction*> load_state_slot_actions;
-  QList<QAction*> save_state_slot_actions;
-  QList<QAction*> select_state_slot_actions;
+  struct StateSlotMenuRow
+  {
+    QPushButton* select = nullptr;
+    QPushButton* load = nullptr;
+    QPushButton* save = nullptr;
+  };
+  std::vector<StateSlotMenuRow> state_slot_menu_rows;
+  state_slot_menu_rows.reserve(State::NUM_STATES);
   const int state_slot_count = static_cast<int>(State::NUM_STATES);
   for (int slot = 1; slot <= state_slot_count; ++slot)
   {
-    QAction* load_action = load_state_slots_menu->addAction(QString{});
-    QAction* save_action = save_state_slots_menu->addAction(QString{});
-    QAction* select_action = select_state_slot_menu->addAction(QString{});
-    select_action->setCheckable(true);
-    select_action->setActionGroup(select_state_group);
+    auto* action = new QWidgetAction(select_state_slot_menu);
+    auto* row = new QWidget(select_state_slot_menu);
+    auto* row_layout = new QHBoxLayout(row);
+    row_layout->setContentsMargins(8, 2, 8, 2);
+    row_layout->setSpacing(6);
 
-    load_state_slot_actions.append(load_action);
-    save_state_slot_actions.append(save_action);
-    select_state_slot_actions.append(select_action);
+    auto* select = new QPushButton(row);
+    auto* load = new QPushButton(tr("Load"), row);
+    auto* save = new QPushButton(tr("Save"), row);
+    select->setFlat(true);
+    load->setFlat(true);
+    save->setFlat(true);
+    select->setStyleSheet(game_button_style);
+    load->setStyleSheet(game_button_style);
+    save->setStyleSheet(game_button_style);
+    select->setMinimumWidth(176);
+    select->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    load->setMinimumWidth(56);
+    save->setMinimumWidth(56);
 
-    connect(load_action, &QAction::triggered, this, [this, slot] { StateLoadSlotAt(slot); });
-    connect(save_action, &QAction::triggered, this, [this, slot] { StateSaveSlotAt(slot); });
-    connect(select_action, &QAction::triggered, this, [this, slot] {
+    row_layout->addWidget(select, 1);
+    row_layout->addWidget(load);
+    row_layout->addWidget(save);
+    action->setDefaultWidget(row);
+    select_state_slot_menu->addAction(action);
+
+    state_slot_menu_rows.push_back({select, load, save});
+
+    connect(select, &QPushButton::clicked, this, [this, select_state_slot_menu, slot] {
       m_menu_bar->SetStateSlot(slot);
+      select_state_slot_menu->close();
+    });
+    connect(load, &QPushButton::clicked, this, [this, select_state_slot_menu, slot] {
+      m_menu_bar->SetStateSlot(slot);
+      StateLoadSlotAt(slot);
+      select_state_slot_menu->close();
+    });
+    connect(save, &QPushButton::clicked, this, [this, select_state_slot_menu, slot] {
+      m_menu_bar->SetStateSlot(slot);
+      StateSaveSlotAt(slot);
+      select_state_slot_menu->close();
     });
   }
 
-  const auto refresh_state_slot_menus = [load_state_slot_actions, save_state_slot_actions,
-                                         select_state_slot_actions, state_slot_count] {
+  const auto refresh_state_slot_menu = [state_slot_menu_rows, state_slot_count, game_button_style,
+                                        selected_game_button_style] {
     const int selected_slot = Settings::Instance().GetStateSlot();
     for (int index = 0; index < state_slot_count; ++index)
     {
       const int slot = index + 1;
       const QString info = QString::fromStdString(State::GetInfoStringOfSlot(slot));
-      load_state_slot_actions.at(index)->setText(
-          QObject::tr("Load from Slot %1 - %2").arg(slot).arg(info));
-      save_state_slot_actions.at(index)->setText(
-          QObject::tr("Save to Slot %1 - %2").arg(slot).arg(info));
-      select_state_slot_actions.at(index)->setText(
-          QObject::tr("Select Slot %1 - %2").arg(slot).arg(info));
-      select_state_slot_actions.at(index)->setChecked(selected_slot == slot);
+      const QString label =
+          (selected_slot == slot ? QObject::tr("Current Slot %1 - %2") :
+                                   QObject::tr("Select Slot %1 - %2"))
+              .arg(slot)
+              .arg(info);
+      state_slot_menu_rows.at(index).select->setText(label);
+      state_slot_menu_rows.at(index).select->setStyleSheet(
+          selected_slot == slot ? selected_game_button_style : game_button_style);
     }
   };
-  connect(load_state_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
-  connect(save_state_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
-  connect(select_state_slot_menu, &QMenu::aboutToShow, this, refresh_state_slot_menus);
-  refresh_state_slot_menus();
-  load_state_button->setMenu(load_state_menu);
-  save_state_button->setMenu(save_state_menu);
+  connect(select_state_slot_menu, &QMenu::aboutToShow, this, refresh_state_slot_menu);
+  refresh_state_slot_menu();
   select_state_slot_button->setMenu(select_state_slot_menu);
 
   auto* setup_layout = make_scroll_tab(tr("Setup"));
@@ -2298,10 +2701,9 @@ void MainWindow::ConnectStack()
   setup_layout->addLayout(play_control_row);
   setup_layout->addWidget(options_button);
   setup_layout->addSpacing(10);
-  setup_layout->addWidget(section_label(tr("Save States"), game_tab));
-  setup_layout->addWidget(load_state_button);
-  setup_layout->addWidget(save_state_button);
+  setup_layout->addWidget(section_label(tr("Save States / Memory Card"), game_tab));
   setup_layout->addWidget(select_state_slot_button);
+  setup_layout->addWidget(transfer_old_save_button);
   setup_layout->addSpacing(12);
   setup_layout->addStretch();
   auto* setup_art = new QLabel(game_tab);
@@ -3324,6 +3726,139 @@ void MainWindow::ConnectStack()
   });
   connect(pause_button, &QPushButton::clicked, this, &MainWindow::TogglePause);
   connect(stop_button, &QPushButton::clicked, this, &MainWindow::RequestStop);
+  connect(transfer_old_save_button, &QPushButton::clicked, this,
+          [this, load_primegun_runtime_settings, runtime, refresh_visible_settings,
+           selected_metroid_game_setting, update_selected_game] {
+    if (Core::GetState(m_system) != Core::State::Uninitialized)
+    {
+      ModalMessageBox::warning(this, tr("Transfer Old Memory Card"),
+                               tr("Stop the game before transferring a memory card save."));
+      return;
+    }
+
+    QMessageBox prompt(this);
+    prompt.setWindowTitle(tr("Transfer Old Memory Card"));
+    prompt.setText(tr("Transfer old save game."));
+    prompt.setInformativeText(
+        tr("PrimedGun will search nearby old PrimedGun folders and automatically transfer and "
+           "apply your save."));
+    auto* transfer_button = prompt.addButton(tr("Transfer"), QMessageBox::AcceptRole);
+    prompt.addButton(QMessageBox::Cancel);
+    prompt.exec();
+
+    if (prompt.clickedButton() != transfer_button)
+      return;
+
+    const QString destination = QDir::toNativeSeparators(QString::fromStdString(
+        Config::GetMemcardPath(ExpansionInterface::Slot::A, DiscIO::Region::NTSC_U)));
+    const QString source = PrimedGunFindNearbyOldMemoryCard(destination);
+    if (source.isEmpty())
+    {
+      ModalMessageBox::critical(
+          this, tr("Transfer Old Memory Card"),
+          tr("Could not find an old memory card near this PrimedGun install.\n\n"
+             "Place the new version near your old PrimedGun folder, then try again."));
+      return;
+    }
+
+    const QFileInfo destination_info(destination);
+    QDir destination_dir = destination_info.absoluteDir();
+    if (!destination_dir.exists() && !destination_dir.mkpath(QStringLiteral(".")))
+    {
+      ModalMessageBox::critical(
+          this, tr("Transfer Old Memory Card"),
+          tr("Could not create the current memory card folder:\n%1")
+              .arg(destination_dir.absolutePath()));
+      return;
+    }
+
+#ifdef _WIN32
+    constexpr Qt::CaseSensitivity path_case_sensitivity = Qt::CaseInsensitive;
+#else
+    constexpr Qt::CaseSensitivity path_case_sensitivity = Qt::CaseSensitive;
+#endif
+    if (QString::compare(QDir::cleanPath(QFileInfo(source).absoluteFilePath()),
+                         QDir::cleanPath(destination_info.absoluteFilePath()),
+                         path_case_sensitivity) == 0)
+    {
+      ModalMessageBox::information(this, tr("Transfer Old Memory Card"),
+                                   tr("That save is already the current memory card."));
+      return;
+    }
+
+    QString backup_path;
+    if (destination_info.exists())
+    {
+      const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
+      const QString suffix = destination_info.suffix();
+      const QString backup_name =
+          suffix.isEmpty() ?
+              QStringLiteral("%1.backup-%2").arg(destination_info.fileName(), timestamp) :
+              QStringLiteral("%1.backup-%2.%3")
+                  .arg(destination_info.completeBaseName(), timestamp, suffix);
+      backup_path = destination_dir.filePath(backup_name);
+      if (!QFile::rename(destination, backup_path))
+      {
+        ModalMessageBox::critical(
+          this, tr("Transfer Old Memory Card"),
+            tr("Could not back up the current memory card:\n%1").arg(destination));
+        return;
+      }
+    }
+
+    if (!QFile::copy(source, destination))
+    {
+      if (!backup_path.isEmpty())
+        QFile::rename(backup_path, destination);
+      ModalMessageBox::critical(this, tr("Transfer Old Memory Card"),
+                                tr("Could not copy the selected save to:\n%1").arg(destination));
+      return;
+    }
+
+    const QString old_settings_path = PrimedGunFindSettingsNearMemoryCard(source);
+    const int imported_settings_count =
+        PrimedGunImportSettingsFromFile(old_settings_path, &Settings::GetQSettings());
+    QString old_dolphin_settings_source;
+    QString dolphin_settings_error;
+    const int imported_dolphin_settings_count = PrimedGunTransferDolphinSettingsNearMemoryCard(
+        source, &old_dolphin_settings_source, &dolphin_settings_error);
+    if (imported_dolphin_settings_count < 0)
+    {
+      ModalMessageBox::critical(this, tr("Transfer Old Memory Card"), dolphin_settings_error);
+      return;
+    }
+
+    if (imported_settings_count > 0)
+    {
+      load_primegun_runtime_settings();
+      *runtime = PrimedGun::GetRuntimeSettings();
+      refresh_visible_settings();
+      update_selected_game(Settings::GetQSettings().value(selected_metroid_game_setting).toString());
+    }
+
+    QString message = tr("Old memory card transferred to:\n%1").arg(destination);
+    if (!backup_path.isEmpty())
+      message += tr("\n\nPrevious memory card backed up to:\n%1").arg(backup_path);
+    if (imported_settings_count > 0)
+    {
+      message += tr("\n\nPrimeGun settings transferred from:\n%1").arg(old_settings_path);
+    }
+    else
+    {
+      message += tr("\n\nNo old PrimeGun settings were found next to that memory card.");
+    }
+    if (imported_dolphin_settings_count > 0)
+    {
+      message += tr("\n\nDolphin settings transferred from:\n%1\n%2 file(s) copied.")
+                     .arg(old_dolphin_settings_source)
+                     .arg(imported_dolphin_settings_count);
+    }
+    else
+    {
+      message += tr("\n\nNo old Dolphin settings were found next to that memory card.");
+    }
+    ModalMessageBox::information(this, tr("Transfer Old Memory Card"), message);
+  });
 
   connect(options_button, &QPushButton::clicked, this,
           [this, make_selected_game, selected_metroid_game_setting, options_button] {

@@ -51,7 +51,6 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 
 ## Setup Notes
 
-- Setting the HMD refresh rate to 120 Hz is recommended; otherwise, frame pacing issues can occur.
 - Meta's own OpenXR environment is not recommended; try SteamVR or Virtual Desktop instead.
 - Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.
 - Check the Layout tab for controller bindings.
@@ -59,7 +58,7 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 - Do not transfer save states across versions. Make sure to save normally before you transfer.
 - Once in game, click the right stick to set your height.
 - Click the left thumbstick to open or close the in-headset settings menu.
-- Try to stay in the centre of your play space and face forward for the best interaction.
+- Try to stay in the centre of your play space, this mod is not roomscaled.
 - Use Save Settings after changing PrimedGun options to apply them.
 
 ## Change Controller Bindings

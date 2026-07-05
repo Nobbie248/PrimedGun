@@ -235,6 +235,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
 constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
+constexpr bool ENABLE_PRIMEDGUN_LOCK_LOGGING = true;
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;
@@ -281,6 +282,11 @@ bool RuntimeLoggingEnabled()
   return ENABLE_PRIMEDGUN_RUNTIME_LOGGING;
 }
 
+bool LockLoggingEnabled()
+{
+  return ENABLE_PRIMEDGUN_LOCK_LOGGING;
+}
+
 void AppendScanDebugLine(std::string_view line)
 {
   if (!RuntimeLoggingEnabled())
@@ -288,6 +294,21 @@ void AppendScanDebugLine(std::string_view line)
 
   File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
   File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunScan.log", "ab");
+  if (!file)
+    return;
+
+  file.WriteBytes(line.data(), line.size());
+  static constexpr char newline = '\n';
+  file.WriteBytes(&newline, 1);
+}
+
+void AppendLockDebugLine(std::string_view line)
+{
+  if (!LockLoggingEnabled())
+    return;
+
+  File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
+  File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunLock.log", "ab");
   if (!file)
     return;
 
@@ -2048,6 +2069,44 @@ bool ReadVanillaTargetUid(const Core::CPUThreadGuard& guard, u32 state_manager, 
   return false;
 }
 
+bool PlayerHasVanillaTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player)
+{
+  constexpr std::array<u32, 3> target_offsets = {
+      PLAYER_ORBIT_TARGET_ID_OFFSET,
+      PLAYER_ORBIT_LOCK_ID_OFFSET,
+      PLAYER_AIM_TARGET_ID_OFFSET,
+  };
+
+  for (const u32 offset : target_offsets)
+  {
+    u16 candidate_uid = 0xffffu;
+    u32 obj = 0;
+    if (ReadPlayerTargetUid(guard, player, offset, &candidate_uid) &&
+        ObjectByUid(guard, state_manager, candidate_uid, &obj) && obj != player &&
+        ObjectLooksLikeVanillaTarget(guard, obj))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool PlayerHasPrimedGunTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player)
+{
+  u32 scratch_player = 0;
+  u16 uid = 0xffffu;
+  return TryReadU32(guard, GUN_TARGET_SCRATCH, &scratch_player) && scratch_player == player &&
+         TryReadU16(guard, GUN_TARGET_SCRATCH + 4u, &uid) &&
+         TargetUidStillExists(guard, state_manager, uid, 0);
+}
+
+bool PlayerHasOrbitControlTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player)
+{
+  return PlayerHasVanillaTarget(guard, state_manager, player) ||
+         PlayerHasPrimedGunTarget(guard, state_manager, player);
+}
+
 bool ResolveActiveCameraTransform(const Core::CPUThreadGuard& guard, u32* transform);
 
 bool RefreshOrbitTargetCandidates(const Core::CPUThreadGuard& guard, u32 state_manager, u32 player,
@@ -2740,9 +2799,12 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   static GunTargetPick s_last_pick = {};
   static bool s_last_pick_valid = false;
   static u64 s_last_pick_frame = 0;
-  static u64 s_last_success_frame = 0;
   static u32 s_last_pick_player = 0;
   static u32 s_last_pick_gun = 0;
+  static u64 s_last_lock_log_frame = 0;
+  static u16 s_last_lock_log_uid = 0xffffu;
+  static int s_last_lock_log_source = -1;
+  static bool s_last_lock_log_held = false;
 
   if (!settings.gun_targeting_enabled || !settings.patch_gun_ray_target ||
       !PlayerObjectLooksValid(guard, player))
@@ -2762,6 +2824,10 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   const bool found_live =
       PickGunRayTarget(guard, state_manager, player, gun, world_xf, mat, settings, lock_held, &pick);
   bool found = found_live;
+  const bool previous_exists =
+      lock_held && same_context && previous_valid &&
+      TargetUidStillExists(guard, state_manager, previous.uid, previous.obj);
+  int lock_source = found_live ? 1 : 0;
   s_last_pick_frame = s_frame_counter;
   s_last_pick_player = player;
   s_last_pick_gun = gun;
@@ -2770,33 +2836,72 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   {
     s_last_pick = pick;
     s_last_pick_valid = true;
-    s_last_success_frame = s_frame_counter;
   }
-  else if (lock_held && same_context && previous_valid &&
-           s_frame_counter - s_last_success_frame <= 12u &&
-           TargetUidStillExists(guard, state_manager, previous.uid, previous.obj))
+  else if (previous_exists)
   {
     pick = previous;
     found = true;
     s_last_pick = pick;
     s_last_pick_valid = true;
+    lock_source = 2;
   }
   else
   {
     s_last_pick_valid = false;
   }
 
+  const auto log_lock_state = [&](int source, u16 uid, u32 obj, bool vanilla_found,
+                                  bool wrote_target) {
+    if (!LockLoggingEnabled())
+      return;
+
+    const bool transition = lock_held != s_last_lock_log_held ||
+                            source != s_last_lock_log_source ||
+                            uid != s_last_lock_log_uid;
+    const bool periodic = lock_held && s_frame_counter >= s_last_lock_log_frame + 30u;
+    if (!transition && !periodic)
+      return;
+
+    const char* source_name =
+        source == 1 ? "live" :
+        source == 2 ? "held_previous" :
+        source == 3 ? "vanilla_fallback" :
+        source == 4 ? "suppressed" :
+                      "none";
+    AppendLockDebugLine(fmt::format(
+        "frame={} lock={} source={} wrote={} uid={:04X} obj={:08X} player={:08X} gun={:08X} "
+        "found_live={} prev_valid={} prev_exists={} same_context={} vanilla={} suppress={} "
+        "last_pick_frame={}",
+        s_frame_counter, lock_held, source_name, wrote_target, uid, obj, player, gun, found_live,
+        previous_valid, previous_exists, same_context, vanilla_found, pick.suppress_orbit_hook,
+        s_last_pick_frame));
+
+    s_last_lock_log_frame = s_frame_counter;
+    s_last_lock_log_uid = uid;
+    s_last_lock_log_source = source;
+    s_last_lock_log_held = lock_held;
+  };
+
   if (!found || pick.suppress_orbit_hook)
   {
     u16 vanilla_uid = 0xffffu;
-    if (lock_held && ReadVanillaTargetUid(guard, state_manager, player, gun, &vanilla_uid))
+    const bool vanilla_found = lock_held && ReadVanillaTargetUid(guard, state_manager, player, gun,
+                                                                 &vanilla_uid);
+    if (vanilla_found)
+    {
       WriteGunTargetScratch(guard, player, vanilla_uid);
+      log_lock_state(3, vanilla_uid, 0, true, true);
+    }
     else
+    {
       WriteGunTargetScratch(guard, player, 0xffffu);
+      log_lock_state(pick.suppress_orbit_hook ? 4 : 0, 0xffffu, 0, false, false);
+    }
     return;
   }
 
   WriteGunTargetScratch(guard, player, pick.uid);
+  log_lock_state(lock_source, pick.uid, pick.obj, false, true);
 }
 
 bool GunPitchFromMatrix(const Matrix3x4& mat, float* pitch_out)
@@ -3240,15 +3345,33 @@ bool FlattenActiveMorphballCameraTransform(const Core::CPUThreadGuard& guard, u3
   return wrote;
 }
 
+void ClearFreeLookYawCarry(const Core::CPUThreadGuard& guard, u32 player)
+{
+  if (player < 0x80000000u)
+    return;
+
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_CENTER_TIME_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_YAW_ANGLE_OFFSET, 0.0f);
+  TryWriteFloat(guard, player + PLAYER_FREE_LOOK_YAW_VEL_OFFSET, 0.0f);
+}
+
 void ApplyLookYawSensitivityBoost(const Core::CPUThreadGuard& guard,
                                   const Common::VR::OpenXRInputSnapshot& snapshot,
                                   const RuntimeSettings& settings, u32 player)
 {
-  if (settings.look_yaw_sensitivity <= 1.0f || player < 0x80000000u ||
-      settings.snap_turn_enabled || !PlayerIsFirstPersonUnmorphed(guard, player))
+  if (player < 0x80000000u || settings.snap_turn_enabled ||
+      !PlayerIsFirstPersonUnmorphed(guard, player))
   {
     return;
   }
+
+  const bool orbit_lock_active = OrbitLockButtonHeld(guard, ADDRESS.state_manager) &&
+                                 PlayerHasOrbitControlTarget(guard, ADDRESS.state_manager, player);
+  if (orbit_lock_active)
+    ClearFreeLookYawCarry(guard, player);
+
+  if (!orbit_lock_active && settings.look_yaw_sensitivity <= 1.0f)
+    return;
 
   const int look_hand = settings.directional_movement_use_right_stick ? 0 : 1;
   const Common::VR::OpenXRControllerState& look = snapshot.controllers[look_hand];
@@ -3261,8 +3384,10 @@ void ApplyLookYawSensitivityBoost(const Core::CPUThreadGuard& guard,
 
   constexpr float max_extra_yaw_deg_per_second = 125.0f;
   constexpr float frame_dt = 1.0f / 60.0f;
-  const float extra_scale = std::clamp(settings.look_yaw_sensitivity - 1.0f, 0.0f, 2.0f);
-  const float yaw_delta_rad = stick_x * extra_scale * max_extra_yaw_deg_per_second * frame_dt *
+  const float yaw_scale =
+      orbit_lock_active ? std::clamp(settings.look_yaw_sensitivity, 0.1f, 3.0f) :
+                          std::clamp(settings.look_yaw_sensitivity - 1.0f, 0.0f, 2.0f);
+  const float yaw_delta_rad = stick_x * yaw_scale * max_extra_yaw_deg_per_second * frame_dt *
                               (static_cast<float>(MathUtil::PI) / 180.0f);
   RotateTransformYaw2D(guard, player + ADDRESS.transform_offset, yaw_delta_rad);
 }
@@ -4027,13 +4152,6 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
   u32 player = 0;
   if (!TryReadU32(guard, ADDRESS.state_manager + ADDRESS.player_offset, &player) ||
       !PlayerIsFirstPersonUnmorphed(guard, player))
-  {
-    s_directional_move_speed = 0.0f;
-    return;
-  }
-
-  const bool scan_active = ScanVisorActive(guard, player);
-  if (!scan_active && OrbitLockButtonHeld(guard, ADDRESS.state_manager))
   {
     s_directional_move_speed = 0.0f;
     return;
@@ -6585,7 +6703,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
       (!default_controls_active && s_frame_counter < s_gameplay_input_hold_until_frame);
   UpdatePitchZeroHookEnabled(guard, scan_active);
   const bool orbit_lock_active =
-      gameplay_input_active && !scan_active && OrbitLockButtonHeld(guard, ADDRESS.state_manager);
+      gameplay_input_active && !scan_active && OrbitLockButtonHeld(guard, ADDRESS.state_manager) &&
+      PlayerHasOrbitControlTarget(guard, ADDRESS.state_manager, player);
   s_gameplay_input_active.store(gameplay_input_active, std::memory_order_relaxed);
   s_orbit_lock_active.store(orbit_lock_active, std::memory_order_relaxed);
   if (!have_player || (!scan_active && !gameplay_input_active))
