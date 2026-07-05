@@ -2103,7 +2103,8 @@ void MainWindow::ConnectStack()
   auto* stop_button = new QPushButton(tr("Stop"), game_tab);
   auto* options_button = new QPushButton(tr("Game Options..."), game_tab);
   auto* select_state_slot_button = new QPushButton(tr("Select State Slot"), game_tab);
-  auto* transfer_old_save_button = new QPushButton(tr("Transfer Old Memory Card"), game_tab);
+  auto* transfer_old_save_button =
+      new QPushButton(tr("Transfer Old Memory Card / Settings"), game_tab);
   const QString game_button_style = QStringLiteral(R"(
     QPushButton {
       background-color: #242a33;

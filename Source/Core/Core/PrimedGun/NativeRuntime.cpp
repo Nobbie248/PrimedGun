@@ -144,6 +144,8 @@ constexpr u32 PATCH_CODE_ARENA_BASE = 0x80001C00u;
 constexpr u32 PATCH_CODE_ARENA_SIZE = 0xC00u;
 constexpr u32 SCRATCH_BASE = 0x80002800u;
 constexpr u32 SCRATCH_ARENA_SIZE = 0x800u;
+constexpr u32 HIGH_PATCH_ARENA_BASE = 0x817F8000u;
+constexpr u32 HIGH_PATCH_ARENA_SIZE = 0x2000u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
 constexpr u32 CANNON_EXPECTED_GUN_SCRATCH = SCRATCH_BASE + 0x038u;
 constexpr u32 MODEL_OFFSET_WORLD_SCRATCH = SCRATCH_BASE + 0x040u;
@@ -189,6 +191,11 @@ constexpr u32 BALL_CAMERA_LEVEL_CAVE = PATCH_CODE_ARENA_BASE + 0xB40u;
 constexpr u32 INTERPOLATION_CAMERA_LEVEL_PATCH_ADDRESS = 0x8026529Cu;
 constexpr u32 INTERPOLATION_CAMERA_LEVEL_PATCH_ORIGINAL = 0x887E00E4u;
 constexpr u32 INTERPOLATION_CAMERA_LEVEL_CAVE = PATCH_CODE_ARENA_BASE + 0xB80u;
+constexpr u32 AUDIO_LISTENER_PATCH_ADDRESS = 0x8000BA88u;
+constexpr u32 AUDIO_LISTENER_PATCH_ORIGINAL = 0xD1010008u;
+constexpr u32 AUDIO_LISTENER_LEGACY_BAD_CAVE = 0x80002300u;
+constexpr u32 AUDIO_LISTENER_CAVE = HIGH_PATCH_ARENA_BASE + 0x000u;
+constexpr u32 AUDIO_LISTENER_SCRATCH = HIGH_PATCH_ARENA_BASE + 0x100u;
 constexpr u32 UPDATE_ORBIT_ORIENTATION_ADDRESS = 0x8017EACCu;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ADDRESS = 0x8000E71Cu;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ORIGINAL = 0x801E0304u;
@@ -492,6 +499,8 @@ DynamicPpcPatch s_orbit_orientation_no_spin_patch{
 DynamicPpcPatch s_first_person_orbit_aim_vector_patch{
     FIRST_PERSON_ORBIT_AIM_VECTOR_ADDRESS, FIRST_PERSON_ORBIT_AIM_VECTOR_ORIGINAL, 0,
     FIRST_PERSON_ORBIT_AIM_VECTOR_CAVE, false};
+DynamicPpcPatch s_audio_listener_patch{
+    AUDIO_LISTENER_PATCH_ADDRESS, AUDIO_LISTENER_PATCH_ORIGINAL, 0, AUDIO_LISTENER_CAVE, false};
 
 ProjectileTransformPatch s_projectile_transform_patches[] = {
     {0x800E0434u, 0, WAVE_PROJECTILE_TRANSFORM_CAVE, 6, false},
@@ -802,7 +811,9 @@ bool OverlapsPrimedGunRuntimeArena(u32 address, u32 size)
 {
   return RangeOverlaps(address, size, PATCH_CODE_ARENA_BASE,
                       PATCH_CODE_ARENA_BASE + PATCH_CODE_ARENA_SIZE) ||
-         RangeOverlaps(address, size, SCRATCH_BASE, SCRATCH_BASE + SCRATCH_ARENA_SIZE);
+         RangeOverlaps(address, size, SCRATCH_BASE, SCRATCH_BASE + SCRATCH_ARENA_SIZE) ||
+         RangeOverlaps(address, size, HIGH_PATCH_ARENA_BASE,
+                       HIGH_PATCH_ARENA_BASE + HIGH_PATCH_ARENA_SIZE);
 }
 
 bool PrimeGameObjectPointerLooksValid(u32 address, u32 size)
@@ -889,6 +900,7 @@ void InvalidatePrimedGunPatchICache(Core::System& system)
   auto& jit = system.GetJitInterface();
   jit.InvalidateICache(0x80000000u, 0x00200000u, true);
   jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
+  jit.InvalidateICache(HIGH_PATCH_ARENA_BASE, HIGH_PATCH_ARENA_SIZE, true);
 }
 
 bool InstallBranchAfterCaveWrite(const Core::CPUThreadGuard& guard, u32 patch_address,
@@ -3790,6 +3802,48 @@ bool MatrixFromHmdSnapshot(const Common::VR::OpenXRInputSnapshot& snapshot, floa
   return true;
 }
 
+void ClearAudioListenerScratch(const Core::CPUThreadGuard& guard)
+{
+  for (u32 offset = 0; offset <= 0x18u; offset += 4u)
+    TryWriteU32(guard, AUDIO_LISTENER_SCRATCH + offset, 0);
+}
+
+bool WriteAudioListenerScratch(const Core::CPUThreadGuard& guard, const Matrix3x4& hmd)
+{
+  if (!MatrixNumbersLookValid(hmd))
+    return false;
+
+  const bool wrote_vectors =
+      // Prime's UpdateAudioListener passes camera column Y as listener heading.
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x04u, hmd.At(0, 1)) &&
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x08u, hmd.At(1, 1)) &&
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x0Cu, hmd.At(2, 1)) &&
+      // Prime passes camera column Z as listener up.
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x10u, hmd.At(0, 2)) &&
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x14u, hmd.At(1, 2)) &&
+      TryWriteFloat(guard, AUDIO_LISTENER_SCRATCH + 0x18u, hmd.At(2, 2));
+  if (!wrote_vectors)
+  {
+    TryWriteU32(guard, AUDIO_LISTENER_SCRATCH, 0);
+    return false;
+  }
+
+  return TryWriteU32(guard, AUDIO_LISTENER_SCRATCH, 1);
+}
+
+void UpdateAudioListenerScratchFromHmd(const Core::CPUThreadGuard& guard,
+                                       const Common::VR::OpenXRInputSnapshot& snapshot,
+                                       float yaw_delta_deg)
+{
+  Matrix3x4 hmd{};
+  if (!snapshot.runtime_active || !snapshot.head_pose.valid ||
+      !MatrixFromHmdSnapshot(snapshot, yaw_delta_deg, &hmd) ||
+      !WriteAudioListenerScratch(guard, hmd))
+  {
+    ClearAudioListenerScratch(guard);
+  }
+}
+
 bool ScanPitchFieldsWritable(const Core::CPUThreadGuard& guard, u32 player)
 {
   if (!PlayerObjectLooksValid(guard, player))
@@ -5391,6 +5445,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
   if (!snapshot.runtime_active)
   {
+    ClearAudioListenerScratch(guard);
     PublishVrOverlayState(settings, false);
     return;
   }
@@ -5404,6 +5459,10 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   SetRuntimeSettings(settings);
 
   float yaw_delta_deg = GetPlayerYawDeltaDegrees(guard);
+  if (settings.builtin_patches_enabled)
+    UpdateAudioListenerScratchFromHmd(guard, snapshot, yaw_delta_deg);
+  else
+    ClearAudioListenerScratch(guard);
   UpdateDirectionalMovement(guard, snapshot, settings, yaw_delta_deg);
   UpdateXrDpad(guard, snapshot, settings);
   float snap_turn_yaw_deg = 0.0f;
@@ -6324,6 +6383,70 @@ bool ApplyFirstPersonOrbitAimVectorPatch(const Core::CPUThreadGuard& guard)
   return patch_wrote;
 }
 
+bool ApplyAudioListenerPatch(const Core::CPUThreadGuard& guard)
+{
+  auto& patch = s_audio_listener_patch;
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current))
+    return false;
+
+  const u32 branch = PpcBranch(patch.address, patch.cave);
+  const u32 legacy_bad_branch = PpcBranch(patch.address, AUDIO_LISTENER_LEGACY_BAD_CAVE);
+  if (current != branch && current != patch.original && current != legacy_bad_branch)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  constexpr u32 scratch_hi = (AUDIO_LISTENER_SCRATCH >> 16) & 0xffffu;
+  constexpr u32 scratch_lo = AUDIO_LISTENER_SCRATCH & 0xffffu;
+  const u32 original_label = patch.cave + 0x60u;
+  const u32 return_addr = patch.address + 0x28u;
+  const std::initializer_list<HookWrite> cave_writes{
+      {0x00u, 0x3D800000u | scratch_hi},  // lis r12, scratch@ha
+      {0x04u, 0x618C0000u | scratch_lo},  // ori r12, r12, scratch@l
+      {0x08u, 0x800C0000u},               // lwz r0, 0(r12)
+      {0x0Cu, 0x2C000000u},               // cmpwi r0, 0
+      {0x10u, PpcBeq(patch.cave + 0x10u, original_label)},
+
+      {0x14u, 0x88E2CC40u},  // lbz r7, -0x33c0(r2)
+      {0x18u, 0xC10C0010u},  // up.x
+      {0x1Cu, 0xD1010008u},
+      {0x20u, 0xC10C0014u},  // up.y
+      {0x24u, 0xD101000Cu},
+      {0x28u, 0xC10C0018u},  // up.z
+      {0x2Cu, 0xD1010010u},
+      {0x30u, 0xC10C0004u},  // heading.x
+      {0x34u, 0xD1010014u},
+      {0x38u, 0xC10C0008u},  // heading.y
+      {0x3Cu, 0xD1010018u},
+      {0x40u, 0xC10C000Cu},  // heading.z
+      {0x44u, 0xD101001Cu},
+      {0x48u, 0xD0410020u},  // original translation column
+      {0x4Cu, 0xD0210024u},
+      {0x50u, 0xD0010028u},
+      {0x54u, PpcBranch(patch.cave + 0x54u, return_addr)},
+      {0x58u, 0x60000000u},
+      {0x5Cu, 0x60000000u},
+
+      {0x60u, patch.original},
+      {0x64u, 0x88E2CC40u},
+      {0x68u, 0xD0E1000Cu},
+      {0x6Cu, 0xD0C10010u},
+      {0x70u, 0xD0A10014u},
+      {0x74u, 0xD0810018u},
+      {0x78u, 0xD061001Cu},
+      {0x7Cu, 0xD0410020u},
+      {0x80u, 0xD0210024u},
+      {0x84u, 0xD0010028u},
+      {0x88u, PpcBranch(patch.cave + 0x88u, return_addr)}};
+
+  const bool patch_wrote = InstallBranchAfterCaveWrite(guard, patch.address, patch.cave, cave_writes);
+  patch.applied = InstructionBlockMatches(guard, patch.cave, cave_writes) &&
+                  TryReadU32(guard, patch.address, &current) && current == branch;
+  return patch_wrote;
+}
+
 void UpdatePitchZeroHookEnabled(const Core::CPUThreadGuard& guard, bool scan_active)
 {
   // Keep the original pitch-zero behavior active in scan mode too; otherwise Prime's
@@ -6355,6 +6478,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyInterpolationCameraLevelPatch(guard) || wrote;
   wrote = ApplyOrbitOrientationNoSpinPatch(guard) || wrote;
   wrote = ApplyFirstPersonOrbitAimVectorPatch(guard) || wrote;
+  wrote = ApplyAudioListenerPatch(guard) || wrote;
 
   u32 player = 0;
   const bool scan_active =
@@ -6596,6 +6720,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   if (!settings.enabled)
   {
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
+    ClearAudioListenerScratch(guard);
     s_cinematic_screen_active = false;
     s_cinematic_screen_hold_until_frame = 0;
     s_gameplay_input_hold_until_frame = 0;
@@ -6608,6 +6733,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   if (!game_active)
   {
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
+    ClearAudioListenerScratch(guard);
     s_cinematic_screen_active = false;
     s_cinematic_screen_hold_until_frame = 0;
     s_gameplay_input_hold_until_frame = 0;
@@ -6631,6 +6757,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   if (!have_player)
   {
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
+    ClearAudioListenerScratch(guard);
     s_cinematic_screen_active = false;
     s_cinematic_screen_hold_until_frame = 0;
     if (s_last_patch_player != 0)
@@ -6862,6 +6989,7 @@ void ResetNativeRuntime()
   s_orbit_orientation_no_spin_patch.applied = false;
   s_orbit_orientation_no_spin_patch.original = 0;
   s_first_person_orbit_aim_vector_patch.applied = false;
+  s_audio_listener_patch.applied = false;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
     patch.applied = false;
   s_combat_elevation_pitch_patch.applied = false;
