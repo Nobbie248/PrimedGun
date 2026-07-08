@@ -209,14 +209,20 @@ constexpr u32 UPDATE_SCAN_OBJECT_INDICATORS = 0x80112508u;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS = 0x801122CCu;
 constexpr u32 DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL = 0xC0410074u;
 
-constexpr u32 VR_MENU_TAB_COUNT = 5;
+constexpr u32 VR_MENU_TAB_COUNT = 6;
+constexpr u32 VR_MENU_LAYOUT_TAB = 0;
+constexpr u32 VR_MENU_CALIBRATION_TAB = 1;
+constexpr float VR_MENU_TEXTURE_WIDTH = 1024.0f;
+constexpr float VR_MENU_TEXTURE_HEIGHT = 512.0f;
+constexpr float VR_MENU_LAYOUT_TEXTURE_WIDTH = 1280.0f;
+constexpr float VR_MENU_LAYOUT_TEXTURE_HEIGHT = 760.0f;
 constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 8;
 constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 18;
 constexpr u32 VR_MENU_CALIBRATION_PAGE_COUNT = 2;
-constexpr u32 VR_MENU_CONTROL_TAB = 1;
-constexpr u32 VR_MENU_MOVEMENT_TAB = 2;
-constexpr u32 VR_MENU_CANNON_TAB = 3;
-constexpr u32 VR_MENU_STATE_TAB = 4;
+constexpr u32 VR_MENU_CONTROL_TAB = 2;
+constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
+constexpr u32 VR_MENU_CANNON_TAB = 4;
+constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
 constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 16;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
@@ -252,6 +258,11 @@ constexpr u32 FINAL_INPUT_RIGHT_STICK_Y_PRESS = FINAL_INPUT_OFFSET + 0x23u;
 constexpr u32 FINAL_INPUT_DPAD_HELD_0 = FINAL_INPUT_OFFSET + 0x2Cu;
 constexpr u32 FINAL_INPUT_DPAD_HELD_1 = FINAL_INPUT_OFFSET + 0x2Du;
 constexpr u32 STATE_MANAGER_PLAYER_STATE_OFFSET = 0x8B8u;
+constexpr u32 STATE_MANAGER_WORLD_TRANS_MANAGER_REF_OFFSET = 0x8C4u;
+constexpr u32 RSTL_REF_DATA_OBJECT_OFFSET = 0x00u;
+constexpr u32 WORLD_TRANS_MANAGER_TYPE_OFFSET = 0x30u;
+constexpr u32 WORLD_TRANS_MANAGER_TYPE_ELEVATOR = 1u;
+constexpr u64 CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES = 10u;
 constexpr u32 PLAYER_STATE_CURRENT_VISOR_OFFSET = 0x14u;
 constexpr u32 PLAYER_STATE_TRANSITION_VISOR_OFFSET = 0x18u;
 constexpr u32 PLAYER_STATE_MAX_VISOR = 3u;
@@ -364,6 +375,7 @@ bool s_last_vr_menu_stick_right = false;
 bool s_vr_menu_visible = false;
 bool s_cinematic_screen_active = false;
 u64 s_cinematic_screen_hold_until_frame = 0;
+u32 s_cinematic_screen_generation = 0;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -4374,7 +4386,9 @@ u32 VrMenuItemCountForTab(u32 tab)
 {
   switch (tab)
   {
-  case 0:
+  case VR_MENU_LAYOUT_TAB:
+    return 0;
+  case VR_MENU_CALIBRATION_TAB:
     return s_vr_menu_calibration_page == 0 ?
                VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS + 1 :
                VR_MENU_CALIBRATION_TOTAL_ITEMS - VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS + 1;
@@ -4443,6 +4457,12 @@ void ClearVrMenuConfirmations()
   ClearVrResetConfirmation();
 }
 
+void ResetVrMenuToLayoutTab()
+{
+  s_vr_menu_tab = VR_MENU_LAYOUT_TAB;
+  s_vr_menu_selected_index = 0;
+}
+
 void RefreshVrStateConfirmation()
 {
   if (s_vr_state_confirm_action != 0 && s_frame_counter >= s_vr_state_confirm_until_frame)
@@ -4498,9 +4518,11 @@ int VrMenuCalibrationActualIndex(u32 local_index)
 
 u32 VrMenuResetActionForSelection()
 {
-  if (s_vr_menu_tab == 0 && VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 7)
+  if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 7)
     return VR_MENU_RESET_TARGETING_ACTION;
-  if (s_vr_menu_tab == 0 && VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 15)
+  if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 15)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
       VrMenuControlActualIndex(s_vr_menu_selected_index) == 15)
@@ -4516,7 +4538,7 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
 {
   switch (tab)
   {
-  case 0:
+  case VR_MENU_CALIBRATION_TAB:
   {
     if (index == 0)
       return true;
@@ -4690,24 +4712,63 @@ bool CinematicCameraActive(const Core::CPUThreadGuard& guard)
          cine_camera_count > 0 && cine_camera_count < 16;
 }
 
+bool ElevatorWorldTransitionActive(const Core::CPUThreadGuard& guard)
+{
+  u32 trans_ref_data = 0;
+  u32 trans_manager = 0;
+  if (!TryReadU32(guard, ADDRESS.state_manager + STATE_MANAGER_WORLD_TRANS_MANAGER_REF_OFFSET,
+                  &trans_ref_data) ||
+      !PrimeDataPointerLooksValid(trans_ref_data, RSTL_REF_DATA_OBJECT_OFFSET + sizeof(u32)) ||
+      !TryReadU32(guard, trans_ref_data + RSTL_REF_DATA_OBJECT_OFFSET, &trans_manager) ||
+      !PrimeDataPointerLooksValid(trans_manager, WORLD_TRANS_MANAGER_TYPE_OFFSET + sizeof(u32)))
+  {
+    return false;
+  }
+
+  u32 trans_type = 0;
+  return TryReadU32(guard, trans_manager + WORLD_TRANS_MANAGER_TYPE_OFFSET, &trans_type) &&
+         trans_type == WORLD_TRANS_MANAGER_TYPE_ELEVATOR;
+}
+
+void SetCinematicScreenActive(bool active)
+{
+  if (active && !s_cinematic_screen_active)
+    ++s_cinematic_screen_generation;
+  s_cinematic_screen_active = active;
+}
+
+void ClearCinematicScreenState(bool enabled)
+{
+  SetCinematicScreenActive(false);
+  s_cinematic_screen_hold_until_frame = 0;
+#ifdef ENABLE_VR
+  Common::VR::PrimedGunVrOverlayState overlay =
+      Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  overlay.cinematic_screen_enabled = enabled;
+  overlay.cinematic_screen_active = false;
+  overlay.cinematic_screen_generation = s_cinematic_screen_generation;
+  Common::VR::OpenXRInputState::SetPrimedGunOverlay(overlay);
+#endif
+}
+
 void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings)
 {
   if (!settings.cinematic_screen_enabled)
   {
-    s_cinematic_screen_active = false;
-    s_cinematic_screen_hold_until_frame = 0;
+    ClearCinematicScreenState(false);
     return;
   }
 
-  if (CinematicCameraActive(guard))
+  if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard))
   {
-    s_cinematic_screen_active = true;
-    s_cinematic_screen_hold_until_frame = s_frame_counter + 20;
+    SetCinematicScreenActive(true);
+    s_cinematic_screen_hold_until_frame =
+        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
     return;
   }
 
   if (s_frame_counter >= s_cinematic_screen_hold_until_frame)
-    s_cinematic_screen_active = false;
+    SetCinematicScreenActive(false);
 }
 
 void ResetVrRuntimeSettings(RuntimeSettings* settings)
@@ -4740,7 +4801,7 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
   const float sign = direction < 0 ? -1.0f : 1.0f;
   switch (s_vr_menu_tab)
   {
-  case 0:
+  case VR_MENU_CALIBRATION_TAB:
   {
     if (s_vr_menu_selected_index == 0)
     {
@@ -4869,7 +4930,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
   if (reset_action == 0)
     ClearVrResetConfirmation();
 
-  if (s_vr_menu_tab == 0)
+  if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB)
   {
     if (s_vr_menu_selected_index == 0)
     {
@@ -5089,6 +5150,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
   overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
   overlay.cinematic_screen_active = settings.cinematic_screen_enabled && s_cinematic_screen_active;
+  overlay.cinematic_screen_generation = s_cinematic_screen_generation;
   overlay.metroid_hud_distance = settings.metroid_hud_distance;
   overlay.metroid_hud_size = settings.metroid_hud_size;
   overlay.xr_dpad_head_radius = settings.xr_dpad_head_radius;
@@ -5184,6 +5246,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       {
         s_vr_menu_visible = !s_vr_menu_visible;
         s_vr_menu_long_press_consumed = true;
+        if (s_vr_menu_visible)
+          ResetVrMenuToLayoutTab();
         if (!s_vr_menu_visible)
           ClearVrMenuConfirmations();
         ++s_vr_menu_generation;
@@ -5193,6 +5257,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
   else if (menu_input && !s_last_vr_menu_thumbstick)
   {
     s_vr_menu_visible = !s_vr_menu_visible;
+    if (s_vr_menu_visible)
+      ResetVrMenuToLayoutTab();
     if (!s_vr_menu_visible)
       ClearVrMenuConfirmations();
     ++s_vr_menu_generation;
@@ -5216,6 +5282,12 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
   {
     const Pose panel_pose = GripControllerPose(panel_hand);
     const Pose pointer_pose = PoseFromOpenXR(pointer_hand.aim_pose);
+    const float menu_texture_width = s_vr_menu_tab == VR_MENU_LAYOUT_TAB ?
+                                         VR_MENU_LAYOUT_TEXTURE_WIDTH :
+                                         VR_MENU_TEXTURE_WIDTH;
+    const float menu_texture_height = s_vr_menu_tab == VR_MENU_LAYOUT_TAB ?
+                                          VR_MENU_LAYOUT_TEXTURE_HEIGHT :
+                                          VR_MENU_TEXTURE_HEIGHT;
     pointer_active = VrMenuPointerHit(panel_pose, pointer_pose, &pointer_x, &pointer_y);
     if (pointer_active)
     {
@@ -5223,7 +5295,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
       if (item_count > 0)
       {
         const int hovered =
-            VrMenuRowFromTextureY(s_vr_menu_tab, std::clamp(pointer_y, 0.0f, 1.0f) * 512.0f,
+            VrMenuRowFromTextureY(s_vr_menu_tab,
+                                  std::clamp(pointer_y, 0.0f, 1.0f) * menu_texture_height,
                                   item_count);
         if (hovered >= 0 && s_vr_menu_selected_index != static_cast<u32>(hovered))
         {
@@ -5243,13 +5316,13 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
     const bool secondary = pointer_hand.connected && pointer_hand.secondary_button;
     if (primary && !s_last_vr_menu_primary)
     {
-      const float texture_x = std::clamp(pointer_x, 0.0f, 1.0f) * 1024.0f;
-      const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * 512.0f;
+      const float texture_x = std::clamp(pointer_x, 0.0f, 1.0f) * menu_texture_width;
+      const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * menu_texture_height;
       if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
       {
         constexpr float tab_start_x = 22.0f;
-        constexpr float tab_step = 196.0f;
-        constexpr float tab_width = 180.0f;
+        constexpr float tab_step = 166.0f;
+        constexpr float tab_width = 150.0f;
         const int tab = static_cast<int>((texture_x - tab_start_x) / tab_step);
         const float tab_local_x =
             texture_x - (tab_start_x + static_cast<float>(tab) * tab_step);
@@ -5263,7 +5336,8 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
           ++s_vr_menu_generation;
         }
       }
-      else if (pointer_active && texture_y >= 108.0f && texture_y <= 136.0f)
+      else if (s_vr_menu_tab != VR_MENU_LAYOUT_TAB && pointer_active && texture_y >= 108.0f &&
+               texture_y <= 136.0f)
       {
         if (texture_x >= 52.0f && texture_x <= 272.0f)
           SaveVrMenuSettingsNotice();
@@ -5419,8 +5493,6 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   RuntimeSettings settings = GetRuntimeSettings();
   if (!settings.enabled)
     return;
-
-  UpdateCinematicScreenState(guard, settings);
 
   const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
   if (!snapshot.runtime_active)
@@ -6698,8 +6770,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
-    s_cinematic_screen_active = false;
-    s_cinematic_screen_hold_until_frame = 0;
+    ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -6712,8 +6783,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
-    s_cinematic_screen_active = false;
-    s_cinematic_screen_hold_until_frame = 0;
+    ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -6724,6 +6794,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   s_game_was_active = true;
+  UpdateCinematicScreenState(guard, settings);
   UpdateShaderHunterGameFlowFlags(guard);
   if (settings.builtin_patches_enabled && RestoreLegacyMorphBallCameraReturnPatch(guard))
     InvalidatePrimedGunPatchICache(system);
@@ -6737,8 +6808,6 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
-    s_cinematic_screen_active = false;
-    s_cinematic_screen_hold_until_frame = 0;
     if (s_last_patch_player != 0)
       s_patch_reapply_until_frame = s_frame_counter + 180u;
     s_last_patch_player = 0;
@@ -6746,6 +6815,9 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     const bool held_gameplay_input_active = s_frame_counter < s_gameplay_input_hold_until_frame;
     s_gameplay_input_active.store(held_gameplay_input_active, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
+#ifdef ENABLE_VR
+    PublishVrOverlayState(settings, false);
+#endif
     return;
   }
 
@@ -6911,6 +6983,9 @@ void ResetNativeRuntime()
   s_patch_reapply_until_frame = 0;
   s_last_cannon_feed_watchdog_frame = 0;
   s_cannon_feed_stall_frames = 0;
+  s_cinematic_screen_generation = 0;
+  s_cinematic_screen_active = false;
+  s_cinematic_screen_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;
   s_cannon_hand_pose_ready = false;
@@ -6929,8 +7004,6 @@ void ResetNativeRuntime()
   s_last_vr_menu_stick_left = false;
   s_last_vr_menu_stick_right = false;
   s_vr_menu_visible = false;
-  s_cinematic_screen_active = false;
-  s_cinematic_screen_hold_until_frame = 0;
   s_snap_turn_ready = true;
   s_snap_turn_cooldown_until_frame = 0;
   s_vr_menu_tab = 0;
@@ -7067,6 +7140,8 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
                                                 s_settings.rumble_intensity,
                                                 s_settings.rumble_hand_mode);
 #endif
+  if (!s_settings.enabled || !s_settings.cinematic_screen_enabled)
+    ClearCinematicScreenState(s_settings.cinematic_screen_enabled);
 }
 
 void ResetCalibrationOffsets()

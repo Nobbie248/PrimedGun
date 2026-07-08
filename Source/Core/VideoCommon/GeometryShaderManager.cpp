@@ -274,8 +274,9 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         vr_headlocked_projection_offset_y = 0.0f;
         const float upm = std::max(
             upm_override > 0.0f ? upm_override : g_ActiveConfig.vr_units_per_meter, 0.0001f);
-        const bool primedgun_cinematic_screen =
-            Common::VR::OpenXRInputState::GetPrimedGunOverlay().cinematic_screen_active;
+        const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+        const bool primedgun_cinematic_screen = primedgun_overlay.cinematic_screen_enabled &&
+                                                primedgun_overlay.cinematic_screen_active;
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
@@ -396,7 +397,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           // Virtual screen params (for ortho draws: menus, FMV, HUD).
           const float dist = upm * g_ActiveConfig.vr_screen_distance;
           const float half_h = upm * g_ActiveConfig.vr_screen_size * 0.5f;
-          const float half_w = half_h * (16.0f / 9.0f);
+          constexpr float virtual_screen_aspect = 4.0f / 3.0f;
+          const float half_w = half_h * virtual_screen_aspect;
           // Layer index: use manual override if set, otherwise auto counter.
           const int layer = (vr_ortho_layer_override >= 0) ? vr_ortho_layer_override
                                                            : vr_ortho_draw_counter;

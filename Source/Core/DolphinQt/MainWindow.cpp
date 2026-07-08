@@ -373,6 +373,38 @@ bool PrimedGunSamePath(const QString& a, const QString& b)
                           path_case_sensitivity) == 0;
 }
 
+bool PrimedGunUserDirHasNearbyExe(const QString& user_dir_path)
+{
+  const QDir user_dir(user_dir_path);
+  if (!user_dir.exists())
+    return false;
+
+  const QFileInfo user_dir_info(user_dir.absolutePath());
+  const QDir install_dir = user_dir_info.absoluteDir();
+  QStringList candidates;
+  PrimedGunAddUniquePath(&candidates, install_dir.filePath(QStringLiteral("PrimedGun.exe")));
+  PrimedGunAddUniquePath(&candidates, install_dir.filePath(QStringLiteral("x64/PrimedGun.exe")));
+  PrimedGunAddUniquePath(&candidates, install_dir.filePath(QStringLiteral("Binary/PrimedGun.exe")));
+  PrimedGunAddUniquePath(&candidates,
+                         install_dir.filePath(QStringLiteral("Binary/x64/PrimedGun.exe")));
+  PrimedGunAddUniquePath(&candidates,
+                         install_dir.filePath(QStringLiteral("build/bin/PrimedGun.exe")));
+  PrimedGunAddUniquePath(&candidates,
+                         install_dir.filePath(QStringLiteral("build/bin/x64/PrimedGun.exe")));
+
+  for (const QString& candidate : candidates)
+  {
+    const QFileInfo exe_info(candidate);
+    if (exe_info.isFile() &&
+        exe_info.fileName().compare(QStringLiteral("PrimedGun.exe"), Qt::CaseInsensitive) == 0)
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 QString PrimedGunFindOldMemoryCardInDirs(const QStringList& search_dirs,
                                          const QString& current_memory_card)
 {
@@ -429,6 +461,10 @@ QString PrimedGunConfigDirNearMemoryCard(const QString& memory_card_path)
 
 QString PrimedGunFindSettingsNearMemoryCard(const QString& memory_card_path)
 {
+  const QString user_dir_path = PrimedGunUserDirNearMemoryCard(memory_card_path);
+  if (!PrimedGunUserDirHasNearbyExe(user_dir_path))
+    return {};
+
   const QString config_dir_path = PrimedGunConfigDirNearMemoryCard(memory_card_path);
   if (config_dir_path.isEmpty())
     return {};
@@ -578,6 +614,8 @@ int PrimedGunTransferDolphinSettingsNearMemoryCard(const QString& memory_card_pa
 {
   const QString old_user_dir_path = PrimedGunUserDirNearMemoryCard(memory_card_path);
   if (old_user_dir_path.isEmpty())
+    return 0;
+  if (!PrimedGunUserDirHasNearbyExe(old_user_dir_path))
     return 0;
 
   const QString current_user_dir_path =
@@ -3870,7 +3908,7 @@ void MainWindow::ConnectStack()
     }
     else
     {
-      message += tr("\n\nNo old PrimeGun settings were found next to that memory card.");
+      message += tr("\n\nNo old PrimeGun settings were found in a folder with PrimedGun.exe.");
     }
     if (imported_dolphin_settings_count > 0)
     {
@@ -3880,7 +3918,8 @@ void MainWindow::ConnectStack()
     }
     else
     {
-      message += tr("\n\nNo old Dolphin settings were found next to that memory card.");
+      message += tr("\n\nNo old user-created Dolphin settings were found in a folder with "
+                    "PrimedGun.exe.");
     }
     ModalMessageBox::information(this, tr("Transfer Old Memory Card"), message);
   });

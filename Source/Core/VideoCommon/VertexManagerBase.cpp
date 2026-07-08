@@ -86,6 +86,8 @@ constexpr int METROID_PRIME1_THERMAL_HEAT_VFOV_X100 = 5;
 constexpr int METROID_PRIME1_THERMAL_HEAT_NEAR_X1000 = 200;
 constexpr int METROID_PRIME1_THERMAL_HEAT_FAR_X100 = 75;
 constexpr u64 METROID_PRIME1_THERMAL_MASK_STAGE7_HASH = 0x8e31231cae45574c;
+constexpr u32 METROID_PRIME1_FULLSCREEN_EFB_EFFECT_PS_HASH = 0x667d9a41;
+constexpr u32 METROID_PRIME1_FULLSCREEN_EFB_EFFECT_SOURCE_STAGE = 7;
 constexpr u64 PRIMEGUN_CANNON_PROBE_PS_HASH = 0x9e0b32f0;
 constexpr u32 PRIMEGUN_CANNON_PROBE_MAX_LOGS = 240;
 constexpr u32 PRIMEGUN_THERMAL_HUD_MAX_LOGS = 240;
@@ -697,6 +699,51 @@ bool HasMetroidPrime1ThermalScissor(const ShaderHunter::RuntimeElementSignature&
 {
   return signature.scissor_left == 342 && signature.scissor_top == 342 &&
          signature.scissor_right == 981 && signature.scissor_bottom == 789;
+}
+
+bool HasMetroidPrime1MainViewport(const ShaderHunter::RuntimeElementSignature& signature)
+{
+  return signature.viewport_x == 662 && signature.viewport_y == 566 &&
+         signature.viewport_width == 320 && signature.viewport_height == 224 &&
+         HasMetroidPrime1ThermalScissor(signature);
+}
+
+bool HasBoundEfbCopyTexture()
+{
+  if (!g_texture_cache)
+    return false;
+
+  for (u32 stage = 0; stage < 8; ++stage)
+  {
+    if (g_texture_cache->IsBoundTextureEfbCopy(stage))
+      return true;
+  }
+
+  return false;
+}
+
+bool HasBoundEfbCopyTextureAtStage(u32 stage)
+{
+  return g_texture_cache && g_texture_cache->IsBoundTextureEfbCopy(stage);
+}
+
+bool IsMetroidPrime1FramebufferEffectDraw(
+    const std::optional<ElementsGroupManager::DrawRecord>& draw)
+{
+  if (!draw || !IsMetroidPrime1Profile(draw->profile_id))
+    return false;
+
+  const ShaderHunter::RuntimeElementSignature& signature = draw->signature;
+  const bool fullscreen_efb_effect_shader =
+      static_cast<u32>(draw->ps_hash) == METROID_PRIME1_FULLSCREEN_EFB_EFFECT_PS_HASH;
+  if (!fullscreen_efb_effect_shader)
+    return false;
+
+  const bool efb_copy_source =
+      HasBoundEfbCopyTextureAtStage(METROID_PRIME1_FULLSCREEN_EFB_EFFECT_SOURCE_STAGE) ||
+      HasBoundEfbCopyTexture();
+  return signature.valid && !signature.perspective && HasMetroidPrime1MainViewport(signature) &&
+         signature.blend_color_update && efb_copy_source;
 }
 
 bool HasMetroidPrime1ThermalHeatProjection(
@@ -1856,6 +1903,17 @@ void VertexManagerBase::Flush()
             if (xray_signature_fallback && handling == ShaderHunter::HandlingType::Skip)
             {
               handling = ShaderHunter::HandlingType::FullscreenMono;
+            }
+            const bool framebuffer_effect_draw =
+                metroid_visor_fix_active && IsMetroidPrime1FramebufferEffectDraw(element_draw);
+            if (framebuffer_effect_draw &&
+                (handling == ShaderHunter::HandlingType::Skip ||
+                 handling == ShaderHunter::HandlingType::Screen ||
+                 handling == ShaderHunter::HandlingType::HeadLocked))
+            {
+              handling = ShaderHunter::HandlingType::FullscreenMono;
+              manual_layer = -1;
+              element_depth = -1.0f;
             }
 
             if (handling == ShaderHunter::HandlingType::Screen)

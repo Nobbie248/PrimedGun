@@ -39,40 +39,69 @@ namespace PGO = PrimedGun::Overlay;
 
 namespace
 {
+struct CinematicScreenAnchor
+{
+  bool valid = false;
+  uint32_t generation = 0;
+  XrQuaternionf orientation{0.0f, 0.0f, 0.0f, 1.0f};
+  XrVector3f position{};
+};
+
+static CinematicScreenAnchor s_cinematic_screen_anchor;
+
+bool ReadCinematicScreenViewerPose(XrQuaternionf* orientation, XrVector3f* position)
+{
+  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+
+  if (snapshot.head_pose.valid)
+  {
+    *orientation = {snapshot.head_pose.orientation[0], snapshot.head_pose.orientation[1],
+                    snapshot.head_pose.orientation[2], snapshot.head_pose.orientation[3]};
+    *position = {snapshot.head_pose.position[0] + snapshot.tracking_origin_position[0],
+                 snapshot.head_pose.position[1] + snapshot.tracking_origin_position[1],
+                 snapshot.head_pose.position[2] + snapshot.tracking_origin_position[2]};
+    return true;
+  }
+
+  if (VR::g_openxr->AreSubmittedEyeViewsValid())
+  {
+    const auto& eyes = VR::g_openxr->GetSubmittedEyeViews();
+    *orientation = eyes[0].pose.orientation;
+    *position = {0.5f * (eyes[0].pose.position.x + eyes[1].pose.position.x),
+                 0.5f * (eyes[0].pose.position.y + eyes[1].pose.position.y),
+                 0.5f * (eyes[0].pose.position.z + eyes[1].pose.position.z)};
+    return true;
+  }
+
+  return false;
+}
+
+void ResetCinematicScreenAnchor()
+{
+  s_cinematic_screen_anchor = {};
+}
+
 bool BuildCinematicScreenLayer(const std::array<XREyeSwapchain, 2>& eye_swapchains,
-                               XrCompositionLayerQuad* layer)
+                               uint32_t generation, XrCompositionLayerQuad* layer)
 {
   if (!VR::g_openxr || !layer || eye_swapchains[0].swapchain == XR_NULL_HANDLE)
     return false;
 
-  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
-  XrQuaternionf orientation{};
-  XrVector3f position{};
-  bool pose_valid = false;
+  if (!s_cinematic_screen_anchor.valid || s_cinematic_screen_anchor.generation != generation)
+  {
+    XrQuaternionf orientation{};
+    XrVector3f position{};
+    if (!ReadCinematicScreenViewerPose(&orientation, &position))
+      return false;
 
-  if (snapshot.head_pose.valid)
-  {
-    orientation = {snapshot.head_pose.orientation[0], snapshot.head_pose.orientation[1],
-                   snapshot.head_pose.orientation[2], snapshot.head_pose.orientation[3]};
-    position = {snapshot.head_pose.position[0] + snapshot.tracking_origin_position[0],
-                snapshot.head_pose.position[1] + snapshot.tracking_origin_position[1],
-                snapshot.head_pose.position[2] + snapshot.tracking_origin_position[2]};
-    pose_valid = true;
-  }
-  else if (VR::g_openxr->AreSubmittedEyeViewsValid())
-  {
-    const auto& eyes = VR::g_openxr->GetSubmittedEyeViews();
-    orientation = eyes[0].pose.orientation;
-    position = {0.5f * (eyes[0].pose.position.x + eyes[1].pose.position.x),
-                0.5f * (eyes[0].pose.position.y + eyes[1].pose.position.y),
-                0.5f * (eyes[0].pose.position.z + eyes[1].pose.position.z)};
-    pose_valid = true;
+    s_cinematic_screen_anchor.valid = true;
+    s_cinematic_screen_anchor.generation = generation;
+    s_cinematic_screen_anchor.orientation = PGO::YawOnlyQuaternion(orientation);
+    s_cinematic_screen_anchor.position = position;
   }
 
-  if (!pose_valid)
-    return false;
-
-  const XrVector3f offset = PGO::RotateVector(orientation, {0.0f, 0.0f, -2.0f});
+  const XrVector3f offset =
+      PGO::RotateVector(s_cinematic_screen_anchor.orientation, {0.0f, 0.0f, -2.0f});
   *layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   layer->space = VR::g_openxr->GetReferenceSpace();
   layer->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -80,9 +109,11 @@ bool BuildCinematicScreenLayer(const std::array<XREyeSwapchain, 2>& eye_swapchai
   layer->subImage.imageRect.offset = {0, 0};
   layer->subImage.imageRect.extent = {static_cast<int32_t>(eye_swapchains[0].width),
                                       static_cast<int32_t>(eye_swapchains[0].height)};
-  layer->pose.orientation = orientation;
-  layer->pose.position = {position.x + offset.x, position.y + offset.y, position.z + offset.z};
-  layer->size = {2.2f, 1.2375f};
+  layer->pose.orientation = s_cinematic_screen_anchor.orientation;
+  layer->pose.position = {s_cinematic_screen_anchor.position.x + offset.x,
+                          s_cinematic_screen_anchor.position.y + offset.y,
+                          s_cinematic_screen_anchor.position.z + offset.z};
+  layer->size = {2.2f, 1.65f};
   return true;
 }
 }  // namespace
@@ -371,14 +402,19 @@ bool D3DOpenXR::SubmitFrame()
   ASSERT(VR::g_openxr != nullptr);
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  if (overlay.cinematic_screen_active &&
-      BuildCinematicScreenLayer(m_eye_swapchains, &m_cinematic_screen_layer))
+  const bool cinematic_screen_active =
+      overlay.cinematic_screen_enabled && overlay.cinematic_screen_active;
+  if (cinematic_screen_active &&
+      BuildCinematicScreenLayer(m_eye_swapchains, overlay.cinematic_screen_generation,
+                                &m_cinematic_screen_layer))
   {
     std::vector<XrCompositionLayerBaseHeader*> layers = {
         reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer)};
     m_primegun_overlay.AppendLayers(&layers);
     return VR::g_openxr->EndFrame(layers);
   }
+  if (!cinematic_screen_active)
+    ResetCinematicScreenAnchor();
 
   // Use the submit snapshot captured when the GS pose cache was last refreshed. Using
   // live m_eye_views here would pick up LocateViews that ran between the last draw and

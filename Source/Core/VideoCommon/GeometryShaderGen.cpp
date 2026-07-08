@@ -26,6 +26,7 @@ constexpr Common::EnumMap<const char*, PrimitiveType::TriangleStrip> primitives_
 
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_in_map{1u, 2u, 3u, 3u};
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_out_map{4u, 4u, 4u, 3u};
+constexpr u32 GEOMETRY_SHADER_CODE_VERSION = 40;
 
 bool geometry_shader_uid_data::IsPassthrough() const
 {
@@ -48,7 +49,7 @@ GeometryShaderUid GetGeometryShaderUid(PrimitiveType primitive_type)
   GeometryShaderUid out;
 
   geometry_shader_uid_data* const uid_data = out.GetUidData();
-  uid_data->code_version = 39;
+  uid_data->code_version = GEOMETRY_SHADER_CODE_VERSION;
   uid_data->primitive_type = static_cast<u32>(primitive_type);
   uid_data->numTexGens = xfmem.numTexGen.numTexGens;
 
@@ -637,6 +638,7 @@ void EnumerateGeometryShaderUids(const std::function<void(const GeometryShaderUi
   for (PrimitiveType primitive : primitive_lut)
   {
     geometry_shader_uid_data* const guid = uid.GetUidData();
+    guid->code_version = GEOMETRY_SHADER_CODE_VERSION;
     guid->primitive_type = static_cast<u32>(primitive);
 
     for (u32 texgens = 0; texgens <= 8; texgens++)

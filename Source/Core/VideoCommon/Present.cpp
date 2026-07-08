@@ -848,8 +848,9 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
   else if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
   {
     constexpr bool kForceOpenXRLayer0ToBothEyes = false;  // diagnostic
-    const bool cinematic_screen_active =
-        Common::VR::OpenXRInputState::GetPrimedGunOverlay().cinematic_screen_active;
+    const auto primegun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+    const bool cinematic_screen_active = primegun_overlay.cinematic_screen_enabled &&
+                                         primegun_overlay.cinematic_screen_active;
     static bool s_first_openxr_render = true;
     if (s_first_openxr_render)
     {

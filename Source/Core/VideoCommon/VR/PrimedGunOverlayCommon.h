@@ -158,6 +158,7 @@ inline const PrimedGunPng& LoadPrimedGunPng(const char* filename)
   static PrimedGunPng ice;
   static PrimedGunPng plasma;
   static PrimedGunPng position;
+  static PrimedGunPng controller_layout;
 
   PrimedGunPng* image = &power;
   if (std::strcmp(filename, "wave.png") == 0)
@@ -168,6 +169,8 @@ inline const PrimedGunPng& LoadPrimedGunPng(const char* filename)
     image = &plasma;
   else if (std::strcmp(filename, "position.png") == 0)
     image = &position;
+  else if (std::strcmp(filename, "controller layout.png") == 0)
+    image = &controller_layout;
 
   if (!image->tried)
   {
@@ -253,6 +256,12 @@ struct MenuRow
   std::string value;
 };
 
+constexpr uint32_t VR_MENU_LAYOUT_TAB = 0;
+constexpr uint32_t VR_MENU_CALIBRATION_TAB = 1;
+constexpr uint32_t VR_MENU_CONTROL_TAB = 2;
+constexpr uint32_t VR_MENU_MOVEMENT_TAB = 3;
+constexpr uint32_t VR_MENU_CANNON_TAB = 4;
+constexpr uint32_t VR_MENU_STATE_TAB = 5;
 constexpr uint32_t RESET_ALL_ACTION = 1;
 constexpr uint32_t RESET_TARGETING_ACTION = 2;
 constexpr uint32_t RESET_CALIBRATION_ACTION = 3;
@@ -286,7 +295,7 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
 {
   switch (s.tab)
   {
-  case 0:
+  case VR_MENU_CALIBRATION_TAB:
   {
     if (index == 0)
       return true;
@@ -295,9 +304,9 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
     return (actual_index >= 1 && actual_index <= 4) ||
            (actual_index >= 8 && actual_index <= 13);
   }
-  case 2:
+  case VR_MENU_MOVEMENT_TAB:
     return (index >= 3 && index <= 7) || index == 9;
-  case 1:
+  case VR_MENU_CONTROL_TAB:
   {
     if (index == 0)
       return true;
@@ -327,7 +336,7 @@ inline std::string RumbleHandModeText(int mode)
 inline int MenuRowTextY(const Common::VR::PrimedGunVrOverlayState& s, int index)
 {
   int y = 146 + index * 22;
-  if (s.tab == 4 && index >= 1)
+  if (s.tab == VR_MENU_STATE_TAB && index >= 1)
     y += 18;
   return y;
 }
@@ -336,7 +345,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
 {
   switch (s.tab)
   {
-  case 0:
+  case VR_MENU_CALIBRATION_TAB:
   {
     std::vector<MenuRow> rows;
     rows.push_back({"PAGE", s.calibration_page == 0 ? "1/2" : "2/2"});
@@ -367,7 +376,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
     }
     return rows;
   }
-  case 1:
+  case VR_MENU_CONTROL_TAB:
   {
     std::vector<MenuRow> rows;
     rows.push_back({"PAGE", s.control_page == 0 ? "1/2" : "2/2"});
@@ -398,7 +407,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
 
     return rows;
   }
-  case 2:
+  case VR_MENU_MOVEMENT_TAB:
     return {{"LEFT STICK STRAFE", s.directional_movement_enabled ? "ON" : "OFF"},
             {"MOVEMENT STICK", s.directional_movement_use_right_stick ? "RIGHT" : "LEFT"},
             {"MOVEMENT DIRECTION",
@@ -411,7 +420,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"SNAP TURN", s.snap_turn_enabled ? "ON" : "OFF"},
             {"SNAP TURN ANGLE", std::to_string(s.snap_turn_degrees)},
             {"RESET MOVEMENT", ConfirmText(s, RESET_MOVEMENT_ACTION)}};
-  case 3:
+  case VR_MENU_CANNON_TAB:
   {
     auto slot_status = [&](uint32_t slot) {
       return s.cannon_texture_slot == slot ? std::string("SELECTED") : std::string("SELECT");
@@ -420,7 +429,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
             {"SLOT 2", slot_status(2)}, {"SLOT 3", slot_status(3)},
             {"SLOT 4", slot_status(4)}, {"CUSTOM", slot_status(5)}};
   }
-  case 4:
+  case VR_MENU_STATE_TAB:
     return {{"LOAD STATE", s.state_confirm_action == 1 ? "ARE YOU SURE?" : "PRESS"},
             {"SAVE STATE", s.state_confirm_action == 2 ? "ARE YOU SURE?" : "PRESS"}};
   default:
@@ -459,9 +468,10 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   if (s.saved_notice)
     DrawText(pixels, width, height, "SETTINGS SAVED", 760, 34, 2, 0xFFFFE6B8u);
 
-  constexpr const char* tabs[] = {"CALIBRATION", "CONTROL", "MOVEMENT", "TEXTURES", "STATES"};
-  constexpr int tab_width = 180;
-  constexpr int tab_step = 196;
+  constexpr const char* tabs[] = {"LAYOUT",   "CALIBRATION", "CONTROL",
+                                  "MOVEMENT", "TEXTURES",    "STATES"};
+  constexpr int tab_width = 150;
+  constexpr int tab_step = 166;
   for (int i = 0; i < static_cast<int>(std::size(tabs)); ++i)
   {
     const int x = 22 + i * tab_step;
@@ -478,6 +488,14 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
     DrawText(pixels, width, height, label, x + (w - TextWidth(label, 2)) / 2, y + 7, 2,
              0xFFFFE6B8u);
   };
+
+  if (s.tab == VR_MENU_LAYOUT_TAB)
+  {
+    DrawPngFit(pixels, width, height, LoadPrimedGunPng("controller layout.png"), 20, 112,
+               static_cast<int>(width) - 40, static_cast<int>(height) - 126, false);
+    return pixels;
+  }
+
   draw_button("SAVE SETTINGS", 52, 108, 220);
   draw_button(s.reset_confirm_action == RESET_ALL_ACTION ? "ARE YOU SURE?" : "RESET ALL", 300,
               108, 220);
@@ -542,6 +560,22 @@ inline XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
   return {v.x + q.w * t.x + (q.y * t.z - q.z * t.y),
           v.y + q.w * t.y + (q.z * t.x - q.x * t.z),
           v.z + q.w * t.z + (q.x * t.y - q.y * t.x)};
+}
+
+inline XrQuaternionf YawOnlyQuaternion(const XrQuaternionf& q)
+{
+  XrVector3f forward = RotateVector(q, {0.0f, 0.0f, -1.0f});
+  forward.y = 0.0f;
+
+  const float len = std::sqrt(forward.x * forward.x + forward.z * forward.z);
+  if (len < 0.0001f)
+    return {0.0f, 0.0f, 0.0f, 1.0f};
+
+  forward.x /= len;
+  forward.z /= len;
+  const float yaw = std::atan2(-forward.x, -forward.z);
+  const float half_yaw = yaw * 0.5f;
+  return {0.0f, std::sin(half_yaw), 0.0f, std::cos(half_yaw)};
 }
 
 inline XrQuaternionf MulQuat(const XrQuaternionf& a, const XrQuaternionf& b)

@@ -19,7 +19,7 @@ namespace VideoCommon
 // As pipelines encompass both shader UIDs and render states, changes to either of these should
 // also increment the pipeline UID version. Incrementing the UID version will cause all UID
 // caches to be invalidated.
-constexpr u32 GX_PIPELINE_UID_VERSION = 10;  // Last changed for OpenXR multiview blending
+constexpr u32 GX_PIPELINE_UID_VERSION = 11;  // Last changed for PrimedGun OpenXR cinema gating
 
 struct GXPipelineUid
 {

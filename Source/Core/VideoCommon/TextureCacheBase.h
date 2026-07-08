@@ -291,6 +291,7 @@ public:
   // Returns the full texture info name (e.g. "tex1_64x64_091555bc4ec6eaf4_..._9").
   std::string GetBoundTextureName(u32 stage) const;
   // VR accessors for the texture bound at a stage.
+  bool IsBoundTextureEfbCopy(u32 stage) const;
   u32 GetBoundTextureLayers(u32 stage) const;
   u32 GetBoundTextureNativeWidth(u32 stage) const;
   u32 GetBoundTextureNativeHeight(u32 stage) const;

@@ -296,9 +296,10 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
 
   const bool menu = overlay.menu_visible;
   const bool weapon_panel = !menu && overlay.weapon_panel_visible;
+  const bool layout_menu = menu && overlay.tab == PGO::VR_MENU_LAYOUT_TAB;
   const uint32_t content_kind = menu ? 2u : weapon_panel ? 3u : 1u;
-  const uint32_t width = menu ? 1024 : weapon_panel ? 512 : 1024;
-  const uint32_t height = menu ? 512 : weapon_panel ? 512 : 384;
+  const uint32_t width = layout_menu ? 1280 : menu ? 1024 : weapon_panel ? 512 : 1024;
+  const uint32_t height = layout_menu ? 760 : menu ? 512 : weapon_panel ? 512 : 384;
   const uint32_t generation =
       menu ? overlay.generation : weapon_panel ? (100u + overlay.weapon_selected_index) : 1u;
   const std::vector<uint32_t> pixels =
