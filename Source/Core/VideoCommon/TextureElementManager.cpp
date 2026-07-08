@@ -23,10 +23,14 @@
 namespace
 {
 constexpr int MAX_TEXTURE_ELEMENT_LOGS = 240;
+constexpr bool ENABLE_PRIMEDGUN_TEXTURE_ELEMENT_LOGGING = false;
 std::atomic<int> s_texture_element_log_count = 0;
 
 void AppendTextureElementLog(std::string_view text)
 {
+  if (!ENABLE_PRIMEDGUN_TEXTURE_ELEMENT_LOGGING)
+    return;
+
   File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
   File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunTextureElement.log", "ab");
   if (!file)
@@ -415,7 +419,7 @@ void TextureElementManager::LoadOverrides(const std::string& game_id)
 
   m_has_overrides.store(has_overrides, std::memory_order_relaxed);
 
-  if (!m_overrides.empty())
+  if (ENABLE_PRIMEDGUN_TEXTURE_ELEMENT_LOGGING && !m_overrides.empty())
   {
     INFO_LOG_FMT(VIDEO, "TextureElementManager: Loaded {} enabled texture overrides for game {}",
                  m_overrides.size(), game_id);
@@ -458,11 +462,14 @@ bool TextureElementManager::ShouldSkipByTexture(const std::array<u64, 8>& bound)
     const auto it = m_texture_handling.find(hash);
     if (it != m_texture_handling.end() && it->second.handling == HandlingType::Skip)
     {
-      const int log_index = s_texture_element_log_count.fetch_add(1, std::memory_order_relaxed);
-      if (log_index < MAX_TEXTURE_ELEMENT_LOGS)
+      if (ENABLE_PRIMEDGUN_TEXTURE_ELEMENT_LOGGING)
       {
-        AppendTextureElementLog(
-            fmt::format("skip-match hash={:016x} slot_log={}\n", hash, log_index + 1));
+        const int log_index = s_texture_element_log_count.fetch_add(1, std::memory_order_relaxed);
+        if (log_index < MAX_TEXTURE_ELEMENT_LOGS)
+        {
+          AppendTextureElementLog(
+              fmt::format("skip-match hash={:016x} slot_log={}\n", hash, log_index + 1));
+        }
       }
       return true;
     }
@@ -485,14 +492,17 @@ TextureElementManager::HandlingType TextureElementManager::GetHandlingForTexture
     if (it == m_texture_handling.end() || it->second.handling == HandlingType::Skip)
       continue;
 
-    const int log_index = s_texture_element_log_count.fetch_add(1, std::memory_order_relaxed);
-    if (log_index < MAX_TEXTURE_ELEMENT_LOGS)
+    if (ENABLE_PRIMEDGUN_TEXTURE_ELEMENT_LOGGING)
     {
-      AppendTextureElementLog(fmt::format("handling-match hash={:016x} handling={} layer={} "
-                                          "depth={:.3f} upm={:.3f} slot_log={}\n",
-                                          hash, HandlingToString(it->second.handling),
-                                          it->second.layer, it->second.element_depth,
-                                          it->second.units_per_meter, log_index + 1));
+      const int log_index = s_texture_element_log_count.fetch_add(1, std::memory_order_relaxed);
+      if (log_index < MAX_TEXTURE_ELEMENT_LOGS)
+      {
+        AppendTextureElementLog(fmt::format("handling-match hash={:016x} handling={} layer={} "
+                                            "depth={:.3f} upm={:.3f} slot_log={}\n",
+                                            hash, HandlingToString(it->second.handling),
+                                            it->second.layer, it->second.element_depth,
+                                            it->second.units_per_meter, log_index + 1));
+      }
     }
 
     if (layer != nullptr)

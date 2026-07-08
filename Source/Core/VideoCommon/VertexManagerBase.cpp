@@ -92,6 +92,7 @@ constexpr u64 PRIMEGUN_CANNON_PROBE_PS_HASH = 0x9e0b32f0;
 constexpr u32 PRIMEGUN_CANNON_PROBE_MAX_LOGS = 240;
 constexpr u32 PRIMEGUN_THERMAL_HUD_MAX_LOGS = 240;
 constexpr u32 PRIMEGUN_ELEMENT_HANDLING_MAX_LOGS = 800;
+constexpr bool ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING = false;
 constexpr int METROID_HUD_CONTEXT_DEFAULT = 0;
 constexpr int METROID_HUD_CONTEXT_COMBAT = 1;
 constexpr int METROID_HUD_CONTEXT_MENU = 2;
@@ -200,6 +201,9 @@ std::string PrimedGunCannonProbeLogPath()
 
 void AppendPrimedGunCannonProbeLog(std::string_view text)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   const std::string path = PrimedGunCannonProbeLogPath();
   File::IOFile file(path, "ab");
   if (!file)
@@ -215,6 +219,9 @@ void LogPrimedGunCannonProbeDraw(u32 draw_sequence, u64 vs_hash, u64 ps_hash, u6
                                 const std::array<std::string, 8>& texture_names,
                                 const ShaderHunter::RuntimeElementSignature& signature)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   if (ps_hash != PRIMEGUN_CANNON_PROBE_PS_HASH)
     return;
 
@@ -335,6 +342,9 @@ bool ShouldDisableOpenXRLegacyView(float vr_override)
 
 void AppendPrimedGunThermalHudLog(std::string_view text)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   if (s_primegun_thermal_hud_log_count >= PRIMEGUN_THERMAL_HUD_MAX_LOGS)
     return;
 
@@ -348,6 +358,9 @@ void AppendPrimedGunThermalHudLog(std::string_view text)
 
 void AppendPrimedGunElementHandlingLog(std::string_view text)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   if (s_primegun_element_handling_log_count >= PRIMEGUN_ELEMENT_HANDLING_MAX_LOGS)
     return;
 
@@ -820,6 +833,9 @@ void LogMetroidPrime1XRayDraw(u32 draw_counter,
                               u64 gs_hash, int forced_texture_layer,
                               bool signature_fallback, bool d3d_tex0_layer_fallback)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   if (!ShouldLogMetroidPrime1XRayDraw(draw))
     return;
 
@@ -875,6 +891,9 @@ void LogPrimedGunElementHandling(u32 draw_counter,
                                   u64 gs_hash, const std::array<u64, 8>& texture_hashes,
                                   int forced_texture_layer, float stereo_override)
 {
+  if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
+    return;
+
   if (!draw || draw->profile_id != MetroidElementProfile::Prime1GC)
     return;
 

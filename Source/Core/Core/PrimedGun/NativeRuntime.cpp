@@ -144,12 +144,11 @@ constexpr u32 PATCH_CODE_ARENA_BASE = 0x80001C00u;
 constexpr u32 PATCH_CODE_ARENA_SIZE = 0xC00u;
 constexpr u32 SCRATCH_BASE = 0x80002800u;
 constexpr u32 SCRATCH_ARENA_SIZE = 0x800u;
-constexpr u32 HIGH_PATCH_ARENA_BASE = 0x817F8000u;
-constexpr u32 HIGH_PATCH_ARENA_SIZE = 0x2000u;
 constexpr u32 CANNON_BASIS_SCRATCH = SCRATCH_BASE + 0x000u;
 constexpr u32 CANNON_EXPECTED_GUN_SCRATCH = SCRATCH_BASE + 0x038u;
 constexpr u32 MODEL_OFFSET_WORLD_SCRATCH = SCRATCH_BASE + 0x040u;
 constexpr u32 ADJUSTED_GUN_POS_SCRATCH = SCRATCH_BASE + 0x050u;
+constexpr u32 AUDIO_LISTENER_CAVE = SCRATCH_BASE + 0x080u;
 constexpr u32 GUN_TARGET_SCRATCH = SCRATCH_BASE + 0x400u;
 constexpr u32 RETICLE_BILLBOARD_SCRATCH = SCRATCH_BASE + 0x500u;
 constexpr u32 SCAN_RETICLE_TRACE_SCRATCH = SCRATCH_BASE + 0x540u;
@@ -161,6 +160,7 @@ constexpr u32 DPAD_DISABLE_ORIGINAL_FLAGS_SCRATCH = SCRATCH_BASE + 0x68Cu;
 constexpr u32 GAMEFLOW_MENU_SCRATCH = SCRATCH_BASE + 0x690u;
 constexpr u32 MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH = SCRATCH_BASE + 0x694u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH = SCRATCH_BASE + 0x698u;
+constexpr u32 AUDIO_LISTENER_SCRATCH = SCRATCH_BASE + 0x700u;
 constexpr u32 DPAD_DISABLE_OWNER_MAGIC = 0x50474450u;  // PGDP
 
 constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
@@ -195,8 +195,7 @@ constexpr u32 INTERPOLATION_CAMERA_LEVEL_CAVE = PATCH_CODE_ARENA_BASE + 0xB80u;
 constexpr u32 AUDIO_LISTENER_PATCH_ADDRESS = 0x8000BA88u;
 constexpr u32 AUDIO_LISTENER_PATCH_ORIGINAL = 0xD1010008u;
 constexpr u32 AUDIO_LISTENER_LEGACY_BAD_CAVE = 0x80002300u;
-constexpr u32 AUDIO_LISTENER_CAVE = HIGH_PATCH_ARENA_BASE + 0x000u;
-constexpr u32 AUDIO_LISTENER_SCRATCH = HIGH_PATCH_ARENA_BASE + 0x100u;
+constexpr u32 AUDIO_LISTENER_LEGACY_HIGH_CAVE = 0x817F8000u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ADDRESS = 0x8000E71Cu;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ORIGINAL = 0x801E0304u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_SKIP_ADDRESS = 0x8000E9C4u;
@@ -246,7 +245,7 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
 constexpr bool ENABLE_PRIMEDGUN_RUNTIME_LOGGING = false;
-constexpr bool ENABLE_PRIMEDGUN_LOCK_LOGGING = true;
+constexpr bool ENABLE_PRIMEDGUN_LOCK_LOGGING = false;
 
 constexpr u32 FINAL_INPUT_OFFSET = 0xB54u;
 constexpr u32 FINAL_INPUT_RIGHT_STICK_X = FINAL_INPUT_OFFSET + 0x10u;
@@ -637,10 +636,9 @@ void ParseBuiltinPatches()
       continue;
     }
 
-    // PrimedGun's built-in patch block uses AR-style dword writes. Accept both 04 and 05
-    // command pages so hook caves can live in high MEM1 instead of low game code space.
+    // PrimedGun's built-in patch block uses AR-style dword writes.
     const u8 command_page = static_cast<u8>(command >> 24);
-    if (command_page != 0x04 && command_page != 0x05)
+    if (command_page != 0x04)
       continue;
 
     s_builtin_patches.push_back({0x80000000u | (command & 0x01ff'ffffu), value, current_group});
@@ -819,9 +817,7 @@ bool OverlapsPrimedGunRuntimeArena(u32 address, u32 size)
 {
   return RangeOverlaps(address, size, PATCH_CODE_ARENA_BASE,
                       PATCH_CODE_ARENA_BASE + PATCH_CODE_ARENA_SIZE) ||
-         RangeOverlaps(address, size, SCRATCH_BASE, SCRATCH_BASE + SCRATCH_ARENA_SIZE) ||
-         RangeOverlaps(address, size, HIGH_PATCH_ARENA_BASE,
-                       HIGH_PATCH_ARENA_BASE + HIGH_PATCH_ARENA_SIZE);
+         RangeOverlaps(address, size, SCRATCH_BASE, SCRATCH_BASE + SCRATCH_ARENA_SIZE);
 }
 
 bool PrimeGameObjectPointerLooksValid(u32 address, u32 size)
@@ -908,7 +904,6 @@ void InvalidatePrimedGunPatchICache(Core::System& system)
   auto& jit = system.GetJitInterface();
   jit.InvalidateICache(0x80000000u, 0x00200000u, true);
   jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
-  jit.InvalidateICache(HIGH_PATCH_ARENA_BASE, HIGH_PATCH_ARENA_SIZE, true);
 }
 
 bool InstallBranchAfterCaveWrite(const Core::CPUThreadGuard& guard, u32 patch_address,
@@ -6431,7 +6426,9 @@ bool ApplyAudioListenerPatch(const Core::CPUThreadGuard& guard)
 
   const u32 branch = PpcBranch(patch.address, patch.cave);
   const u32 legacy_bad_branch = PpcBranch(patch.address, AUDIO_LISTENER_LEGACY_BAD_CAVE);
-  if (current != branch && current != patch.original && current != legacy_bad_branch)
+  const u32 legacy_high_branch = PpcBranch(patch.address, AUDIO_LISTENER_LEGACY_HIGH_CAVE);
+  if (current != branch && current != patch.original && current != legacy_bad_branch &&
+      current != legacy_high_branch)
   {
     patch.applied = false;
     return false;
