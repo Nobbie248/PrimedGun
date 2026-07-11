@@ -21,6 +21,10 @@ add_library(uicommon
   UICommon.h
 )
 
+if (MSVC)
+  set_source_files_properties(UICommon.cpp PROPERTIES COMPILE_OPTIONS "/WX-")
+endif()
+
 target_link_libraries(uicommon
 PUBLIC
   common
