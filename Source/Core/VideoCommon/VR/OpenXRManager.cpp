@@ -133,6 +133,8 @@ bool OpenXRManager::IsRuntimeExtensionSupported(const char* extension_name)
 std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
 {
   std::vector<const char*> extensions;
+  if (IsRuntimeExtensionSupported(XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME))
+    extensions.push_back(XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME);
   return extensions;
 }
 
@@ -358,6 +360,8 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_thumbstick_click, "thumbstick_click", "Thumbstick Click",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
+      !create_action(&m_action_thumbrest_touch, "thumbrest_touch", "Thumb Rest Touch",
+                     XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_trigger_click, "trigger_click", "Trigger Click",
                      XR_ACTION_TYPE_BOOLEAN_INPUT) ||
       !create_action(&m_action_squeeze_click, "squeeze_click", "Squeeze Click",
@@ -467,6 +471,36 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_haptic, "/user/hand/left/output/haptic"},
                        {m_action_haptic, "/user/hand/right/output/haptic"},
                    });
+
+  const auto suggest_touch_plus_bindings = [&](const char* profile) {
+    suggest_bindings(profile,
+                     {
+                         {m_action_primary_click, "/user/hand/left/input/x/click"},
+                         {m_action_secondary_click, "/user/hand/left/input/y/click"},
+                         {m_action_menu_click, "/user/hand/left/input/menu/click"},
+                         {m_action_thumbstick_click, "/user/hand/left/input/thumbstick/click"},
+                         {m_action_thumbrest_touch, "/user/hand/left/input/thumbrest/touch"},
+                         {m_action_thumbstick_x, "/user/hand/left/input/thumbstick/x"},
+                         {m_action_thumbstick_y, "/user/hand/left/input/thumbstick/y"},
+                         {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
+                         {m_action_squeeze_value, "/user/hand/left/input/squeeze/value"},
+                         {m_action_aim_pose, "/user/hand/left/input/aim/pose"},
+                         {m_action_grip_pose, "/user/hand/left/input/grip/pose"},
+                         {m_action_primary_click, "/user/hand/right/input/a/click"},
+                         {m_action_secondary_click, "/user/hand/right/input/b/click"},
+                         {m_action_thumbstick_click, "/user/hand/right/input/thumbstick/click"},
+                         {m_action_thumbrest_touch, "/user/hand/right/input/thumbrest/touch"},
+                         {m_action_thumbstick_x, "/user/hand/right/input/thumbstick/x"},
+                         {m_action_thumbstick_y, "/user/hand/right/input/thumbstick/y"},
+                         {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
+                         {m_action_squeeze_value, "/user/hand/right/input/squeeze/value"},
+                         {m_action_aim_pose, "/user/hand/right/input/aim/pose"},
+                         {m_action_grip_pose, "/user/hand/right/input/grip/pose"},
+                         {m_action_haptic, "/user/hand/left/output/haptic"},
+                         {m_action_haptic, "/user/hand/right/output/haptic"},
+                     });
+  };
+  suggest_touch_plus_bindings("/interaction_profiles/meta/touch_controller_plus");
 
   suggest_bindings("/interaction_profiles/valve/index_controller",
                    {
@@ -611,6 +645,7 @@ void OpenXRManager::DestroyInputActions()
   m_action_secondary_click = XR_NULL_HANDLE;
   m_action_menu_click = XR_NULL_HANDLE;
   m_action_thumbstick_click = XR_NULL_HANDLE;
+  m_action_thumbrest_touch = XR_NULL_HANDLE;
   m_action_trigger_click = XR_NULL_HANDLE;
   m_action_squeeze_click = XR_NULL_HANDLE;
   m_action_trigger_value = XR_NULL_HANDLE;
@@ -806,6 +841,7 @@ void OpenXRManager::UpdateInputActions()
     controller.secondary_button = get_boolean(m_action_secondary_click);
     controller.menu_button = get_boolean(m_action_menu_click);
     controller.thumbstick_button = get_boolean(m_action_thumbstick_click);
+    controller.thumbrest_touch = get_boolean(m_action_thumbrest_touch);
     const bool trackpad_click = get_boolean(m_action_trackpad_click);
     controller.trackpad_touch = get_boolean(m_action_trackpad_touch);
 

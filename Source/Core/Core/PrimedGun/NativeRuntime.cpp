@@ -213,15 +213,15 @@ constexpr u32 VR_MENU_LAYOUT_TAB = 0;
 constexpr u32 VR_MENU_CALIBRATION_TAB = 1;
 constexpr float VR_MENU_TEXTURE_WIDTH = 1024.0f;
 constexpr float VR_MENU_TEXTURE_HEIGHT = 512.0f;
-constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 18;
+constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 12;
+constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 22;
 constexpr u32 VR_MENU_CALIBRATION_PAGE_COUNT = 2;
 constexpr u32 VR_MENU_CONTROL_TAB = 2;
 constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
 constexpr u32 VR_MENU_CANNON_TAB = 4;
 constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 16;
+constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 17;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
 constexpr std::array<int, 4> SNAP_TURN_DEGREES_CHOICES = {30, 45, 60, 90};
 constexpr float VR_MENU_ROW_TEXT_Y = 146.0f;
@@ -3544,6 +3544,25 @@ bool LeftControllerNearHead(const Pose& left, const Pose& hmd, const RuntimeSett
          dy >= -(settings.xr_dpad_head_y_below + 0.04f) && dy <= 0.28f;
 }
 
+bool IsQuestTouchPlusProfile(std::string_view profile)
+{
+  return profile.find("/interaction_profiles/meta/touch_controller_plus") != std::string_view::npos;
+}
+
+bool QuestTouchPlusThumbrestModifierActive(const Common::VR::OpenXRInputSnapshot& snapshot)
+{
+  for (std::size_t hand = 0; hand < snapshot.controllers.size(); ++hand)
+  {
+    if (snapshot.controllers[hand].thumbrest_touch &&
+        IsQuestTouchPlusProfile(snapshot.interaction_profiles[hand]))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void ClearDpadDisableOwnershipScratch(const Core::CPUThreadGuard& guard)
 {
   TryWriteU32(guard, DPAD_DISABLE_OWNER_SCRATCH, 0);
@@ -4020,33 +4039,52 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
     return;
   }
 
+  const float deadzone = std::min(settings.xr_dpad_deadzone, 0.25f);
+  DpadDir dir = DpadNone;
+  bool dpad_modifier_active = false;
   const Common::VR::OpenXRControllerState& dpad_hand =
       snapshot.controllers[settings.use_right_hand ? 0 : 1];
-  if (!dpad_hand.connected || !dpad_hand.aim_pose.valid || !snapshot.head_pose.valid)
-  {
-    disarm();
-    return;
-  }
 
-  const Pose hand_pose = PoseFromOpenXR(dpad_hand.aim_pose);
-  const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
-  bool in_head_zone = LeftControllerNearHead(hand_pose, hmd_pose, settings);
-  if (in_head_zone)
+  if (settings.xr_dpad_use_thumbrest_modifier)
   {
-    s_last_near_head_frame = s_frame_counter;
-  }
-  else if (s_last_near_head_frame != 0 && s_frame_counter - s_last_near_head_frame < 16)
-  {
-    in_head_zone = true;
+    if (!dpad_hand.connected || !QuestTouchPlusThumbrestModifierActive(snapshot))
+    {
+      disarm();
+      return;
+    }
+
+    dpad_modifier_active = true;
+    dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
   }
   else
   {
-    disarm();
-    return;
+    if (!dpad_hand.connected || !dpad_hand.aim_pose.valid || !snapshot.head_pose.valid)
+    {
+      disarm();
+      return;
+    }
+
+    const Pose hand_pose = PoseFromOpenXR(dpad_hand.aim_pose);
+    const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
+    bool in_head_zone = LeftControllerNearHead(hand_pose, hmd_pose, settings);
+    if (in_head_zone)
+    {
+      s_last_near_head_frame = s_frame_counter;
+    }
+    else if (s_last_near_head_frame != 0 && s_frame_counter - s_last_near_head_frame < 16)
+    {
+      in_head_zone = true;
+    }
+    else
+    {
+      disarm();
+      return;
+    }
+
+    dpad_modifier_active = in_head_zone;
+    dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
   }
 
-  const float deadzone = std::min(settings.xr_dpad_deadzone, 0.25f);
-  DpadDir dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
   if (dir != DpadNone)
   {
     s_latched_dir = dir;
@@ -4063,7 +4101,7 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
     return;
   }
 
-  SetPlayerInputDisabledForDpad(guard, ADDRESS.state_manager, in_head_zone);
+  SetPlayerInputDisabledForDpad(guard, ADDRESS.state_manager, dpad_modifier_active);
   if (!s_c_stick_suppressed)
   {
     SuppressCStickForDpad(guard, ADDRESS.state_manager);
@@ -4156,6 +4194,13 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
   const Pose controller_move_pose = PoseFromOpenXR(controller.aim_pose);
   const Pose move_pose =
       settings.directional_movement_use_hmd_direction ? hmd_pose : controller_move_pose;
+  if (settings.xr_dpad_enabled && settings.xr_dpad_use_thumbrest_modifier &&
+      QuestTouchPlusThumbrestModifierActive(snapshot))
+  {
+    s_directional_move_speed = 0.0f;
+    return;
+  }
+
   const Common::VR::OpenXRControllerState& dpad_hand =
       snapshot.controllers[settings.use_right_hand ? 0 : 1];
   if (dpad_hand.connected && dpad_hand.aim_pose.valid &&
@@ -4544,13 +4589,13 @@ int VrMenuCalibrationActualIndex(u32 local_index)
 u32 VrMenuResetActionForSelection()
 {
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 7)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 11)
     return VR_MENU_RESET_TARGETING_ACTION;
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 15)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
-      VrMenuControlActualIndex(s_vr_menu_selected_index) == 15)
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 16)
   {
     return VR_MENU_RESET_CONTROLLER_ACTION;
   }
@@ -4569,8 +4614,8 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuCalibrationActualIndex(index);
-    return (actual_index >= 1 && actual_index <= 4) ||
-           (actual_index >= 8 && actual_index <= 13);
+    return (actual_index >= 1 && actual_index <= 8) ||
+           (actual_index >= 12 && actual_index <= 17);
   }
   case VR_MENU_CONTROL_TAB:
   {
@@ -4578,8 +4623,8 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuControlActualIndex(index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
-           actual_index == 13 || actual_index == 14;
+    return actual_index == 3 || actual_index == 9 || actual_index == 13 ||
+           actual_index == 14 || actual_index == 15;
   }
   case VR_MENU_MOVEMENT_TAB:
     return (index >= 3 && index <= 7) || index == 9;
@@ -4708,6 +4753,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
   settings->xr_dpad_enabled = true;
+  settings->xr_dpad_use_thumbrest_modifier = false;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
   settings->xr_dpad_deadzone = 0.45f;
@@ -4847,29 +4893,45 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
           std::clamp(settings->metroid_hud_size + sign * 0.05f, 0.1f, 3.0f);
       break;
     case 3:
+      settings->metroid_hud_offset_up =
+          std::clamp(settings->metroid_hud_offset_up + sign * 0.01f, 0.0f, 1.0f);
+      break;
+    case 4:
+      settings->metroid_hud_offset_down =
+          std::clamp(settings->metroid_hud_offset_down + sign * 0.01f, 0.0f, 1.0f);
+      break;
+    case 5:
+      settings->metroid_hud_offset_left =
+          std::clamp(settings->metroid_hud_offset_left + sign * 0.01f, 0.0f, 1.0f);
+      break;
+    case 6:
+      settings->metroid_hud_offset_right =
+          std::clamp(settings->metroid_hud_offset_right + sign * 0.01f, 0.0f, 1.0f);
+      break;
+    case 7:
       settings->gun_targeting_distance =
           std::clamp(settings->gun_targeting_distance + sign * 1.0f, 1.0f, 200.0f);
       break;
-    case 4:
+    case 8:
       settings->gun_targeting_radius =
           std::clamp(settings->gun_targeting_radius + sign * 0.1f, 0.1f, 25.0f);
       break;
-    case 8:
+    case 12:
       settings->model_offset_x += sign * 0.01f;
       break;
-    case 9:
+    case 13:
       settings->model_offset_y += sign * 0.01f;
       break;
-    case 10:
+    case 14:
       settings->model_offset_z += sign * 0.01f;
       break;
-    case 11:
+    case 15:
       settings->rot_offset_x += sign * 1.0f;
       break;
-    case 12:
+    case 16:
       settings->rot_offset_y += sign * 1.0f;
       break;
-    case 13:
+    case 17:
       settings->rot_offset_z += sign * 1.0f;
       break;
     default:
@@ -4896,15 +4958,15 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->primegun_trackpad_press_threshold =
           std::clamp(settings->primegun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
       break;
-    case 12:
+    case 13:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 13:
+    case 14:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 14:
+    case 15:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -4966,11 +5028,11 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     const int actual_index = VrMenuCalibrationActualIndex(s_vr_menu_selected_index);
     if (actual_index == 0)
       settings->cinematic_screen_enabled = !settings->cinematic_screen_enabled;
-    else if (actual_index == 5)
+    else if (actual_index == 9)
       settings->visor_helmet_enabled = !settings->visor_helmet_enabled;
-    else if (actual_index == 6)
+    else if (actual_index == 10)
       settings->height_prompt_enabled = !settings->height_prompt_enabled;
-    else if (actual_index == 7)
+    else if (actual_index == 11)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -4980,9 +5042,9 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->gun_targeting_radius = 4.0f;
       settings->visor_helmet_enabled = false;
     }
-    else if (actual_index == 14)
+    else if (actual_index == 18)
       settings->position_marker_enabled = !settings->position_marker_enabled;
-    else if (actual_index == 15)
+    else if (actual_index == 19)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -4994,7 +5056,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 16)
+    else if (actual_index == 20)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;
@@ -5006,7 +5068,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 17)
+    else if (actual_index == 21)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;
@@ -5048,7 +5110,9 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
     else if (actual_index == 10 || actual_index == 11)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (actual_index == 15)
+    else if (actual_index == 12)
+      settings->xr_dpad_use_thumbrest_modifier = !settings->xr_dpad_use_thumbrest_modifier;
+    else if (actual_index == 16)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5189,11 +5253,16 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.height_prompt_enabled = settings.height_prompt_enabled;
   overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
+  overlay.xr_dpad_use_thumbrest_modifier = settings.xr_dpad_use_thumbrest_modifier;
   overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
   overlay.cinematic_screen_active = settings.cinematic_screen_enabled && s_cinematic_screen_active;
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
   overlay.metroid_hud_distance = settings.metroid_hud_distance;
   overlay.metroid_hud_size = settings.metroid_hud_size;
+  overlay.metroid_hud_offset_up = settings.metroid_hud_offset_up;
+  overlay.metroid_hud_offset_down = settings.metroid_hud_offset_down;
+  overlay.metroid_hud_offset_left = settings.metroid_hud_offset_left;
+  overlay.metroid_hud_offset_right = settings.metroid_hud_offset_right;
   overlay.xr_dpad_head_radius = settings.xr_dpad_head_radius;
   overlay.xr_dpad_head_y_below = settings.xr_dpad_head_y_below;
   overlay.xr_dpad_deadzone = settings.xr_dpad_deadzone;
@@ -7156,6 +7225,14 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
       ClampFinite(s_settings.metroid_hud_distance, defaults.metroid_hud_distance, 0.1f, 3.0f);
   s_settings.metroid_hud_size =
       ClampFinite(s_settings.metroid_hud_size, defaults.metroid_hud_size, 0.1f, 3.0f);
+  s_settings.metroid_hud_offset_up =
+      ClampFinite(s_settings.metroid_hud_offset_up, defaults.metroid_hud_offset_up, 0.0f, 1.0f);
+  s_settings.metroid_hud_offset_down = ClampFinite(s_settings.metroid_hud_offset_down,
+                                                   defaults.metroid_hud_offset_down, 0.0f, 1.0f);
+  s_settings.metroid_hud_offset_left = ClampFinite(s_settings.metroid_hud_offset_left,
+                                                   defaults.metroid_hud_offset_left, 0.0f, 1.0f);
+  s_settings.metroid_hud_offset_right = ClampFinite(s_settings.metroid_hud_offset_right,
+                                                    defaults.metroid_hud_offset_right, 0.0f, 1.0f);
   s_settings.xr_dpad_head_radius =
       ClampFinite(s_settings.xr_dpad_head_radius, defaults.xr_dpad_head_radius, 0.02f, 2.0f);
   s_settings.xr_dpad_head_y_below =

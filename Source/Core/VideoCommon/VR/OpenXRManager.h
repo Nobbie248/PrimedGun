@@ -223,6 +223,7 @@ private:
   XrAction m_action_secondary_click = XR_NULL_HANDLE;
   XrAction m_action_menu_click = XR_NULL_HANDLE;
   XrAction m_action_thumbstick_click = XR_NULL_HANDLE;
+  XrAction m_action_thumbrest_touch = XR_NULL_HANDLE;
   XrAction m_action_trigger_click = XR_NULL_HANDLE;
   XrAction m_action_squeeze_click = XR_NULL_HANDLE;
   XrAction m_action_trigger_value = XR_NULL_HANDLE;

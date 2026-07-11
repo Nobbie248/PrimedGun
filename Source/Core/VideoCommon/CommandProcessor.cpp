@@ -12,6 +12,7 @@
 #include "Common/Flag.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Core/Config/MainSettings.h"
 #include "Core/CoreTiming.h"
 #include "Core/HW/GPFifo.h"
 #include "Core/HW/MMIO.h"
@@ -387,11 +388,14 @@ void CommandProcessorManager::GatherPipeBursted()
 
   m_system.GetFifo().RunGpu();
 
-  ASSERT_MSG(COMMANDPROCESSOR,
-             m_fifo.CPReadWriteDistance.load(std::memory_order_relaxed) <=
-                 m_fifo.CPEnd.load(std::memory_order_relaxed) -
-                     m_fifo.CPBase.load(std::memory_order_relaxed),
-             "FIFO is overflowed by GatherPipe !\nCPU thread is too fast!");
+  if (!Config::Get(Config::MAIN_SUPPRESS_CPU_THREAD_WARNINGS))
+  {
+    ASSERT_MSG(COMMANDPROCESSOR,
+               m_fifo.CPReadWriteDistance.load(std::memory_order_relaxed) <=
+                   m_fifo.CPEnd.load(std::memory_order_relaxed) -
+                       m_fifo.CPBase.load(std::memory_order_relaxed),
+               "FIFO is overflowed by GatherPipe !\nCPU thread is too fast!");
+  }
 
   // check if we are in sync
   ASSERT_MSG(COMMANDPROCESSOR,

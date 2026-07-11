@@ -485,6 +485,14 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         const float perspective_hud_size = perspective_hud_size_override > 0.0f ?
                                                perspective_hud_size_override :
                                                g_ActiveConfig.vr_screen_size;
+        const float perspective_hud_offset_x =
+            std::clamp(primedgun_overlay.metroid_hud_offset_right -
+                           primedgun_overlay.metroid_hud_offset_left,
+                       -1.0f, 1.0f);
+        const float perspective_hud_offset_y =
+            std::clamp(primedgun_overlay.metroid_hud_offset_up -
+                           primedgun_overlay.metroid_hud_offset_down,
+                       -1.0f, 1.0f);
         if (perspective_hud)
         {
           const float reference_view_z = vertex_shader_manager.constants.posnormalmatrix[2][3];
@@ -552,8 +560,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           }
           if (transform.valid)
           {
-            constants.vr_screen[0] = transform.position[0];
-            constants.vr_screen[1] = transform.position[1];
+            constants.vr_screen[0] = transform.position[0] + upm * perspective_hud_offset_x;
+            constants.vr_screen[1] = transform.position[1] + upm * perspective_hud_offset_y;
             constants.vr_screen[2] = transform.position[2];
             constants.head_locked_params[1] = transform.scale[0];
             constants.head_locked_params[2] = transform.scale[1];

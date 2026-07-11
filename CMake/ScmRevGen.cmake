@@ -34,7 +34,7 @@ string(TIMESTAMP DOLPHIN_WC_BUILD_DATE "%Y-%m-%d" UTC)
 set(DOLPHIN_VERSION_MAJOR "1")
 set(DOLPHIN_VERSION_MINOR "0")
 set(DOLPHIN_VERSION_PATCH "2")
-set(DOLPHIN_WC_DESCRIBE "1.1.0")
+set(DOLPHIN_WC_DESCRIBE "1.1.1")
 
 # If Dolphin is not built from a Git repository, default the version info to
 # reasonable values.

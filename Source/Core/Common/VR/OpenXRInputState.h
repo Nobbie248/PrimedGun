@@ -37,6 +37,7 @@ struct OpenXRControllerState
   bool trigger_button = false;
   bool squeeze_button = false;
   bool thumbstick_button = false;
+  bool thumbrest_touch = false;
   bool trackpad_button = false;
   bool trackpad_touch = false;
   float trigger_value = 0.0f;
@@ -113,6 +114,7 @@ struct PrimedGunVrOverlayState
   bool vr_overlays_enabled = true;
   bool height_prompt_enabled = true;
   bool xr_dpad_enabled = true;
+  bool xr_dpad_use_thumbrest_modifier = false;
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
   bool cinematic_screen_enabled = false;
@@ -120,6 +122,10 @@ struct PrimedGunVrOverlayState
   uint32_t cinematic_screen_generation = 0;
   float metroid_hud_distance = 0.5f;
   float metroid_hud_size = 0.5f;
+  float metroid_hud_offset_up = 0.0f;
+  float metroid_hud_offset_down = 0.0f;
+  float metroid_hud_offset_left = 0.0f;
+  float metroid_hud_offset_right = 0.0f;
   bool position_marker_visible = false;
   float xr_dpad_head_radius = 0.18f;
   float xr_dpad_head_y_below = 0.14f;
@@ -196,7 +202,8 @@ public:
           << (controller.connected ? "true" : "false") << " profile="
           << s_state.interaction_profiles[i] << " trigger=" << controller.trigger_value
           << " squeeze=" << controller.squeeze_value << " stick=(" << controller.thumbstick_x
-          << ',' << controller.thumbstick_y << ")\n";
+          << ',' << controller.thumbstick_y << ") thumbrest="
+          << (controller.thumbrest_touch ? "true" : "false") << '\n';
     }
     return out.str();
   }

@@ -158,6 +158,7 @@ private:
     AddInput(new DigitalInput(this, hand, DigitalControl::Trigger));
     AddInput(new DigitalInput(this, hand, DigitalControl::Squeeze));
     AddInput(new DigitalInput(this, hand, DigitalControl::Thumbstick));
+    AddInput(new DigitalInput(this, hand, DigitalControl::ThumbRestTouch));
     AddInput(new DigitalInput(this, hand, DigitalControl::Trackpad));
     AddInput(new DigitalInput(this, hand, DigitalControl::TrackpadTouch));
     AddInput(new AnalogInput(this, hand, AnalogControl::Trigger));
@@ -182,6 +183,7 @@ private:
     Trigger,
     Squeeze,
     Thumbstick,
+    ThumbRestTouch,
     Trackpad,
     TrackpadTouch,
   };
@@ -242,6 +244,8 @@ private:
         return prefix + " Button Squeeze";
       case DigitalControl::Thumbstick:
         return prefix + " Button Thumbstick";
+      case DigitalControl::ThumbRestTouch:
+        return prefix + " Button Thumb Rest Touch";
       case DigitalControl::Trackpad:
         return prefix + " Button Trackpad Press";
       case DigitalControl::TrackpadTouch:
@@ -281,6 +285,8 @@ private:
         return state.squeeze_button ? 1.0 : 0.0;
       case DigitalControl::Thumbstick:
         return state.thumbstick_button ? 1.0 : 0.0;
+      case DigitalControl::ThumbRestTouch:
+        return state.thumbrest_touch ? 1.0 : 0.0;
       case DigitalControl::Trackpad:
         return state.trackpad_button ? 1.0 : 0.0;
       case DigitalControl::TrackpadTouch:

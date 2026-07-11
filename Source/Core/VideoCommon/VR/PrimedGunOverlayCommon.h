@@ -290,7 +290,7 @@ inline int CalibrationMenuActualIndex(uint32_t page, int local_index)
   if (local_index <= 0)
     return -1;
 
-  constexpr int first_page_items = 8;
+  constexpr int first_page_items = 12;
   return page == 0 ? local_index - 1 : first_page_items + local_index - 1;
 }
 
@@ -304,8 +304,8 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
       return true;
 
     const int actual_index = CalibrationMenuActualIndex(s.calibration_page, index);
-    return (actual_index >= 1 && actual_index <= 4) ||
-           (actual_index >= 8 && actual_index <= 13);
+    return (actual_index >= 1 && actual_index <= 8) ||
+           (actual_index >= 12 && actual_index <= 17);
   }
   case VR_MENU_MOVEMENT_TAB:
     return (index >= 3 && index <= 7) || index == 9;
@@ -315,8 +315,8 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
       return true;
 
     const int actual_index = ControlMenuActualIndex(s.control_page, index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
-           actual_index == 13 || actual_index == 14;
+    return actual_index == 3 || actual_index == 9 || actual_index == 13 ||
+           actual_index == 14 || actual_index == 15;
   }
   default:
     return false;
@@ -358,6 +358,10 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"CUTSCENE CINEMA SCREEN", s.cinematic_screen_enabled ? "ON" : "OFF"});
       rows.push_back({"HUD DISTANCE", FloatText(s.metroid_hud_distance, 2)});
       rows.push_back({"HUD SIZE", FloatText(s.metroid_hud_size, 2)});
+      rows.push_back({"HUD UP", FloatText(s.metroid_hud_offset_up, 2)});
+      rows.push_back({"HUD DOWN", FloatText(s.metroid_hud_offset_down, 2)});
+      rows.push_back({"HUD LEFT", FloatText(s.metroid_hud_offset_left, 2)});
+      rows.push_back({"HUD RIGHT", FloatText(s.metroid_hud_offset_right, 2)});
       rows.push_back({"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)});
       rows.push_back({"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)});
       rows.push_back({"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"});
@@ -402,6 +406,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)});
       rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
       rows.push_back({"DIRECTION PAD", s.xr_dpad_enabled ? "ON" : "OFF"});
+      rows.push_back({"QUEST THUMB REST", s.xr_dpad_use_thumbrest_modifier ? "ON" : "OFF"});
       rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
       rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
       rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});

@@ -54,8 +54,13 @@ struct RuntimeSettings
   bool cinematic_screen_enabled = false;
   float metroid_hud_distance = 0.5f;
   float metroid_hud_size = 0.5f;
+  float metroid_hud_offset_up = 0.0f;
+  float metroid_hud_offset_down = 0.0f;
+  float metroid_hud_offset_left = 0.0f;
+  float metroid_hud_offset_right = 0.0f;
   bool position_marker_enabled = false;
   bool xr_dpad_enabled = true;
+  bool xr_dpad_use_thumbrest_modifier = false;
   float xr_dpad_head_radius = 0.28f;
   float xr_dpad_head_y_below = 0.02f;
   float xr_dpad_deadzone = 0.45f;
