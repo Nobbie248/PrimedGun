@@ -48,6 +48,8 @@ For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/
 - Cannon position and rotation calibration.
 - Easy cannon texture swapping tool.
 - In-headset settings menu.
+- HMD Directional audio.
+- Left-handed support.
 
 ## Setup Notes
 
