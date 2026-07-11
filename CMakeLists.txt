@@ -97,7 +97,7 @@ option(ENABLE_VR "Enables VR support via OpenXR (Windows D3D/Vulkan, Linux Vulka
 option(USE_DISCORD_PRESENCE "Enables Discord Rich Presence, show the current game on Discord" OFF)
 option(USE_MGBA "Enables GBA controllers emulation using libmgba" OFF)
 option(ENABLE_AUTOUPDATE "Enables support for automatic updates" OFF)
-option(USE_RETRO_ACHIEVEMENTS "Enables integration with retroachievements.org" OFF)
+option(USE_RETRO_ACHIEVEMENTS "Enables integration with retroachievements.org" ON)
 
 # Maintainers: if you consider blanket disabling this for your users, please
 # consider the following points:
