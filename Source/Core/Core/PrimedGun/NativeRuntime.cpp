@@ -213,8 +213,8 @@ constexpr u32 VR_MENU_LAYOUT_TAB = 0;
 constexpr u32 VR_MENU_CALIBRATION_TAB = 1;
 constexpr float VR_MENU_TEXTURE_WIDTH = 1024.0f;
 constexpr float VR_MENU_TEXTURE_HEIGHT = 512.0f;
-constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 12;
-constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 22;
+constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 10;
+constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 20;
 constexpr u32 VR_MENU_CALIBRATION_PAGE_COUNT = 2;
 constexpr u32 VR_MENU_CONTROL_TAB = 2;
 constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
@@ -4685,10 +4685,10 @@ int VrMenuCalibrationActualIndex(u32 local_index)
 u32 VrMenuResetActionForSelection()
 {
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 11)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 9)
     return VR_MENU_RESET_TARGETING_ACTION;
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 17)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
       VrMenuControlActualIndex(s_vr_menu_selected_index) == 16)
@@ -4710,8 +4710,8 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuCalibrationActualIndex(index);
-    return (actual_index >= 1 && actual_index <= 8) ||
-           (actual_index >= 12 && actual_index <= 17);
+    return (actual_index >= 1 && actual_index <= 6) ||
+           (actual_index >= 10 && actual_index <= 15);
   }
   case VR_MENU_CONTROL_TAB:
   {
@@ -4989,45 +4989,47 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
           std::clamp(settings->metroid_hud_size + sign * 0.05f, 0.1f, 3.0f);
       break;
     case 3:
-      settings->metroid_hud_offset_up =
-          std::clamp(settings->metroid_hud_offset_up + sign * 0.01f, 0.0f, 1.0f);
+    {
+      const float value = std::clamp(settings->metroid_hud_offset_up -
+                                         settings->metroid_hud_offset_down + sign * 0.01f,
+                                     -1.0f, 1.0f);
+      settings->metroid_hud_offset_up = std::max(value, 0.0f);
+      settings->metroid_hud_offset_down = std::max(-value, 0.0f);
       break;
+    }
     case 4:
-      settings->metroid_hud_offset_down =
-          std::clamp(settings->metroid_hud_offset_down + sign * 0.01f, 0.0f, 1.0f);
+    {
+      const float value = std::clamp(settings->metroid_hud_offset_right -
+                                         settings->metroid_hud_offset_left + sign * 0.01f,
+                                     -1.0f, 1.0f);
+      settings->metroid_hud_offset_right = std::max(value, 0.0f);
+      settings->metroid_hud_offset_left = std::max(-value, 0.0f);
       break;
+    }
     case 5:
-      settings->metroid_hud_offset_left =
-          std::clamp(settings->metroid_hud_offset_left + sign * 0.01f, 0.0f, 1.0f);
-      break;
-    case 6:
-      settings->metroid_hud_offset_right =
-          std::clamp(settings->metroid_hud_offset_right + sign * 0.01f, 0.0f, 1.0f);
-      break;
-    case 7:
       settings->gun_targeting_distance =
           std::clamp(settings->gun_targeting_distance + sign * 1.0f, 1.0f, 200.0f);
       break;
-    case 8:
+    case 6:
       settings->gun_targeting_radius =
           std::clamp(settings->gun_targeting_radius + sign * 0.1f, 0.1f, 25.0f);
       break;
-    case 12:
+    case 10:
       settings->model_offset_x += sign * 0.01f;
       break;
-    case 13:
+    case 11:
       settings->model_offset_y += sign * 0.01f;
       break;
-    case 14:
+    case 12:
       settings->model_offset_z += sign * 0.01f;
       break;
-    case 15:
+    case 13:
       settings->rot_offset_x += sign * 1.0f;
       break;
-    case 16:
+    case 14:
       settings->rot_offset_y += sign * 1.0f;
       break;
-    case 17:
+    case 15:
       settings->rot_offset_z += sign * 1.0f;
       break;
     default:
@@ -5124,11 +5126,11 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     const int actual_index = VrMenuCalibrationActualIndex(s_vr_menu_selected_index);
     if (actual_index == 0)
       settings->cinematic_screen_enabled = !settings->cinematic_screen_enabled;
-    else if (actual_index == 9)
+    else if (actual_index == 7)
       settings->visor_helmet_enabled = !settings->visor_helmet_enabled;
-    else if (actual_index == 10)
+    else if (actual_index == 8)
       settings->height_prompt_enabled = !settings->height_prompt_enabled;
-    else if (actual_index == 11)
+    else if (actual_index == 9)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5138,9 +5140,9 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->gun_targeting_radius = 4.0f;
       settings->visor_helmet_enabled = false;
     }
-    else if (actual_index == 18)
+    else if (actual_index == 16)
       settings->position_marker_enabled = !settings->position_marker_enabled;
-    else if (actual_index == 19)
+    else if (actual_index == 17)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5152,7 +5154,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 20)
+    else if (actual_index == 18)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;
@@ -5164,7 +5166,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 21)
+    else if (actual_index == 19)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;

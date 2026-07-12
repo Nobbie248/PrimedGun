@@ -3071,22 +3071,20 @@ void MainWindow::ConnectStack()
       add_float_row(calibration_layout, tr("HUD size"), 0.10, 3.00, 0.05,
                     runtime->metroid_hud_size,
                     [runtime](float v) { runtime->metroid_hud_size = v; });
-  auto* metroid_hud_offset_up_spin =
-      add_float_row(calibration_layout, tr("HUD up"), 0.00, 1.00, 0.01,
-                    runtime->metroid_hud_offset_up,
-                    [runtime](float v) { runtime->metroid_hud_offset_up = v; });
-  auto* metroid_hud_offset_down_spin =
-      add_float_row(calibration_layout, tr("HUD down"), 0.00, 1.00, 0.01,
-                    runtime->metroid_hud_offset_down,
-                    [runtime](float v) { runtime->metroid_hud_offset_down = v; });
-  auto* metroid_hud_offset_left_spin =
-      add_float_row(calibration_layout, tr("HUD left"), 0.00, 1.00, 0.01,
-                    runtime->metroid_hud_offset_left,
-                    [runtime](float v) { runtime->metroid_hud_offset_left = v; });
-  auto* metroid_hud_offset_right_spin =
-      add_float_row(calibration_layout, tr("HUD right"), 0.00, 1.00, 0.01,
-                    runtime->metroid_hud_offset_right,
-                    [runtime](float v) { runtime->metroid_hud_offset_right = v; });
+  auto* metroid_hud_offset_vertical_spin =
+      add_float_row(calibration_layout, tr("HUD vertical"), -1.00, 1.00, 0.01,
+                    runtime->metroid_hud_offset_up - runtime->metroid_hud_offset_down,
+                    [runtime](float v) {
+                      runtime->metroid_hud_offset_up = std::max(v, 0.0f);
+                      runtime->metroid_hud_offset_down = std::max(-v, 0.0f);
+                    });
+  auto* metroid_hud_offset_horizontal_spin =
+      add_float_row(calibration_layout, tr("HUD horizontal"), -1.00, 1.00, 0.01,
+                    runtime->metroid_hud_offset_right - runtime->metroid_hud_offset_left,
+                    [runtime](float v) {
+                      runtime->metroid_hud_offset_right = std::max(v, 0.0f);
+                      runtime->metroid_hud_offset_left = std::max(-v, 0.0f);
+                    });
   separator(calibration_layout);
   calibration_layout->addWidget(section_label(tr("Targeting"), game_tab));
   auto* reset_aiming = new QPushButton(tr("Reset Targeting"), game_tab);
@@ -3638,10 +3636,10 @@ void MainWindow::ConnectStack()
     set_float(look_yaw_sensitivity_spin, runtime->look_yaw_sensitivity);
     set_float(metroid_hud_distance_spin, runtime->metroid_hud_distance);
     set_float(metroid_hud_size_spin, runtime->metroid_hud_size);
-    set_float(metroid_hud_offset_up_spin, runtime->metroid_hud_offset_up);
-    set_float(metroid_hud_offset_down_spin, runtime->metroid_hud_offset_down);
-    set_float(metroid_hud_offset_left_spin, runtime->metroid_hud_offset_left);
-    set_float(metroid_hud_offset_right_spin, runtime->metroid_hud_offset_right);
+    set_float(metroid_hud_offset_vertical_spin,
+              runtime->metroid_hud_offset_up - runtime->metroid_hud_offset_down);
+    set_float(metroid_hud_offset_horizontal_spin,
+              runtime->metroid_hud_offset_right - runtime->metroid_hud_offset_left);
     set_float(target_distance_spin, runtime->gun_targeting_distance);
     set_float(target_radius_spin, runtime->gun_targeting_radius);
     set_float(model_x_spin, runtime->model_offset_x);

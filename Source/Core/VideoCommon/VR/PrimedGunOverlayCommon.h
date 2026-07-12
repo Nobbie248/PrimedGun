@@ -358,10 +358,10 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"CUTSCENE CINEMA SCREEN", s.cinematic_screen_enabled ? "ON" : "OFF"});
       rows.push_back({"HUD DISTANCE", FloatText(s.metroid_hud_distance, 2)});
       rows.push_back({"HUD SIZE", FloatText(s.metroid_hud_size, 2)});
-      rows.push_back({"HUD UP", FloatText(s.metroid_hud_offset_up, 2)});
-      rows.push_back({"HUD DOWN", FloatText(s.metroid_hud_offset_down, 2)});
-      rows.push_back({"HUD LEFT", FloatText(s.metroid_hud_offset_left, 2)});
-      rows.push_back({"HUD RIGHT", FloatText(s.metroid_hud_offset_right, 2)});
+      rows.push_back({"HUD VERTICAL",
+                      FloatText(s.metroid_hud_offset_up - s.metroid_hud_offset_down, 2)});
+      rows.push_back({"HUD HORIZONTAL",
+                      FloatText(s.metroid_hud_offset_right - s.metroid_hud_offset_left, 2)});
       rows.push_back({"TARGET DISTANCE", FloatText(s.gun_targeting_distance, 1)});
       rows.push_back({"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)});
       rows.push_back({"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"});
