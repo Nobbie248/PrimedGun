@@ -1,1 +1,2 @@
 *.sln text eol=crlf
+/scripts/build-steamos.sh text eol=lf

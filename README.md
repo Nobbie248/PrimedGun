@@ -35,7 +35,8 @@ ln -sfn ../../Data/Sys build/Binaries/Sys
 
 If CMake has already configured the repo before, delete the old `build` folder before rebuilding so cached settings do not carry over. Do not patch files inside `Externals/OpenXR`; the repo configures the bundled OpenXR loader directly.
 
-For SteamOS-specific builds, see [PrimedSteam](https://github.com/josethevrtech/PrimedSteam).
+For the isolated SteamOS build path, see [BUILDING-STEAMOS.md](BUILDING-STEAMOS.md). This workflow
+was originally contributed through [PrimedSteam](https://github.com/josethevrtech/PrimedSteam).
 
 ## Features
 
