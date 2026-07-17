@@ -41,6 +41,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QStackedWidget>
@@ -481,37 +482,48 @@ bool PrimedGunShouldImportSettingKey(const QString& key)
          key != QStringLiteral("last_memcard_transfer_dir");
 }
 
+void PrimedGunImportSettingsGroup(QSettings* source_settings, const QString& group,
+                                  QSettings* destination_settings,
+                                  QSet<QString>* imported_settings)
+{
+  source_settings->beginGroup(group);
+  for (const QString& key : source_settings->allKeys())
+  {
+    if (!PrimedGunShouldImportSettingKey(key))
+      continue;
+
+    const QString destination_key = QStringLiteral("primedgun/%1").arg(key);
+    destination_settings->setValue(destination_key, source_settings->value(key));
+    imported_settings->insert(destination_key);
+  }
+  source_settings->endGroup();
+}
+
 int PrimedGunImportSettingsFromFile(const QString& settings_path, QSettings* destination_settings)
 {
   if (settings_path.isEmpty() || destination_settings == nullptr)
     return 0;
 
   QSettings source_settings(settings_path, QSettings::IniFormat);
-  source_settings.beginGroup(QStringLiteral("primedgun"));
-  const QStringList keys = source_settings.allKeys();
+  QSet<QString> imported_settings;
 
-  int imported_count = 0;
-  for (const QString& key : keys)
-  {
-    if (!PrimedGunShouldImportSettingKey(key))
-      continue;
+  // Import the legacy namespace first so current values win if both are present.
+  const QString legacy_group = QStringLiteral("prime") + QStringLiteral("gun");
+  PrimedGunImportSettingsGroup(&source_settings, legacy_group, destination_settings,
+                               &imported_settings);
+  PrimedGunImportSettingsGroup(&source_settings, QStringLiteral("primedgun"), destination_settings,
+                               &imported_settings);
 
-    destination_settings->setValue(QStringLiteral("primedgun/%1").arg(key),
-                                   source_settings.value(key));
-    ++imported_count;
-  }
-
-  source_settings.endGroup();
   const QString selected_game_key = QStringLiteral("mainwindow/selected_metroid_prime_path");
   if (source_settings.contains(selected_game_key))
   {
     destination_settings->setValue(selected_game_key, source_settings.value(selected_game_key));
-    ++imported_count;
+    imported_settings.insert(selected_game_key);
   }
 
-  if (imported_count > 0)
+  if (!imported_settings.isEmpty())
     destination_settings->sync();
-  return imported_count;
+  return imported_settings.size();
 }
 
 bool PrimedGunShouldTransferDolphinSettingsFile(const QString& relative_path)
