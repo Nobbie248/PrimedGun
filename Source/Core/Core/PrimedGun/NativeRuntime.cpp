@@ -276,7 +276,9 @@ constexpr u64 CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES = 10u;
 constexpr u32 PLAYER_STATE_CURRENT_VISOR_OFFSET = 0x14u;
 constexpr u32 PLAYER_STATE_TRANSITION_VISOR_OFFSET = 0x18u;
 constexpr u32 PLAYER_STATE_MAX_VISOR = 3u;
+constexpr u32 PLAYER_STATE_COMBAT_VISOR = 0u;
 constexpr u32 PLAYER_STATE_SCAN_VISOR = 2u;
+constexpr u32 PLAYER_STATE_THERMAL_VISOR = 3u;
 constexpr u32 FINAL_INPUT_DPAD_PRESSED_0 = FINAL_INPUT_OFFSET + 0x2Eu;
 constexpr u32 PLAYER_DISABLE_INPUT_FLAGS_OFFSET = 0x9C6u;
 constexpr u8 PLAYER_DISABLE_INPUT_MASK = 0x04u;
@@ -287,6 +289,7 @@ constexpr u32 PLAYER_ORBIT_TARGET_ID_OFFSET = 0x310u;
 constexpr u32 PLAYER_ORBIT_LOCK_ID_OFFSET = 0x33Cu;
 constexpr u32 PLAYER_NEARBY_ORBIT_OBJECTS_OFFSET = 0x344u;
 constexpr u32 PLAYER_ONSCREEN_ORBIT_OBJECTS_OFFSET = 0x354u;
+constexpr u32 PLAYER_OFFSCREEN_ORBIT_OBJECTS_OFFSET = 0x364u;
 constexpr u32 PLAYER_FREE_LOOK_STATE_OFFSET = 0x3DCu;
 constexpr u32 PLAYER_AIM_TARGET_ID_OFFSET = 0x3F4u;
 constexpr u32 PLAYER_FREE_LOOK_CENTER_TIME_OFFSET = 0x3E0u;
@@ -1038,15 +1041,26 @@ struct ScanVisorInfo
   u32 proxy_visor = 0xffffffffu;
 };
 
+bool ResolvePlayerState(const Core::CPUThreadGuard& guard, u32* player_state)
+{
+  if (player_state == nullptr)
+    return false;
+
+  u32 ref_data = 0;
+  return TryReadU32(guard, ADDRESS.state_manager + STATE_MANAGER_PLAYER_STATE_OFFSET, &ref_data) &&
+         PrimeDataPointerLooksValid(ref_data, RSTL_REF_DATA_OBJECT_OFFSET + sizeof(u32)) &&
+         TryReadU32(guard, ref_data + RSTL_REF_DATA_OBJECT_OFFSET, player_state) &&
+         PrimeDataPointerLooksValid(*player_state,
+                                   PLAYER_STATE_TRANSITION_VISOR_OFFSET + sizeof(u32));
+}
+
 ScanVisorInfo ReadScanVisorInfo(const Core::CPUThreadGuard& guard, u32 player)
 {
   ScanVisorInfo info{};
   if (player < 0x80000000u)
     return info;
 
-  if (TryReadU32(guard, ADDRESS.state_manager + STATE_MANAGER_PLAYER_STATE_OFFSET,
-                 &info.player_state) &&
-      info.player_state >= 0x80000000u &&
+  if (ResolvePlayerState(guard, &info.player_state) &&
       TryReadU32(guard, info.player_state + PLAYER_STATE_CURRENT_VISOR_OFFSET,
                  &info.current_visor))
   {
@@ -1074,6 +1088,14 @@ ScanVisorInfo ReadScanVisorInfo(const Core::CPUThreadGuard& guard, u32 player)
 bool ScanVisorActive(const Core::CPUThreadGuard& guard, u32 player)
 {
   return ReadScanVisorInfo(guard, player).active;
+}
+
+bool ReadCurrentPlayerVisor(const Core::CPUThreadGuard& guard, u32* visor)
+{
+  u32 player_state = 0;
+  return visor != nullptr && ResolvePlayerState(guard, &player_state) &&
+         TryReadU32(guard, player_state + PLAYER_STATE_CURRENT_VISOR_OFFSET, visor) &&
+         *visor <= PLAYER_STATE_MAX_VISOR;
 }
 
 bool PlayerIsInMenuMapOrMorphball(const Core::CPUThreadGuard& guard, u32 player)
@@ -1145,9 +1167,7 @@ bool PlayerIsChangingVisorsInFirstPerson(const Core::CPUThreadGuard& guard, u32 
   u32 player_state = 0;
   u32 current_visor = 0xffffffffu;
   u32 transition_visor = 0xffffffffu;
-  if (!TryReadU32(guard, ADDRESS.state_manager + STATE_MANAGER_PLAYER_STATE_OFFSET,
-                  &player_state) ||
-      player_state < 0x80000000u ||
+  if (!ResolvePlayerState(guard, &player_state) ||
       !TryReadU32(guard, player_state + PLAYER_STATE_CURRENT_VISOR_OFFSET, &current_visor) ||
       !TryReadU32(guard, player_state + PLAYER_STATE_TRANSITION_VISOR_OFFSET,
                   &transition_visor) ||
@@ -1552,6 +1572,8 @@ struct ScanTargetCandidate
   u16 uid = 0xffffu;
   u32 obj = 0;
 };
+
+std::vector<ScanTargetCandidate> s_thermal_orbit_candidates;
 
 struct ActorAabb
 {
@@ -2022,6 +2044,13 @@ bool ActorIsTargetable(const Core::CPUThreadGuard& guard, u32 obj)
   u8 flags = 0;
   return PrimeGameObjectPointerLooksValid(obj, 0xe8u) && TryReadU8(guard, obj + 0xe7u, &flags) &&
          (flags & 0x01u) != 0;
+}
+
+bool ActorUsesTargetDistanceTest(const Core::CPUThreadGuard& guard, u32 obj)
+{
+  u8 flags = 0;
+  return !PrimeGameObjectPointerLooksValid(obj, 0xe8u) ||
+         !TryReadU8(guard, obj + 0xe7u, &flags) || (flags & 0x02u) != 0;
 }
 
 bool ActorIsGrapplePoint(const Core::CPUThreadGuard& guard, u32 obj)
@@ -2747,6 +2776,9 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
   constexpr float scan_pick_radius_multiplier = 3.0f;
   const float grapple_max_perp = max_perp * 1.30f;
   const bool scan_mode = ScanVisorActive(guard, player);
+  u32 current_visor = PLAYER_STATE_COMBAT_VISOR;
+  ReadCurrentPlayerVisor(guard, &current_visor);
+  const bool thermal_mode = current_visor == PLAYER_STATE_THERMAL_VISOR;
   std::vector<ScanTargetCandidate> nearby_orbit_candidates;
   const bool have_nearby_orbit_candidates =
       !scan_mode && RefreshOrbitTargetCandidates(guard, state_manager, player,
@@ -2757,6 +2789,103 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
       !scan_mode && RefreshOrbitTargetCandidates(guard, state_manager, player,
                                                  PLAYER_ONSCREEN_ORBIT_OBJECTS_OFFSET,
                                                  &onscreen_orbit_candidates);
+  std::vector<ScanTargetCandidate> offscreen_orbit_candidates;
+  const bool have_offscreen_orbit_candidates =
+      !scan_mode && RefreshOrbitTargetCandidates(guard, state_manager, player,
+                                                 PLAYER_OFFSCREEN_ORBIT_OBJECTS_OFFSET,
+                                                 &offscreen_orbit_candidates);
+  const bool have_validated_orbit_candidates =
+      have_nearby_orbit_candidates || have_onscreen_orbit_candidates ||
+      have_offscreen_orbit_candidates;
+  if (thermal_mode || (!scan_mode && !s_thermal_orbit_candidates.empty()))
+  {
+    if (thermal_mode && have_validated_orbit_candidates)
+    {
+      s_thermal_orbit_candidates.clear();
+      const std::array<const std::vector<ScanTargetCandidate>*, 3> current_lists = {
+          &nearby_orbit_candidates,
+          &onscreen_orbit_candidates,
+          &offscreen_orbit_candidates,
+      };
+      for (const std::vector<ScanTargetCandidate>* candidates : current_lists)
+      {
+        for (const ScanTargetCandidate& candidate : *candidates)
+        {
+          if (!CandidateListContainsUid(s_thermal_orbit_candidates, candidate.uid))
+            s_thermal_orbit_candidates.push_back(candidate);
+        }
+      }
+    }
+    else
+    {
+      std::erase_if(s_thermal_orbit_candidates, [&](const ScanTargetCandidate& candidate) {
+        return !TargetUidStillExists(guard, state_manager, candidate.uid, candidate.obj) ||
+               !EntityLooksActive(guard, candidate.obj);
+      });
+    }
+
+    if (thermal_mode && s_thermal_orbit_candidates.empty())
+      return false;
+
+    bool found_cached_limb = false;
+    for (const ScanTargetCandidate& candidate : s_thermal_orbit_candidates)
+    {
+      // Thardus uses the same destroyable-rock object for both phases. Prime adds Target + Orbit
+      // to the undestroyed current rock in Thermal, removes them during the handoff, then adds
+      // them back to the destroyed bright rock outside Thermal. Keep identity cached for 360
+      // aiming, but always let Prime's current material state decide whether it is eligible.
+      if (!ActorIsTargetable(guard, candidate.obj) ||
+          !ActorHasMaterial(guard, candidate.obj, 40) ||
+          !ActorHasMaterial(guard, candidate.obj, 41))
+      {
+        continue;
+      }
+
+      const float candidate_max_along =
+          ActorUsesTargetDistanceTest(guard, candidate.obj) ? max_along : max_along * 1.75f;
+      const RayCandidateMetrics metrics =
+          ResolveActorRayMetrics(guard, candidate.obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z,
+                                 candidate_max_along, true);
+      const float candidate_max_perp = max_perp * vanilla_orbit_pick_radius_multiplier;
+      float aim_cone_perp = candidate_max_perp;
+      if (metrics.valid && strict_lock_aim)
+      {
+        const float strict_cone = 0.45f + metrics.along * 0.075f;
+        const float bounds_slack =
+            std::min(metrics.radius * 0.60f, candidate_max_perp * 0.50f);
+        aim_cone_perp =
+            std::min(candidate_max_perp,
+                     strict_cone * vanilla_orbit_pick_radius_multiplier + bounds_slack);
+      }
+
+      if (!metrics.valid || metrics.perp > aim_cone_perp)
+        continue;
+
+      const float cone_fraction = metrics.perp / std::max(aim_cone_perp, 0.001f);
+      const float score = cone_fraction * 1.50f + metrics.perp * 0.35f +
+                          metrics.along * 0.003f - metrics.radius * 0.015f;
+      if (found_cached_limb && score >= pick->score)
+        continue;
+
+      found_cached_limb = true;
+      pick->uid = candidate.uid;
+      pick->obj = candidate.obj;
+      pick->x = metrics.x;
+      pick->y = metrics.y;
+      pick->z = metrics.z;
+      pick->along = metrics.along;
+      pick->perp = metrics.perp;
+      pick->score = score;
+      pick->has_target = true;
+      pick->has_orbit = true;
+      pick->targetable = true;
+      pick->suppress_orbit_hook = false;
+    }
+
+    if (found_cached_limb || thermal_mode)
+      return found_cached_limb;
+  }
+
   bool found = false;
 
   for (u32 i = 0; i < 1024u; ++i)
@@ -2794,6 +2923,11 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
         have_nearby_orbit_candidates && CandidateListContainsUid(nearby_orbit_candidates, uid);
     const bool onscreen_orbit_candidate =
         have_onscreen_orbit_candidates && CandidateListContainsUid(onscreen_orbit_candidates, uid);
+    const bool offscreen_orbit_candidate =
+        have_offscreen_orbit_candidates &&
+        CandidateListContainsUid(offscreen_orbit_candidates, uid);
+    const bool validated_orbit_candidate =
+        nearby_orbit_candidate || onscreen_orbit_candidate || offscreen_orbit_candidate;
     const bool orbit_candidate = has_orbit && targetable;
     const bool scan_candidate = has_scan;
     const bool grapple_candidate = grapple_point && has_orbit;
@@ -2801,8 +2935,7 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
         !scan_mode && onscreen_orbit_candidate && orbit_candidate;
     const bool cannon_orbit_candidate =
         !scan_mode && orbit_candidate &&
-        (has_scan || has_character || vanilla_orbit_candidate || nearby_orbit_candidate);
-
+        (has_scan || has_character || validated_orbit_candidate);
     const bool has_any_target_hint =
         has_target || has_orbit || scan_candidate || grapple_candidate;
     if (!has_any_target_hint)
@@ -2833,9 +2966,11 @@ bool PickGunRayTarget(const Core::CPUThreadGuard& guard, u32 state_manager, u32 
     if (target_only_helper_point)
       continue;
 
+    const float candidate_max_along =
+        ActorUsesTargetDistanceTest(guard, obj) ? max_along : max_along * 1.75f;
     const RayCandidateMetrics metrics =
-        ResolveActorRayMetrics(guard, obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z, max_along,
-                               allow_physics_aabb);
+        ResolveActorRayMetrics(guard, obj, ray_x, ray_y, ray_z, dir_x, dir_y, dir_z,
+                               candidate_max_along, allow_physics_aabb);
     if (!metrics.valid)
       continue;
 
@@ -2938,6 +3073,9 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   }
 
   const bool lock_held = OrbitLockButtonHeld(guard, state_manager);
+  u32 current_visor = PLAYER_STATE_COMBAT_VISOR;
+  ReadCurrentPlayerVisor(guard, &current_visor);
+  const bool thermal_mode = current_visor == PLAYER_STATE_THERMAL_VISOR;
 
   GunTargetPick pick = {};
   const bool found_live =
@@ -2977,8 +3115,9 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
   if (!found || pick.suppress_orbit_hook)
   {
     u16 vanilla_uid = 0xffffu;
-    const bool vanilla_found = lock_held && ReadVanillaTargetUid(guard, state_manager, player, gun,
-                                                                 &vanilla_uid);
+    const bool vanilla_found =
+        !thermal_mode && lock_held &&
+        ReadVanillaTargetUid(guard, state_manager, player, gun, &vanilla_uid);
     if (vanilla_found)
     {
       WriteGunTargetScratch(guard, player, vanilla_uid);
@@ -2986,7 +3125,9 @@ void UpdateGunTargeting(const Core::CPUThreadGuard& guard, u32 state_manager, u3
     }
     else
     {
-      WriteGunTargetScratch(guard, player, 0xffffu);
+      // Thermal must not fall back to the camera-centered selector. Other visors should release
+      // scratch ownership when the cannon picker has no result so Prime can run vanilla lock-on.
+      WriteGunTargetScratch(guard, thermal_mode ? player : 0, 0xffffu);
       log_lock_state(pick.suppress_orbit_hook ? 4 : 0, 0xffffu, 0, false, false);
     }
     return;
@@ -7345,6 +7486,7 @@ void ResetNativeRuntime()
 {
   s_patches_applied_this_boot = false;
   s_frame_counter = 0;
+  s_thermal_orbit_candidates.clear();
   s_scan_was_active = false;
   s_scan_last_player = 0;
   s_scan_normal_frames = 0;
