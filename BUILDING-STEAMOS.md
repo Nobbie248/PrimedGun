@@ -1,8 +1,5 @@
 # Building PrimedGun on SteamOS
 
-This is an additive SteamOS build path. It uses a dedicated `build-steamos` directory and does not
-change the Windows build or the generic Linux instructions in `README.md`.
-
 SteamOS support and the original build workflow were contributed by
 [josethevrtech](https://github.com/josethevrtech) through
 [PrimedSteam](https://github.com/josethevrtech/PrimedSteam).
