@@ -37,6 +37,8 @@ If CMake has already configured the repo before, delete the old `build` folder b
 
 For SteamOS, see [BUILDING-STEAMOS.md](BUILDING-STEAMOS.md).
 
+For macOS, see [PrimedGun-Mac fork](https://github.com/gperkins345/PrimedGun-Mac) by [gperkins345](https://github.com/gperkins345).
+
 ## Features
 
 - Full directional movement.
