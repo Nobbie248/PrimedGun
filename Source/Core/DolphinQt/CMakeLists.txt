@@ -11,10 +11,39 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
+set(PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR "")
 if (Qt6_VERSION VERSION_GREATER_EQUAL 6.10.0)
   # GuiPrivate is needed to #include qplatformnativeinterface.h in MainWindow.cpp with Qt 6.10+.
   set(NEED_QT_GUI_PRIVATE_COMPONENT ON)
   find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+elseif(UNIX AND NOT APPLE)
+  # Older Linux Qt packages expose QPA headers through a versioned private include directory
+  # without defining Qt6::GuiPrivate.
+  get_target_property(_qt6_gui_include_dirs Qt6::Gui INTERFACE_INCLUDE_DIRECTORIES)
+  foreach(_qt6_gui_include_dir IN LISTS _qt6_gui_include_dirs)
+    foreach(_qt6_version IN ITEMS "${Qt6Gui_VERSION}" "${Qt6_VERSION}" "${Qt6Core_VERSION}")
+      if(NOT _qt6_version)
+        continue()
+      endif()
+
+      foreach(_qt6_gui_private_candidate IN ITEMS
+              "${_qt6_gui_include_dir}/${_qt6_version}/QtGui"
+              "${_qt6_gui_include_dir}/QtGui/${_qt6_version}/QtGui")
+        if(EXISTS "${_qt6_gui_private_candidate}/qpa/qplatformnativeinterface.h")
+          set(PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR "${_qt6_gui_private_candidate}")
+          break()
+        endif()
+      endforeach()
+
+      if(PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR)
+        break()
+      endif()
+    endforeach()
+
+    if(PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR)
+      break()
+    endif()
+  endforeach()
 endif()
 
 message(STATUS "Found Qt version ${Qt6_VERSION}")
@@ -473,6 +502,8 @@ if (NEED_QT_GUI_PRIVATE_COMPONENT)
   PRIVATE
     Qt6::GuiPrivate
   )
+elseif(PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR)
+  target_include_directories(dolphin-emu PRIVATE "${PRIMEDGUN_QT_GUI_PRIVATE_INCLUDE_DIR}")
 endif()
 
 if (WIN32)

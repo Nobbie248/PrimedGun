@@ -30,6 +30,21 @@ tools, reinstall the dependencies before changing PrimedGun source files.
 `vulkan-radeon` is appropriate for AMD GPUs. Install the Vulkan driver that matches the system if
 using different graphics hardware.
 
+If `pacman` reports keyring or signature errors on a fresh installation or after changing SteamOS
+update channels, rebuild the package keyring before installing the dependencies:
+
+```bash
+sudo install -d -m 755 /etc/pacman.d/gnupg
+sudo chown -R root:root /etc/pacman.d/gnupg
+sudo pacman-key --init
+
+for keyring in /usr/share/pacman/keyrings/*.gpg; do
+  sudo pacman-key --populate "$(basename "$keyring" .gpg)"
+done
+
+sudo pacman -Syy
+```
+
 ## Build
 
 Clone PrimedGun with its submodules, then run the SteamOS build script:
@@ -50,6 +65,12 @@ Launch it with:
 
 ```bash
 ./build-steamos/Binaries/PrimedGun
+```
+
+Check that all runtime libraries resolve before launching:
+
+```bash
+ldd build-steamos/Binaries/PrimedGun | grep "not found" || echo "runtime libs OK"
 ```
 
 The script configures a portable Release build with VR and Vulkan enabled. Automatic updates and
@@ -76,3 +97,5 @@ git submodule update --init --recursive
 
 If CMake reports stale cached paths after a major toolchain or Qt update, remove only the dedicated
 `build-steamos` directory and run the script again.
+
+If configuration reports that `EGL/egl.h` is missing, reinstall `libglvnd`.
