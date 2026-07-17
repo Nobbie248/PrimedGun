@@ -7,6 +7,16 @@ SteamOS support and the original build workflow were contributed by
 [josethevrtech](https://github.com/josethevrtech) through
 [PrimedSteam](https://github.com/josethevrtech/PrimedSteam).
 
+## Original verification environment
+
+The contributed workflow was originally verified with:
+
+- SteamOS 3.9, build `20260617.1001`
+- Linux `6.18.33-valve2-1-neptune-618-g29c9aecca098`
+- AMD Ryzen 9 PRO 8945HS with Radeon 780M Graphics
+- AMD Radeon RX 7900 GRE
+- 32 GiB RAM
+
 ## Requirements
 
 The original workflow was tested on SteamOS 3.9 with an AMD GPU. In Desktop Mode, temporarily make
