@@ -99,6 +99,13 @@ option(USE_MGBA "Enables GBA controllers emulation using libmgba" OFF)
 option(ENABLE_AUTOUPDATE "Enables support for automatic updates" OFF)
 option(USE_RETRO_ACHIEVEMENTS "Enables integration with retroachievements.org" ON)
 
+if(WIN32)
+  # PrimedGun ships normal-mode RetroAchievements support on Windows. Force this
+  # for existing build directories that may have cached the old OFF default.
+  set(USE_RETRO_ACHIEVEMENTS ON CACHE BOOL
+      "Enables integration with retroachievements.org" FORCE)
+endif()
+
 # Maintainers: if you consider blanket disabling this for your users, please
 # consider the following points:
 #  * No data is being sent without explicit user approval (pop up box at first

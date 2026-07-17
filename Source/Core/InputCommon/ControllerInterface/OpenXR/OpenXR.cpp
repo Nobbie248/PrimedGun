@@ -260,23 +260,23 @@ private:
       const auto& state = m_device.GetControllerState(m_hand);
       if (!state.connected)
         return 0.0;
-      const bool primegun_menu_open =
+      const bool primedgun_menu_open =
           Common::VR::OpenXRInputState::GetPrimedGunOverlay().menu_visible;
 
       switch (m_control)
       {
       case DigitalControl::Primary:
-        if (primegun_menu_open)
+        if (primedgun_menu_open)
           return 0.0;
         return state.primary_button ? 1.0 : 0.0;
       case DigitalControl::Secondary:
-        if (primegun_menu_open)
+        if (primedgun_menu_open)
           return 0.0;
         return state.secondary_button ? 1.0 : 0.0;
       case DigitalControl::Menu:
         return state.menu_button ? 1.0 : 0.0;
       case DigitalControl::Trigger:
-        if (primegun_menu_open)
+        if (primedgun_menu_open)
           return 0.0;
         return state.trigger_button ? 1.0 : 0.0;
       case DigitalControl::Squeeze:
@@ -331,13 +331,13 @@ private:
       const auto& state = m_device.GetControllerState(m_hand);
       if (!state.connected)
         return 0.0;
-      const bool primegun_menu_open =
+      const bool primedgun_menu_open =
           Common::VR::OpenXRInputState::GetPrimedGunOverlay().menu_visible;
 
       switch (m_control)
       {
       case AnalogControl::Trigger:
-        if (primegun_menu_open)
+        if (primedgun_menu_open)
           return 0.0;
         return state.trigger_value;
       case AnalogControl::Squeeze:

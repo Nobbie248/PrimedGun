@@ -14,7 +14,6 @@
 #include "Core/Config/AchievementSettings.h"
 #include "Core/Config/UISettings.h"
 #include "Core/Core.h"
-#include "Core/Movie.h"
 #include "Core/System.h"
 #include "UICommon/DiscordPresence.h"
 
@@ -68,6 +67,9 @@ void AchievementSettingsWidget::CreateLayout()
       tr("Enable integration with RetroAchievements for earning achievements and competing in "
          "leaderboards.<br><br>Must log in with a RetroAchievements account to use. Dolphin does "
          "not save your password locally and uses an API token to maintain login."));
+  auto* primedgun_mode_notice =
+      new QLabel(tr("PrimedGun supports normal RetroAchievements. Hardcore Mode is not supported."));
+  primedgun_mode_notice->setWordWrap(true);
   m_common_username_label = new QLabel(tr("Username"));
   m_common_username_input = new QLineEdit(QStringLiteral(""));
   m_common_password_label = new QLabel(tr("Password"));
@@ -78,20 +80,11 @@ void AchievementSettingsWidget::CreateLayout()
   m_common_login_failed = new QLabel(tr("Login Failed"));
   m_common_login_failed->setStyleSheet(QStringLiteral("QLabel { color : red; }"));
   m_common_login_failed->setVisible(false);
-  m_common_hardcore_enabled_input = new ToolTipCheckBox(tr("Enable Hardcore Mode"));
+  m_common_hardcore_enabled_input =
+      new ToolTipCheckBox(tr("Enable Hardcore Mode (Not supported by PrimedGun)"));
   m_common_hardcore_enabled_input->SetDescription(
-      tr("Enable Hardcore Mode on RetroAchievements.<br><br>Hardcore Mode is intended to provide "
-         "an experience as close to gaming on the original hardware as possible. RetroAchievements "
-         "rankings are primarily oriented towards Hardcore points (Softcore points are tracked but "
-         "not as heavily emphasized) and leaderboards require Hardcore Mode to be on.<br><br>To "
-         "ensure this experience, the following features will be disabled, as they give emulator "
-         "players an advantage over console players:<br>- Loading states<br>-- Saving states is "
-         "allowed<br>- Emulator speeds below 100%<br>-- Frame advance is disabled<br>-- Turbo is "
-         "allowed<br>- Cheats<br>- Memory patches<br>-- File patches are allowed<br>- Debug "
-         "UI<br>- Freelook<br><br><dolphin_emphasis>This cannot be turned on while a game is "
-         "playing.</dolphin_emphasis><br>Close your current game before enabling.<br>Be aware that "
-         "turning Hardcore Mode off while a game is running requires the game to be closed before "
-         "re-enabling."));
+      tr("Hardcore Mode is unavailable because PrimedGun requires runtime memory patches for its VR "
+         "controls and rendering. Normal RetroAchievements remain available."));
   m_common_unofficial_enabled_input = new ToolTipCheckBox(tr("Enable Unofficial Achievements"));
   m_common_unofficial_enabled_input->SetDescription(
       tr("Enable unlocking unofficial achievements as well as official "
@@ -132,6 +125,7 @@ void AchievementSettingsWidget::CreateLayout()
          "such as 60 out of 120 stars."));
 
   m_common_layout->addWidget(m_common_integration_enabled_input);
+  m_common_layout->addWidget(primedgun_mode_notice);
   m_common_layout->addWidget(m_common_username_label);
   m_common_layout->addWidget(m_common_username_input);
   m_common_layout->addWidget(m_common_password_label);
@@ -195,7 +189,6 @@ void AchievementSettingsWidget::LoadSettings()
   Core::System& system = Core::System::GetInstance();
 
   bool enabled = Config::Get(Config::RA_ENABLED);
-  bool hardcore_enabled = Config::Get(Config::RA_HARDCORE_ENABLED);
   bool logged_out = Config::Get(Config::RA_API_TOKEN).empty();
   std::string username = Config::Get(Config::RA_USERNAME);
 
@@ -218,11 +211,8 @@ void AchievementSettingsWidget::LoadSettings()
   SignalBlocking(m_common_logout_button)->setVisible(!logged_out);
   SignalBlocking(m_common_logout_button)->setEnabled(enabled);
 
-  SignalBlocking(m_common_hardcore_enabled_input)
-      ->setChecked(Config::Get(Config::RA_HARDCORE_ENABLED));
-  SignalBlocking(m_common_hardcore_enabled_input)
-      ->setEnabled(enabled && (hardcore_enabled || (Core::IsUninitialized(system) &&
-                                                    !system.GetMovie().IsPlayingInput())));
+  SignalBlocking(m_common_hardcore_enabled_input)->setChecked(false);
+  SignalBlocking(m_common_hardcore_enabled_input)->setEnabled(false);
 
   SignalBlocking(m_common_unofficial_enabled_input)
       ->setChecked(Config::Get(Config::RA_UNOFFICIAL_ENABLED));
@@ -258,8 +248,7 @@ void AchievementSettingsWidget::SaveSettings()
   Config::ConfigChangeCallbackGuard config_guard;
 
   Config::SetBaseOrCurrent(Config::RA_ENABLED, m_common_integration_enabled_input->isChecked());
-  Config::SetBaseOrCurrent(Config::RA_HARDCORE_ENABLED,
-                           m_common_hardcore_enabled_input->isChecked());
+  Config::SetBaseOrCurrent(Config::RA_HARDCORE_ENABLED, false);
   Config::SetBaseOrCurrent(Config::RA_UNOFFICIAL_ENABLED,
                            m_common_unofficial_enabled_input->isChecked());
   Config::SetBaseOrCurrent(Config::RA_ENCORE_ENABLED, m_common_encore_enabled_input->isChecked());

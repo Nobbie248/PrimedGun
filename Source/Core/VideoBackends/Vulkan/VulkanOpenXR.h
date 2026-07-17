@@ -207,9 +207,9 @@ private:
 
   std::array<XRVkEyeSwapchain, 2> m_eye_swapchains{};
   XRVkLayeredSwapchain m_layered_swapchain{};
-  XRPrimedGunVkOverlaySwapchain m_primegun_overlay_swapchain{};
-  XRPrimedGunVkOverlaySwapchain m_primegun_position_marker_swapchain{};
-  XRPrimedGunVkLaserSwapchain m_primegun_laser_swapchain{};
+  XRPrimedGunVkOverlaySwapchain m_primedgun_overlay_swapchain{};
+  XRPrimedGunVkOverlaySwapchain m_primedgun_position_marker_swapchain{};
+  XRPrimedGunVkLaserSwapchain m_primedgun_laser_swapchain{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};
@@ -223,9 +223,9 @@ private:
   std::array<XrCompositionLayerProjectionView, 2> m_projection_views{};
   XrCompositionLayerProjection m_projection_layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   XrCompositionLayerQuad m_cinematic_screen_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
-  XrCompositionLayerQuad m_primegun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
-  XrCompositionLayerQuad m_primegun_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
-  XrCompositionLayerQuad m_primegun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_primedgun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_primedgun_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_primedgun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 
   std::atomic<bool> m_async_frame_finalization_in_flight{false};
   std::atomic<bool> m_async_frame_finalization_failed{false};

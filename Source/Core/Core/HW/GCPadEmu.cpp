@@ -274,14 +274,14 @@ static void ApplyPrimedGunGripInputs(const Common::VR::OpenXRControllerState& le
                                      bool force_left_trackpad, bool force_right_trackpad,
                                      GCPadStatus* pad)
 {
-  if (!overlay.primegun_grip_inputs_enabled)
+  if (!overlay.primedgun_grip_inputs_enabled)
     return;
 
   if (left.connected)
   {
     const bool left_grip_action =
-        (force_left_trackpad || overlay.primegun_grip_inputs_use_trackpad) ?
-            left.trackpad_touch && left.trackpad_force >= overlay.primegun_trackpad_press_threshold :
+        (force_left_trackpad || overlay.primedgun_grip_inputs_use_trackpad) ?
+            left.trackpad_touch && left.trackpad_force >= overlay.primedgun_trackpad_press_threshold :
             left.squeeze_button;
     if (left_grip_action)
       pad->button |= PAD_TRIGGER_Z;
@@ -290,8 +290,8 @@ static void ApplyPrimedGunGripInputs(const Common::VR::OpenXRControllerState& le
   if (right.connected)
   {
     const bool right_grip_action =
-        (force_right_trackpad || overlay.primegun_grip_inputs_use_trackpad) ?
-            right.trackpad_touch && right.trackpad_force >= overlay.primegun_trackpad_press_threshold :
+        (force_right_trackpad || overlay.primedgun_grip_inputs_use_trackpad) ?
+            right.trackpad_touch && right.trackpad_force >= overlay.primedgun_trackpad_press_threshold :
             right.squeeze_button;
     if (right_grip_action)
       pad->button |= PAD_BUTTON_Y;
@@ -561,7 +561,7 @@ static void UpdatePrimedGunWeaponSelect(const Common::VR::OpenXRControllerState&
 
 static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
 {
-  static u64 s_primegun_pad_sample = 0;
+  static u64 s_primedgun_pad_sample = 0;
   static u64 s_grip_input_suppress_until_sample = 0;
   static bool s_last_gameplay = false;
   static bool s_last_overlay_visible = false;
@@ -618,12 +618,12 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
 
   const bool gameplay = PrimedGun::IsGameplayInputActive();
   if (gameplay && !s_last_gameplay)
-    s_grip_input_suppress_until_sample = s_primegun_pad_sample + 30;
+    s_grip_input_suppress_until_sample = s_primedgun_pad_sample + 30;
   const bool suppress_grip_inputs =
-      gameplay && s_primegun_pad_sample < s_grip_input_suppress_until_sample;
+      gameplay && s_primedgun_pad_sample < s_grip_input_suppress_until_sample;
   const bool orbit_lock_active = gameplay && PrimedGun::IsOrbitLockActive();
   const bool log_now =
-      (++s_primegun_pad_sample % 120) == 0 || gameplay != s_last_gameplay ||
+      (++s_primedgun_pad_sample % 120) == 0 || gameplay != s_last_gameplay ||
       orbit_lock_active != s_last_orbit_lock ||
       overlay.menu_visible != s_last_overlay_visible || left.primary_button != s_last_left_primary ||
       left.secondary_button != s_last_left_secondary || left.menu_button != s_last_left_menu ||
@@ -921,7 +921,7 @@ GCPadStatus GCPad::GetInput() const
 #ifdef ENABLE_VR
   if (m_index == 0 && ApplyPrimedGunModernControls(&pad))
   {
-    if (!Common::VR::OpenXRInputState::GetPrimedGunOverlay().primegun_grip_inputs_enabled)
+    if (!Common::VR::OpenXRInputState::GetPrimedGunOverlay().primedgun_grip_inputs_enabled)
     {
       m_buttons->GetState(&pad.button, button_bitmasks, m_input_override_function);
       if (pad.button & PAD_BUTTON_A)

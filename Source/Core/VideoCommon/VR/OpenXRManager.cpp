@@ -25,7 +25,7 @@ std::unique_ptr<OpenXRManager> g_openxr;
 
 namespace
 {
-constexpr float PRIMEGUN_DEFAULT_STANDING_HEIGHT_M = 1.2f;
+constexpr float PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M = 1.2f;
 
 struct EulerDeg
 {
@@ -875,7 +875,7 @@ void OpenXRManager::UpdateInputActions()
     {
       if (m_reference_space_is_stage)
       {
-        m_home_position = {0.0f, PRIMEGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
+        m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
       }
       else
       {
@@ -935,12 +935,12 @@ bool OpenXRManager::CreateReferenceSpace()
   if (XR_SUCCEEDED(result))
   {
     m_reference_space_is_stage = true;
-    m_home_position = {0.0f, PRIMEGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
+    m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     m_home_set = true;
     INFO_LOG_FMT(OPENXR,
                  "OpenXR: Using stage reference space for PrimedGun play-space origin with default "
                  "startup height {:.2f}m.",
-                 PRIMEGUN_DEFAULT_STANDING_HEIGHT_M);
+                 PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M);
     return true;
   }
 
@@ -1216,7 +1216,7 @@ void OpenXRManager::GetEyeProjectionRows(
   {
     if (m_reference_space_is_stage)
     {
-      m_home_position = {0.0f, PRIMEGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
+      m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     }
     else
     {

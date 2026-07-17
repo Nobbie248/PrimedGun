@@ -541,7 +541,7 @@ if (MSVC)
   target_compile_options(dolphin-emu PRIVATE "/GR")
 endif()
 
-option(PRIMEGUN_ENABLE_TRANSLATIONS "Build and deploy Dolphin UI translation files for PrimedGun" OFF)
+option(PRIMEDGUN_ENABLE_TRANSLATIONS "Build and deploy Dolphin UI translation files for PrimedGun" OFF)
 
 set_target_properties(dolphin-emu PROPERTIES
   OUTPUT_NAME PrimedGun
@@ -627,70 +627,70 @@ if(WIN32)
                                  "$<TARGET_FILE:dolphin-emu>"
   )
 
-  if(NOT PRIMEGUN_ENABLE_TRANSLATIONS)
+  if(NOT PRIMEDGUN_ENABLE_TRANSLATIONS)
     add_custom_command(TARGET dolphin-emu POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Languages"
     )
   endif()
 endif()
 
-file(GLOB_RECURSE primegun_user_asset_files CONFIGURE_DEPENDS
+file(GLOB_RECURSE primedgun_user_asset_files CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/Data/User/Load/PrimedGun/*"
   "${CMAKE_SOURCE_DIR}/Data/User/Load/Textures/000_PrimedGunCannon/*"
 )
 if(WIN32 OR APPLE)
-  set(PRIMEGUN_RUNTIME_USER_DIR "User")
+  set(PRIMEDGUN_RUNTIME_USER_DIR "User")
 else()
-  set(PRIMEGUN_RUNTIME_USER_DIR "user")
+  set(PRIMEDGUN_RUNTIME_USER_DIR "user")
 endif()
-add_custom_target(primegun-user-assets-copy
-  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEGUN_RUNTIME_USER_DIR}/Load"
+add_custom_target(primedgun-user-assets-copy
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEDGUN_RUNTIME_USER_DIR}/Load"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_SOURCE_DIR}/Data/User/Load/PrimedGun"
-          "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEGUN_RUNTIME_USER_DIR}/Load/PrimedGun"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEGUN_RUNTIME_USER_DIR}/Load/Textures"
+          "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEDGUN_RUNTIME_USER_DIR}/Load/PrimedGun"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEDGUN_RUNTIME_USER_DIR}/Load/Textures"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_SOURCE_DIR}/Data/User/Load/Textures/000_PrimedGunCannon"
-          "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEGUN_RUNTIME_USER_DIR}/Load/Textures/000_PrimedGunCannon"
-  DEPENDS ${primegun_user_asset_files}
+          "$<TARGET_FILE_DIR:dolphin-emu>/${PRIMEDGUN_RUNTIME_USER_DIR}/Load/Textures/000_PrimedGunCannon"
+  DEPENDS ${primedgun_user_asset_files}
   COMMENT "Copying PrimedGun runtime texture assets"
 )
-add_dependencies(dolphin-emu primegun-user-assets-copy)
+add_dependencies(dolphin-emu primedgun-user-assets-copy)
 
 if(UNIX AND NOT APPLE AND LINUX_LOCAL_DEV)
-  add_custom_target(primegun-sys-link
+  add_custom_target(primedgun-sys-link
     COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:dolphin-emu>/Sys"
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:dolphin-emu>/Sys"
     COMMAND ${CMAKE_COMMAND} -E create_symlink "../../Data/Sys" "$<TARGET_FILE_DIR:dolphin-emu>/Sys"
     COMMENT "Linking Data/Sys into the local runtime directory"
   )
-  add_dependencies(dolphin-emu primegun-sys-link)
+  add_dependencies(dolphin-emu primedgun-sys-link)
 endif()
 
-file(GLOB_RECURSE primegun_runtime_asset_files CONFIGURE_DEPENDS
+file(GLOB_RECURSE primedgun_runtime_asset_files CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/assets/*"
 )
-add_custom_target(primegun-runtime-assets-copy
+add_custom_target(primedgun-runtime-assets-copy
   COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:dolphin-emu>/assets"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_SOURCE_DIR}/assets"
           "$<TARGET_FILE_DIR:dolphin-emu>/assets"
-  DEPENDS ${primegun_runtime_asset_files}
+  DEPENDS ${primedgun_runtime_asset_files}
   COMMENT "Copying PrimedGun runtime UI assets"
 )
-add_dependencies(dolphin-emu primegun-runtime-assets-copy)
+add_dependencies(dolphin-emu primedgun-runtime-assets-copy)
 
-add_custom_target(primegun-readme-copy
+add_custom_target(primedgun-readme-copy
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "${CMAKE_SOURCE_DIR}/README.md"
           "$<TARGET_FILE_DIR:dolphin-emu>/README.md"
   DEPENDS "${CMAKE_SOURCE_DIR}/README.md"
   COMMENT "Copying PrimedGun README into the runtime directory"
 )
-add_dependencies(dolphin-emu primegun-readme-copy)
+add_dependencies(dolphin-emu primedgun-readme-copy)
 
 # Handle localization
-if(PRIMEGUN_ENABLE_TRANSLATIONS)
+if(PRIMEDGUN_ENABLE_TRANSLATIONS)
 find_package(Gettext)
 
 if(WIN32 AND NOT Gettext_FOUND)

@@ -103,9 +103,9 @@ struct PrimedGunVrOverlayState
   bool rumble_enabled = true;
   float rumble_intensity = 1.0f;
   int rumble_hand_mode = 2;
-  bool primegun_grip_inputs_enabled = true;
-  bool primegun_grip_inputs_use_trackpad = false;
-  float primegun_trackpad_press_threshold = 0.5f;
+  bool primedgun_grip_inputs_enabled = true;
+  bool primedgun_grip_inputs_use_trackpad = false;
+  float primedgun_trackpad_press_threshold = 0.5f;
   bool combat_jump_use_primary_button = false;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
@@ -213,7 +213,7 @@ public:
     std::lock_guard lk(s_state_mutex);
     s_state = {};
     s_haptics = {};
-    s_primegun_overlay = {};
+    s_primedgun_overlay = {};
     ++s_state.generation;
   }
 
@@ -226,13 +226,13 @@ public:
   static PrimedGunVrOverlayState GetPrimedGunOverlay()
   {
     std::lock_guard lk(s_state_mutex);
-    return s_primegun_overlay;
+    return s_primedgun_overlay;
   }
 
   static void SetPrimedGunOverlay(const PrimedGunVrOverlayState& overlay)
   {
     std::lock_guard lk(s_state_mutex);
-    s_primegun_overlay = overlay;
+    s_primedgun_overlay = overlay;
   }
 
   static void SetRumble(float amplitude)
@@ -302,7 +302,7 @@ private:
   static inline std::mutex s_state_mutex;
   static inline OpenXRInputSnapshot s_state{};
   static inline OpenXRHapticsState s_haptics{};
-  static inline PrimedGunVrOverlayState s_primegun_overlay{};
+  static inline PrimedGunVrOverlayState s_primedgun_overlay{};
 };
 }  // namespace Common::VR
 

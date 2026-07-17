@@ -186,7 +186,7 @@ These notes were saved before hard-resetting the local tree.
   - `directional_movement_use_hmd_direction`
 - Desktop UI addition:
   - movement direction radio buttons: `Controller direction` / `HMD direction`
-  - persisted with `QSettings` key `primegun/directional_movement_use_hmd_direction`
+  - persisted with `QSettings` key `primedgun/directional_movement_use_hmd_direction`
 - In-headset menu addition:
   - `MOVE DIRECTION` row showing `CONTROLLER` or `HMD`
   - adjusted numeric-row indices after inserting the new row

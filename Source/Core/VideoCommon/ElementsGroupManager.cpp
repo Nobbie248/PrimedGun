@@ -38,7 +38,7 @@ struct ParsedElementGroupOverrideFile
   std::set<std::string> enabled_names;
 };
 
-bool IsPrimeGunMapOrPauseLayer(MetroidElementLayer layer)
+bool IsPrimedGunMapOrPauseLayer(MetroidElementLayer layer)
 {
   switch (layer)
   {
@@ -1586,7 +1586,7 @@ void ElementsGroupManager::ClassifyProfileDraw(DrawRecord* draw,
   draw->profile_layer = selected_layer;
   draw->profile_layer_name = std::string(MetroidElementLayerToDisplayName(selected_layer));
 
-  if (IsPrimeGunMapOrPauseLayer(selected_layer))
+  if (IsPrimedGunMapOrPauseLayer(selected_layer))
     ShaderHunter::GetInstance().RegisterExternalFlag("primedgun_map_or_pause");
 }
 

@@ -113,12 +113,12 @@ QIcon Resources::GetMisc(MiscID id)
 
 QIcon Resources::GetAppIcon()
 {
-  const QString primegun_png =
+  const QString primedgun_png =
       QCoreApplication::applicationDirPath() + QStringLiteral("/assets/PrimedGun.png");
-  if (QFileInfo(primegun_png).exists())
+  if (QFileInfo(primedgun_png).exists())
   {
     QIcon icon;
-    icon.addFile(primegun_png);
+    icon.addFile(primedgun_png);
     if (!icon.isNull())
       return icon;
   }

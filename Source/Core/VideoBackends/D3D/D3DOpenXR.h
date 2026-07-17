@@ -82,7 +82,7 @@ private:
   void DestroySwapchains();
 
   std::array<XREyeSwapchain, 2> m_eye_swapchains{};
-  D3DPrimedGunOverlay m_primegun_overlay{};
+  D3DPrimedGunOverlay m_primedgun_overlay{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
   std::array<uint32_t, 2> m_acquired_image_index{0, 0};

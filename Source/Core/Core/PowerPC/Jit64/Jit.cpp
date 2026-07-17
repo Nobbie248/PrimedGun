@@ -935,11 +935,11 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
   MOV(64, R(RSCRATCH), Imm64(reinterpret_cast<u64>(PrimedGun::PPCTrace::GetActiveFlagAddress())));
   CMP(32, MDisp(RSCRATCH, 0), Imm32(0));
-  FixupBranch skip_primegun_trace = J_CC(CC_Z);
+  FixupBranch skip_primedgun_trace = J_CC(CC_Z);
   ABI_PushRegistersAndAdjustStack({}, 0);
   ABI_CallFunctionC(PrimedGun::PPCTrace::TraceBlockFromJit, js.blockStart);
   ABI_PopRegistersAndAdjustStack({}, 0);
-  SetJumpTarget(skip_primegun_trace);
+  SetJumpTarget(skip_primedgun_trace);
 
   // Conditionally add profiling code.
   if (IsProfilingEnabled())

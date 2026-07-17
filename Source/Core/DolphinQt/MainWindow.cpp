@@ -186,16 +186,16 @@
 
 namespace
 {
-constexpr const char* PRIMEGUN_CANNON_GAME_ID = "GM8E01";
-constexpr const char* PRIMEGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
-constexpr const char* PRIMEGUN_CANNON_LIBRARY_FOLDER = "PrimedGun/CannonTextures";
-constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
+constexpr const char* PRIMEDGUN_CANNON_GAME_ID = "GM8E01";
+constexpr const char* PRIMEDGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
+constexpr const char* PRIMEDGUN_CANNON_LIBRARY_FOLDER = "PrimedGun/CannonTextures";
+constexpr std::array<const char*, 3> PRIMEDGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_3c6ded49d64d30f2_14",
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
 };
-constexpr int PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX = 2;
-constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_LABELS = {
+constexpr int PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX = 2;
+constexpr std::array<const char*, 3> PRIMEDGUN_CANNON_TEXTURE_LABELS = {
     "Cannon texture A",
     "Cannon texture B",
     "Shine mask",
@@ -204,13 +204,13 @@ constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_LABELS = {
 QString PrimedGunCannonPackDir()
 {
   return QDir::cleanPath(QString::fromStdString(File::GetUserPath(D_HIRESTEXTURES_IDX)) +
-                         QLatin1Char('/') + QString::fromLatin1(PRIMEGUN_CANNON_PACK_FOLDER));
+                         QLatin1Char('/') + QString::fromLatin1(PRIMEDGUN_CANNON_PACK_FOLDER));
 }
 
 QString PrimedGunCannonLibraryDir()
 {
   return QDir::cleanPath(QString::fromStdString(File::GetUserPath(D_LOAD_IDX)) +
-                         QLatin1Char('/') + QString::fromLatin1(PRIMEGUN_CANNON_LIBRARY_FOLDER));
+                         QLatin1Char('/') + QString::fromLatin1(PRIMEDGUN_CANNON_LIBRARY_FOLDER));
 }
 
 QString PrimedGunCannonAppLibraryDir()
@@ -218,7 +218,7 @@ QString PrimedGunCannonAppLibraryDir()
   return QDir::cleanPath(QString::fromStdString(File::GetSysDirectory()) +
                          QStringLiteral("../") + QString::fromLatin1(PORTABLE_USER_DIR) +
                          QStringLiteral("/Load/") +
-                         QString::fromLatin1(PRIMEGUN_CANNON_LIBRARY_FOLDER));
+                         QString::fromLatin1(PRIMEDGUN_CANNON_LIBRARY_FOLDER));
 }
 
 QString PrimedGunCannonLibraryFilePath(const QString& relative_path)
@@ -475,7 +475,7 @@ QString PrimedGunFindSettingsNearMemoryCard(const QString& memory_card_path)
 
 bool PrimedGunShouldImportSettingKey(const QString& key)
 {
-  // Keep transfer focused on user-facing PrimeGun preferences. Runtime activation and old
+  // Keep transfer focused on user-facing PrimedGun preferences. Runtime activation and old
   // path/history fields should stay owned by the current install.
   return key != QStringLiteral("enabled") &&
          key != QStringLiteral("last_memcard_transfer_dir");
@@ -487,7 +487,7 @@ int PrimedGunImportSettingsFromFile(const QString& settings_path, QSettings* des
     return 0;
 
   QSettings source_settings(settings_path, QSettings::IniFormat);
-  source_settings.beginGroup(QStringLiteral("primegun"));
+  source_settings.beginGroup(QStringLiteral("primedgun"));
   const QStringList keys = source_settings.allKeys();
 
   int imported_count = 0;
@@ -496,7 +496,7 @@ int PrimedGunImportSettingsFromFile(const QString& settings_path, QSettings* des
     if (!PrimedGunShouldImportSettingKey(key))
       continue;
 
-    destination_settings->setValue(QStringLiteral("primegun/%1").arg(key),
+    destination_settings->setValue(QStringLiteral("primedgun/%1").arg(key),
                                    source_settings.value(key));
     ++imported_count;
   }
@@ -658,7 +658,7 @@ QString PrimedGunCannonRemoveShinePresetPath()
 {
   return PrimedGunCannonLibraryFilePath(
       QStringLiteral("presets/remove_shine/") +
-      QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
+      QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
       QStringLiteral(".dds"));
 }
 
@@ -666,37 +666,37 @@ QString PrimedGunCannonRestoreShinePresetPath(int slot)
 {
   return PrimedGunCannonLibraryFilePath(
       QStringLiteral("presets/restore_shine/slot_%1/").arg(slot) +
-      QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
+      QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
       QStringLiteral(".dds"));
 }
 
 QString PrimedGunCannonUserTexturePackSourcePath()
 {
   return QDir::cleanPath(QString::fromStdString(File::GetUserPath(D_HIRESTEXTURES_IDX)) +
-                         QLatin1Char('/') + QString::fromLatin1(PRIMEGUN_CANNON_GAME_ID) +
+                         QLatin1Char('/') + QString::fromLatin1(PRIMEDGUN_CANNON_GAME_ID) +
                          QLatin1Char('/') +
                          QString::fromLatin1(
-                             PRIMEGUN_CANNON_TEXTURE_NAMES[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
+                             PRIMEDGUN_CANNON_TEXTURE_NAMES[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX]) +
                          QStringLiteral(".dds"));
 }
 
 QString PrimedGunCannonSourcePath(int slot, int texture_index, const QString& extension)
 {
   return PrimedGunCannonSlotDir(slot) + QLatin1Char('/') +
-         QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension;
+         QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension;
 }
 
 QString PrimedGunCannonExistingSourcePath(int slot, int texture_index, const QString& extension)
 {
   return PrimedGunCannonLibraryFilePath(
       QStringLiteral("slot_%1/").arg(slot) +
-      QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension);
+      QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension);
 }
 
 QString PrimedGunCannonDefaultPreviewPath(int texture_index)
 {
   const QString relative_base = QStringLiteral("default/") +
-                               QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[texture_index]);
+                               QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[texture_index]);
   const QString dds_path = PrimedGunCannonLibraryFilePath(relative_base + QStringLiteral(".dds"));
   if (QFileInfo(dds_path).isFile())
     return dds_path;
@@ -711,7 +711,7 @@ QString PrimedGunCannonDefaultPreviewPath(int texture_index)
 QString PrimedGunCannonActivePath(int texture_index, const QString& extension)
 {
   return PrimedGunCannonPackDir() + QLatin1Char('/') +
-         QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension;
+         QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_NAMES[texture_index]) + extension;
 }
 
 void PrimedGunRemoveCannonSlotTextureFiles(int slot, int texture_index)
@@ -728,16 +728,16 @@ void PrimedGunRemoveActiveCannonTextureFiles(int texture_index)
 
 QString PrimedGunCannonSlotSetting(int slot, int texture_index)
 {
-  return QStringLiteral("primegun/cannon_texture_slot_%1_target_%2").arg(slot).arg(texture_index);
+  return QStringLiteral("primedgun/cannon_texture_slot_%1_target_%2").arg(slot).arg(texture_index);
 }
 
 QString PrimedGunResolveCannonTextureSource(int slot, int texture_index, const QString& stored_source)
 {
   const QString normalized_stored_source = QDir::fromNativeSeparators(stored_source);
-  const bool uses_legacy_primegun_folder =
+  const bool uses_legacy_primedgun_folder =
       normalized_stored_source.contains(QStringLiteral("/Load/PrimedGun/"));
 
-  if (!stored_source.isEmpty() && !uses_legacy_primegun_folder &&
+  if (!stored_source.isEmpty() && !uses_legacy_primedgun_folder &&
       QFileInfo(stored_source).isFile())
     return stored_source;
 
@@ -773,7 +773,7 @@ bool PrimedGunEnsureCannonPackRegistration()
     return false;
 
   QFile game_id_file(pack_dir.filePath(QStringLiteral("gameids/%1.txt").arg(
-      QString::fromLatin1(PRIMEGUN_CANNON_GAME_ID))));
+      QString::fromLatin1(PRIMEDGUN_CANNON_GAME_ID))));
   if (!game_id_file.exists())
   {
     if (!game_id_file.open(QIODevice::WriteOnly | QIODevice::Text))
@@ -824,7 +824,7 @@ bool PrimedGunBackupSlotShinePreset(int slot, QString* error)
     return true;
 
   const QString source = PrimedGunResolveCannonTextureSource(
-      slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX, QString());
+      slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX, QString());
   if (source.isEmpty())
     return true;
 
@@ -989,7 +989,7 @@ void PrimedGunSetCannonPreviewLabel(QLabel* label, const QString& path)
 
 void PrimedGunClearActiveCannonTextures()
 {
-  for (const char* texture_name : PRIMEGUN_CANNON_TEXTURE_NAMES)
+  for (const char* texture_name : PRIMEDGUN_CANNON_TEXTURE_NAMES)
   {
     const QString base = PrimedGunCannonPackDir() + QLatin1Char('/') + QString::fromLatin1(texture_name);
     QFile::remove(base + QStringLiteral(".png"));
@@ -1011,7 +1011,7 @@ bool PrimedGunApplyCannonTextureSlot(int slot, QString* error)
     return true;
 
   QSettings& settings = Settings::GetQSettings();
-  for (int texture_index = 0; texture_index < static_cast<int>(PRIMEGUN_CANNON_TEXTURE_NAMES.size());
+  for (int texture_index = 0; texture_index < static_cast<int>(PRIMEDGUN_CANNON_TEXTURE_NAMES.size());
        ++texture_index)
   {
     const QString setting_key = PrimedGunCannonSlotSetting(slot, texture_index);
@@ -1057,13 +1057,13 @@ void PrimedGunRefreshCustomTextureConfig(bool use_active_overrides)
 {
   g_Config.Refresh();
   UpdateActiveConfig();
-  for (const char* texture_name : PRIMEGUN_CANNON_TEXTURE_NAMES)
+  for (const char* texture_name : PRIMEDGUN_CANNON_TEXTURE_NAMES)
     HiresTexture::RemoveAssetPath(texture_name);
   HiresTexture::Update();
-  for (int texture_index = 0; texture_index < static_cast<int>(PRIMEGUN_CANNON_TEXTURE_NAMES.size());
+  for (int texture_index = 0; texture_index < static_cast<int>(PRIMEDGUN_CANNON_TEXTURE_NAMES.size());
        ++texture_index)
   {
-    const char* texture_name = PRIMEGUN_CANNON_TEXTURE_NAMES[texture_index];
+    const char* texture_name = PRIMEDGUN_CANNON_TEXTURE_NAMES[texture_index];
     const QString active_dds = PrimedGunCannonActivePath(texture_index, QStringLiteral(".dds"));
     const QString active_png = PrimedGunCannonActivePath(texture_index, QStringLiteral(".png"));
     const QString active_path =
@@ -1552,6 +1552,24 @@ static std::vector<std::string> StringListToStdVector(QStringList list)
 
 static constexpr const char* SELECTED_METROID_GAME_SETTING = "mainwindow/selected_metroid_prime_path";
 
+void MigrateLegacyPrimedGunSettings()
+{
+  QSettings& settings = Settings::GetQSettings();
+  const QString legacy_prefix = QStringLiteral("prime") + QStringLiteral("gun/");
+  const QString corrected_prefix = QStringLiteral("primedgun/");
+
+  for (const QString& key : settings.allKeys())
+  {
+    if (!key.startsWith(legacy_prefix))
+      continue;
+
+    const QString corrected_key = corrected_prefix + key.mid(legacy_prefix.size());
+    if (!settings.contains(corrected_key))
+      settings.setValue(corrected_key, settings.value(key));
+    settings.remove(key);
+  }
+}
+
 class PrimedGunScaledImageLabel final : public QLabel
 {
 public:
@@ -1593,9 +1611,10 @@ MainWindow::MainWindow(Core::System& system, std::unique_ptr<BootParameters> boo
 {
   setWindowTitle(
       QStringLiteral("PrimedGun v%1").arg(QString::fromStdString(Common::GetScmDescStr())));
-  const QIcon primegun_icon(QApplication::applicationDirPath() +
-                            QStringLiteral("/assets/PrimedGun.png"));
-  setWindowIcon(primegun_icon.isNull() ? Resources::GetAppIcon() : primegun_icon);
+  MigrateLegacyPrimedGunSettings();
+  const QIcon primedgun_icon(QApplication::applicationDirPath() +
+                             QStringLiteral("/assets/PrimedGun.png"));
+  setWindowIcon(primedgun_icon.isNull() ? Resources::GetAppIcon() : primedgun_icon);
   setUnifiedTitleAndToolBarOnMac(true);
   setAcceptDrops(true);
   setAttribute(Qt::WA_NativeWindow);
@@ -2175,41 +2194,41 @@ void MainWindow::ConnectStack()
   select_state_slot_button->setStyleSheet(game_button_style);
   transfer_old_save_button->setStyleSheet(game_button_style);
   QSettings& settings = Settings::GetQSettings();
-  const auto load_primegun_runtime_settings = [&settings] {
+  const auto load_primedgun_runtime_settings = [&settings] {
     PrimedGun::RuntimeSettings runtime = PrimedGun::GetRuntimeSettings();
-    runtime.enabled = settings.value(QStringLiteral("primegun/enabled"), runtime.enabled).toBool();
+    runtime.enabled = settings.value(QStringLiteral("primedgun/enabled"), runtime.enabled).toBool();
     runtime.builtin_patches_enabled =
-        settings.value(QStringLiteral("primegun/builtin_patches_enabled"),
+        settings.value(QStringLiteral("primedgun/builtin_patches_enabled"),
                        runtime.builtin_patches_enabled)
             .toBool();
     runtime.patch_disable_frustum_culling =
-        settings.value(QStringLiteral("primegun/patch_disable_frustum_culling"),
+        settings.value(QStringLiteral("primedgun/patch_disable_frustum_culling"),
                        runtime.patch_disable_frustum_culling)
             .toBool();
     runtime.patch_no_idle_sway =
-        settings.value(QStringLiteral("primegun/patch_no_idle_sway"), runtime.patch_no_idle_sway)
+        settings.value(QStringLiteral("primedgun/patch_no_idle_sway"), runtime.patch_no_idle_sway)
             .toBool();
     runtime.patch_disable_arm_cannon_idle_fidget =
-        settings.value(QStringLiteral("primegun/patch_disable_arm_cannon_idle_fidget"),
+        settings.value(QStringLiteral("primedgun/patch_disable_arm_cannon_idle_fidget"),
                        runtime.patch_disable_arm_cannon_idle_fidget)
             .toBool();
     runtime.patch_beam_projectile_timing =
-        settings.value(QStringLiteral("primegun/patch_beam_projectile_timing"),
+        settings.value(QStringLiteral("primedgun/patch_beam_projectile_timing"),
                        runtime.patch_beam_projectile_timing)
             .toBool();
     runtime.patch_xr_visor_dpad_timing =
-        settings.value(QStringLiteral("primegun/patch_xr_visor_dpad_timing"),
+        settings.value(QStringLiteral("primedgun/patch_xr_visor_dpad_timing"),
                        runtime.patch_xr_visor_dpad_timing)
             .toBool();
     runtime.patch_cannon_rotation =
-        settings.value(QStringLiteral("primegun/patch_cannon_rotation"),
+        settings.value(QStringLiteral("primedgun/patch_cannon_rotation"),
                        runtime.patch_cannon_rotation)
             .toBool();
     runtime.patch_gun_ray_target =
-        settings.value(QStringLiteral("primegun/patch_gun_ray_target"), runtime.patch_gun_ray_target)
+        settings.value(QStringLiteral("primedgun/patch_gun_ray_target"), runtime.patch_gun_ray_target)
             .toBool();
     runtime.patch_reticle =
-        settings.value(QStringLiteral("primegun/patch_reticle"), runtime.patch_reticle).toBool();
+        settings.value(QStringLiteral("primedgun/patch_reticle"), runtime.patch_reticle).toBool();
     runtime.builtin_patches_enabled = true;
     runtime.patch_disable_frustum_culling = true;
     runtime.patch_no_idle_sway = true;
@@ -2220,270 +2239,270 @@ void MainWindow::ConnectStack()
     runtime.patch_gun_ray_target = true;
     runtime.patch_reticle = true;
     runtime.use_right_hand =
-        settings.value(QStringLiteral("primegun/use_right_hand"), runtime.use_right_hand).toBool();
+        settings.value(QStringLiteral("primedgun/use_right_hand"), runtime.use_right_hand).toBool();
     runtime.offset_x = 0.0f;
     runtime.offset_y = 0.0f;
     runtime.offset_z = 0.0f;
     runtime.model_offset_x =
-        settings.value(QStringLiteral("primegun/model_offset_x"), runtime.model_offset_x).toFloat();
+        settings.value(QStringLiteral("primedgun/model_offset_x"), runtime.model_offset_x).toFloat();
     runtime.model_offset_y =
-        settings.value(QStringLiteral("primegun/model_offset_y"), runtime.model_offset_y).toFloat();
+        settings.value(QStringLiteral("primedgun/model_offset_y"), runtime.model_offset_y).toFloat();
     runtime.model_offset_z =
-        settings.value(QStringLiteral("primegun/model_offset_z"), runtime.model_offset_z).toFloat();
+        settings.value(QStringLiteral("primedgun/model_offset_z"), runtime.model_offset_z).toFloat();
     runtime.rot_offset_x =
-        settings.value(QStringLiteral("primegun/rot_offset_x"), runtime.rot_offset_x).toFloat();
+        settings.value(QStringLiteral("primedgun/rot_offset_x"), runtime.rot_offset_x).toFloat();
     runtime.rot_offset_y =
-        settings.value(QStringLiteral("primegun/rot_offset_y"), runtime.rot_offset_y).toFloat();
+        settings.value(QStringLiteral("primedgun/rot_offset_y"), runtime.rot_offset_y).toFloat();
     runtime.rot_offset_z =
-        settings.value(QStringLiteral("primegun/rot_offset_z"), runtime.rot_offset_z).toFloat();
+        settings.value(QStringLiteral("primedgun/rot_offset_z"), runtime.rot_offset_z).toFloat();
     runtime.world_scale =
-        settings.value(QStringLiteral("primegun/world_scale"), runtime.world_scale).toFloat();
+        settings.value(QStringLiteral("primedgun/world_scale"), runtime.world_scale).toFloat();
     runtime.require_trigger = false;
     runtime.trigger_threshold = 0.5f;
     runtime.rumble_enabled =
-        settings.value(QStringLiteral("primegun/rumble_enabled"), runtime.rumble_enabled).toBool();
+        settings.value(QStringLiteral("primedgun/rumble_enabled"), runtime.rumble_enabled).toBool();
     runtime.rumble_intensity =
-        settings.value(QStringLiteral("primegun/rumble_intensity"), runtime.rumble_intensity).toFloat();
+        settings.value(QStringLiteral("primedgun/rumble_intensity"), runtime.rumble_intensity).toFloat();
     runtime.rumble_hand_mode =
-        settings.value(QStringLiteral("primegun/rumble_hand_mode"), runtime.rumble_hand_mode).toInt();
-    runtime.primegun_grip_inputs_enabled =
-        settings.value(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
-                       runtime.primegun_grip_inputs_enabled)
+        settings.value(QStringLiteral("primedgun/rumble_hand_mode"), runtime.rumble_hand_mode).toInt();
+    runtime.primedgun_grip_inputs_enabled =
+        settings.value(QStringLiteral("primedgun/primedgun_grip_inputs_enabled"),
+                       runtime.primedgun_grip_inputs_enabled)
             .toBool();
-    runtime.primegun_grip_inputs_use_trackpad =
-        settings.value(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
-                       runtime.primegun_grip_inputs_use_trackpad)
+    runtime.primedgun_grip_inputs_use_trackpad =
+        settings.value(QStringLiteral("primedgun/primedgun_grip_inputs_use_trackpad"),
+                       runtime.primedgun_grip_inputs_use_trackpad)
             .toBool();
-    runtime.primegun_trackpad_press_threshold =
-        settings.value(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
-                       runtime.primegun_trackpad_press_threshold)
+    runtime.primedgun_trackpad_press_threshold =
+        settings.value(QStringLiteral("primedgun/primedgun_trackpad_press_threshold"),
+                       runtime.primedgun_trackpad_press_threshold)
             .toFloat();
     runtime.combat_jump_use_primary_button =
-        settings.value(QStringLiteral("primegun/combat_jump_use_primary_button"),
+        settings.value(QStringLiteral("primedgun/combat_jump_use_primary_button"),
                        runtime.combat_jump_use_primary_button)
             .toBool();
     runtime.vr_menu_hold_left_stick =
-        settings.value(QStringLiteral("primegun/vr_menu_hold_left_stick"),
+        settings.value(QStringLiteral("primedgun/vr_menu_hold_left_stick"),
                        runtime.vr_menu_hold_left_stick)
             .toBool();
     runtime.vr_menu_requires_head_zone =
-        settings.value(QStringLiteral("primegun/vr_menu_requires_head_zone"),
+        settings.value(QStringLiteral("primedgun/vr_menu_requires_head_zone"),
                        runtime.vr_menu_requires_head_zone)
             .toBool();
     runtime.cinematic_screen_enabled =
-        settings.value(QStringLiteral("primegun/cinematic_screen_enabled"),
+        settings.value(QStringLiteral("primedgun/cinematic_screen_enabled"),
                        runtime.cinematic_screen_enabled)
             .toBool();
     runtime.metroid_hud_distance =
-        settings.value(QStringLiteral("primegun/metroid_hud_distance"),
+        settings.value(QStringLiteral("primedgun/metroid_hud_distance"),
                        runtime.metroid_hud_distance)
             .toFloat();
     runtime.metroid_hud_size =
-        settings.value(QStringLiteral("primegun/metroid_hud_size"), runtime.metroid_hud_size)
+        settings.value(QStringLiteral("primedgun/metroid_hud_size"), runtime.metroid_hud_size)
             .toFloat();
     runtime.metroid_hud_offset_up =
-        settings.value(QStringLiteral("primegun/metroid_hud_offset_up"),
+        settings.value(QStringLiteral("primedgun/metroid_hud_offset_up"),
                        runtime.metroid_hud_offset_up)
             .toFloat();
     runtime.metroid_hud_offset_down =
-        settings.value(QStringLiteral("primegun/metroid_hud_offset_down"),
+        settings.value(QStringLiteral("primedgun/metroid_hud_offset_down"),
                        runtime.metroid_hud_offset_down)
             .toFloat();
     runtime.metroid_hud_offset_left =
-        settings.value(QStringLiteral("primegun/metroid_hud_offset_left"),
+        settings.value(QStringLiteral("primedgun/metroid_hud_offset_left"),
                        runtime.metroid_hud_offset_left)
             .toFloat();
     runtime.metroid_hud_offset_right =
-        settings.value(QStringLiteral("primegun/metroid_hud_offset_right"),
+        settings.value(QStringLiteral("primedgun/metroid_hud_offset_right"),
                        runtime.metroid_hud_offset_right)
             .toFloat();
     runtime.gun_targeting_enabled =
-        settings.value(QStringLiteral("primegun/gun_targeting_enabled"),
+        settings.value(QStringLiteral("primedgun/gun_targeting_enabled"),
                        runtime.gun_targeting_enabled)
             .toBool();
     runtime.gun_targeting_distance =
-        settings.value(QStringLiteral("primegun/gun_targeting_distance"),
+        settings.value(QStringLiteral("primedgun/gun_targeting_distance"),
                        runtime.gun_targeting_distance)
             .toFloat();
     runtime.gun_targeting_radius =
-        settings.value(QStringLiteral("primegun/gun_targeting_radius"),
+        settings.value(QStringLiteral("primedgun/gun_targeting_radius"),
                        runtime.gun_targeting_radius)
             .toFloat();
     runtime.visor_helmet_enabled =
-        settings.value(QStringLiteral("primegun/visor_helmet_enabled"),
+        settings.value(QStringLiteral("primedgun/visor_helmet_enabled"),
                        runtime.visor_helmet_enabled)
             .toBool();
     runtime.vr_overlays_enabled =
-        settings.value(QStringLiteral("primegun/vr_overlays_enabled"),
+        settings.value(QStringLiteral("primedgun/vr_overlays_enabled"),
                        runtime.vr_overlays_enabled)
             .toBool();
     runtime.height_prompt_enabled =
-        settings.value(QStringLiteral("primegun/height_prompt_enabled"),
+        settings.value(QStringLiteral("primedgun/height_prompt_enabled"),
                        runtime.height_prompt_enabled)
             .toBool();
     runtime.position_marker_enabled =
-        settings.value(QStringLiteral("primegun/position_marker_enabled"),
+        settings.value(QStringLiteral("primedgun/position_marker_enabled"),
                        runtime.position_marker_enabled)
             .toBool();
     runtime.xr_dpad_enabled =
-        settings.value(QStringLiteral("primegun/xr_dpad_enabled"), runtime.xr_dpad_enabled).toBool();
+        settings.value(QStringLiteral("primedgun/xr_dpad_enabled"), runtime.xr_dpad_enabled).toBool();
     runtime.xr_dpad_use_thumbrest_modifier =
         settings
-            .value(QStringLiteral("primegun/xr_dpad_use_thumbrest_modifier"),
+            .value(QStringLiteral("primedgun/xr_dpad_use_thumbrest_modifier"),
                    runtime.xr_dpad_use_thumbrest_modifier)
             .toBool();
     runtime.xr_dpad_head_radius =
-        settings.value(QStringLiteral("primegun/xr_dpad_head_radius"),
+        settings.value(QStringLiteral("primedgun/xr_dpad_head_radius"),
                        runtime.xr_dpad_head_radius)
             .toFloat();
     runtime.xr_dpad_head_y_below =
-        settings.value(QStringLiteral("primegun/xr_dpad_head_y_below"),
+        settings.value(QStringLiteral("primedgun/xr_dpad_head_y_below"),
                        runtime.xr_dpad_head_y_below)
             .toFloat();
     runtime.xr_dpad_deadzone =
-        settings.value(QStringLiteral("primegun/xr_dpad_deadzone"), runtime.xr_dpad_deadzone)
+        settings.value(QStringLiteral("primedgun/xr_dpad_deadzone"), runtime.xr_dpad_deadzone)
             .toFloat();
     runtime.directional_movement_enabled =
-        settings.value(QStringLiteral("primegun/directional_movement_enabled"),
+        settings.value(QStringLiteral("primedgun/directional_movement_enabled"),
                        runtime.directional_movement_enabled)
             .toBool();
     runtime.directional_movement_use_right_stick =
-        settings.value(QStringLiteral("primegun/directional_movement_use_right_stick"),
+        settings.value(QStringLiteral("primedgun/directional_movement_use_right_stick"),
                        runtime.directional_movement_use_right_stick)
             .toBool();
     runtime.directional_movement_use_hmd_direction =
-        settings.value(QStringLiteral("primegun/directional_movement_use_hmd_direction"),
+        settings.value(QStringLiteral("primedgun/directional_movement_use_hmd_direction"),
                        runtime.directional_movement_use_hmd_direction)
             .toBool();
     runtime.directional_movement_deadzone =
-        settings.value(QStringLiteral("primegun/directional_movement_deadzone"),
+        settings.value(QStringLiteral("primedgun/directional_movement_deadzone"),
                        runtime.directional_movement_deadzone)
             .toFloat();
     runtime.directional_movement_speed =
-        settings.value(QStringLiteral("primegun/directional_movement_speed"),
+        settings.value(QStringLiteral("primedgun/directional_movement_speed"),
                        runtime.directional_movement_speed)
             .toFloat();
     runtime.directional_movement_accel =
-        settings.value(QStringLiteral("primegun/directional_movement_accel"),
+        settings.value(QStringLiteral("primedgun/directional_movement_accel"),
                        runtime.directional_movement_accel)
             .toFloat();
     runtime.directional_movement_air_accel =
-        settings.value(QStringLiteral("primegun/directional_movement_air_accel"),
+        settings.value(QStringLiteral("primedgun/directional_movement_air_accel"),
                        runtime.directional_movement_air_accel)
             .toFloat();
     runtime.look_yaw_sensitivity =
-        settings.value(QStringLiteral("primegun/look_yaw_sensitivity"),
+        settings.value(QStringLiteral("primedgun/look_yaw_sensitivity"),
                        runtime.look_yaw_sensitivity)
             .toFloat();
     runtime.snap_turn_enabled =
-        settings.value(QStringLiteral("primegun/snap_turn_enabled"), runtime.snap_turn_enabled)
+        settings.value(QStringLiteral("primedgun/snap_turn_enabled"), runtime.snap_turn_enabled)
             .toBool();
     runtime.snap_turn_degrees =
-        settings.value(QStringLiteral("primegun/snap_turn_degrees"), runtime.snap_turn_degrees)
+        settings.value(QStringLiteral("primedgun/snap_turn_degrees"), runtime.snap_turn_degrees)
             .toInt();
     PrimedGun::SetRuntimeSettings(runtime);
   };
-  const auto save_primegun_runtime_settings = [&settings](const PrimedGun::RuntimeSettings& runtime) {
-    settings.setValue(QStringLiteral("primegun/enabled"), runtime.enabled);
-    settings.setValue(QStringLiteral("primegun/builtin_patches_enabled"),
+  const auto save_primedgun_runtime_settings = [&settings](const PrimedGun::RuntimeSettings& runtime) {
+    settings.setValue(QStringLiteral("primedgun/enabled"), runtime.enabled);
+    settings.setValue(QStringLiteral("primedgun/builtin_patches_enabled"),
                       runtime.builtin_patches_enabled);
-    settings.setValue(QStringLiteral("primegun/patch_disable_frustum_culling"),
+    settings.setValue(QStringLiteral("primedgun/patch_disable_frustum_culling"),
                       runtime.patch_disable_frustum_culling);
-    settings.setValue(QStringLiteral("primegun/patch_no_idle_sway"), runtime.patch_no_idle_sway);
-    settings.setValue(QStringLiteral("primegun/patch_disable_arm_cannon_idle_fidget"),
+    settings.setValue(QStringLiteral("primedgun/patch_no_idle_sway"), runtime.patch_no_idle_sway);
+    settings.setValue(QStringLiteral("primedgun/patch_disable_arm_cannon_idle_fidget"),
                       runtime.patch_disable_arm_cannon_idle_fidget);
-    settings.setValue(QStringLiteral("primegun/patch_beam_projectile_timing"),
+    settings.setValue(QStringLiteral("primedgun/patch_beam_projectile_timing"),
                       runtime.patch_beam_projectile_timing);
-    settings.setValue(QStringLiteral("primegun/patch_xr_visor_dpad_timing"),
+    settings.setValue(QStringLiteral("primedgun/patch_xr_visor_dpad_timing"),
                       runtime.patch_xr_visor_dpad_timing);
-    settings.setValue(QStringLiteral("primegun/patch_cannon_rotation"), runtime.patch_cannon_rotation);
-    settings.setValue(QStringLiteral("primegun/patch_gun_ray_target"), runtime.patch_gun_ray_target);
-    settings.setValue(QStringLiteral("primegun/patch_reticle"), runtime.patch_reticle);
-    settings.setValue(QStringLiteral("primegun/use_right_hand"), runtime.use_right_hand);
-    settings.remove(QStringLiteral("primegun/offset_x"));
-    settings.remove(QStringLiteral("primegun/offset_y"));
-    settings.remove(QStringLiteral("primegun/offset_z"));
-    settings.setValue(QStringLiteral("primegun/model_offset_x"), runtime.model_offset_x);
-    settings.setValue(QStringLiteral("primegun/model_offset_y"), runtime.model_offset_y);
-    settings.setValue(QStringLiteral("primegun/model_offset_z"), runtime.model_offset_z);
-    settings.setValue(QStringLiteral("primegun/rot_offset_x"), runtime.rot_offset_x);
-    settings.setValue(QStringLiteral("primegun/rot_offset_y"), runtime.rot_offset_y);
-    settings.setValue(QStringLiteral("primegun/rot_offset_z"), runtime.rot_offset_z);
-    settings.setValue(QStringLiteral("primegun/world_scale"), runtime.world_scale);
-    settings.setValue(QStringLiteral("primegun/require_trigger"), runtime.require_trigger);
-    settings.setValue(QStringLiteral("primegun/trigger_threshold"), runtime.trigger_threshold);
-    settings.setValue(QStringLiteral("primegun/rumble_enabled"), runtime.rumble_enabled);
-    settings.setValue(QStringLiteral("primegun/rumble_intensity"), runtime.rumble_intensity);
-    settings.setValue(QStringLiteral("primegun/rumble_hand_mode"), runtime.rumble_hand_mode);
-    settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_enabled"),
-                      runtime.primegun_grip_inputs_enabled);
-    settings.setValue(QStringLiteral("primegun/primegun_grip_inputs_use_trackpad"),
-                      runtime.primegun_grip_inputs_use_trackpad);
-    settings.setValue(QStringLiteral("primegun/primegun_trackpad_press_threshold"),
-                      runtime.primegun_trackpad_press_threshold);
-    settings.setValue(QStringLiteral("primegun/combat_jump_use_primary_button"),
+    settings.setValue(QStringLiteral("primedgun/patch_cannon_rotation"), runtime.patch_cannon_rotation);
+    settings.setValue(QStringLiteral("primedgun/patch_gun_ray_target"), runtime.patch_gun_ray_target);
+    settings.setValue(QStringLiteral("primedgun/patch_reticle"), runtime.patch_reticle);
+    settings.setValue(QStringLiteral("primedgun/use_right_hand"), runtime.use_right_hand);
+    settings.remove(QStringLiteral("primedgun/offset_x"));
+    settings.remove(QStringLiteral("primedgun/offset_y"));
+    settings.remove(QStringLiteral("primedgun/offset_z"));
+    settings.setValue(QStringLiteral("primedgun/model_offset_x"), runtime.model_offset_x);
+    settings.setValue(QStringLiteral("primedgun/model_offset_y"), runtime.model_offset_y);
+    settings.setValue(QStringLiteral("primedgun/model_offset_z"), runtime.model_offset_z);
+    settings.setValue(QStringLiteral("primedgun/rot_offset_x"), runtime.rot_offset_x);
+    settings.setValue(QStringLiteral("primedgun/rot_offset_y"), runtime.rot_offset_y);
+    settings.setValue(QStringLiteral("primedgun/rot_offset_z"), runtime.rot_offset_z);
+    settings.setValue(QStringLiteral("primedgun/world_scale"), runtime.world_scale);
+    settings.setValue(QStringLiteral("primedgun/require_trigger"), runtime.require_trigger);
+    settings.setValue(QStringLiteral("primedgun/trigger_threshold"), runtime.trigger_threshold);
+    settings.setValue(QStringLiteral("primedgun/rumble_enabled"), runtime.rumble_enabled);
+    settings.setValue(QStringLiteral("primedgun/rumble_intensity"), runtime.rumble_intensity);
+    settings.setValue(QStringLiteral("primedgun/rumble_hand_mode"), runtime.rumble_hand_mode);
+    settings.setValue(QStringLiteral("primedgun/primedgun_grip_inputs_enabled"),
+                      runtime.primedgun_grip_inputs_enabled);
+    settings.setValue(QStringLiteral("primedgun/primedgun_grip_inputs_use_trackpad"),
+                      runtime.primedgun_grip_inputs_use_trackpad);
+    settings.setValue(QStringLiteral("primedgun/primedgun_trackpad_press_threshold"),
+                      runtime.primedgun_trackpad_press_threshold);
+    settings.setValue(QStringLiteral("primedgun/combat_jump_use_primary_button"),
                       runtime.combat_jump_use_primary_button);
-    settings.setValue(QStringLiteral("primegun/vr_menu_hold_left_stick"),
+    settings.setValue(QStringLiteral("primedgun/vr_menu_hold_left_stick"),
                       runtime.vr_menu_hold_left_stick);
-    settings.setValue(QStringLiteral("primegun/vr_menu_requires_head_zone"),
+    settings.setValue(QStringLiteral("primedgun/vr_menu_requires_head_zone"),
                       runtime.vr_menu_requires_head_zone);
-    settings.setValue(QStringLiteral("primegun/cinematic_screen_enabled"),
+    settings.setValue(QStringLiteral("primedgun/cinematic_screen_enabled"),
                       runtime.cinematic_screen_enabled);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_distance"),
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_distance"),
                       runtime.metroid_hud_distance);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_size"), runtime.metroid_hud_size);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_offset_up"),
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_size"), runtime.metroid_hud_size);
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_offset_up"),
                       runtime.metroid_hud_offset_up);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_offset_down"),
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_offset_down"),
                       runtime.metroid_hud_offset_down);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_offset_left"),
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_offset_left"),
                       runtime.metroid_hud_offset_left);
-    settings.setValue(QStringLiteral("primegun/metroid_hud_offset_right"),
+    settings.setValue(QStringLiteral("primedgun/metroid_hud_offset_right"),
                       runtime.metroid_hud_offset_right);
-    settings.setValue(QStringLiteral("primegun/gun_targeting_enabled"),
+    settings.setValue(QStringLiteral("primedgun/gun_targeting_enabled"),
                       runtime.gun_targeting_enabled);
-    settings.setValue(QStringLiteral("primegun/gun_targeting_distance"),
+    settings.setValue(QStringLiteral("primedgun/gun_targeting_distance"),
                       runtime.gun_targeting_distance);
-    settings.setValue(QStringLiteral("primegun/gun_targeting_radius"), runtime.gun_targeting_radius);
-    settings.setValue(QStringLiteral("primegun/visor_helmet_enabled"),
+    settings.setValue(QStringLiteral("primedgun/gun_targeting_radius"), runtime.gun_targeting_radius);
+    settings.setValue(QStringLiteral("primedgun/visor_helmet_enabled"),
                       runtime.visor_helmet_enabled);
-    settings.setValue(QStringLiteral("primegun/vr_overlays_enabled"), runtime.vr_overlays_enabled);
-    settings.setValue(QStringLiteral("primegun/height_prompt_enabled"),
+    settings.setValue(QStringLiteral("primedgun/vr_overlays_enabled"), runtime.vr_overlays_enabled);
+    settings.setValue(QStringLiteral("primedgun/height_prompt_enabled"),
                       runtime.height_prompt_enabled);
-    settings.setValue(QStringLiteral("primegun/position_marker_enabled"),
+    settings.setValue(QStringLiteral("primedgun/position_marker_enabled"),
                       runtime.position_marker_enabled);
-    settings.setValue(QStringLiteral("primegun/xr_dpad_enabled"), runtime.xr_dpad_enabled);
-    settings.setValue(QStringLiteral("primegun/xr_dpad_use_thumbrest_modifier"),
+    settings.setValue(QStringLiteral("primedgun/xr_dpad_enabled"), runtime.xr_dpad_enabled);
+    settings.setValue(QStringLiteral("primedgun/xr_dpad_use_thumbrest_modifier"),
                       runtime.xr_dpad_use_thumbrest_modifier);
-    settings.setValue(QStringLiteral("primegun/xr_dpad_head_radius"), runtime.xr_dpad_head_radius);
-    settings.setValue(QStringLiteral("primegun/xr_dpad_head_y_below"),
+    settings.setValue(QStringLiteral("primedgun/xr_dpad_head_radius"), runtime.xr_dpad_head_radius);
+    settings.setValue(QStringLiteral("primedgun/xr_dpad_head_y_below"),
                       runtime.xr_dpad_head_y_below);
-    settings.setValue(QStringLiteral("primegun/xr_dpad_deadzone"), runtime.xr_dpad_deadzone);
-    settings.setValue(QStringLiteral("primegun/directional_movement_enabled"),
+    settings.setValue(QStringLiteral("primedgun/xr_dpad_deadzone"), runtime.xr_dpad_deadzone);
+    settings.setValue(QStringLiteral("primedgun/directional_movement_enabled"),
                       runtime.directional_movement_enabled);
-    settings.setValue(QStringLiteral("primegun/directional_movement_use_right_stick"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_use_right_stick"),
                       runtime.directional_movement_use_right_stick);
-    settings.setValue(QStringLiteral("primegun/directional_movement_use_hmd_direction"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_use_hmd_direction"),
                       runtime.directional_movement_use_hmd_direction);
-    settings.setValue(QStringLiteral("primegun/directional_movement_deadzone"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_deadzone"),
                       runtime.directional_movement_deadzone);
-    settings.setValue(QStringLiteral("primegun/directional_movement_speed"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_speed"),
                       runtime.directional_movement_speed);
-    settings.setValue(QStringLiteral("primegun/directional_movement_accel"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_accel"),
                       runtime.directional_movement_accel);
-    settings.setValue(QStringLiteral("primegun/directional_movement_air_accel"),
+    settings.setValue(QStringLiteral("primedgun/directional_movement_air_accel"),
                       runtime.directional_movement_air_accel);
-    settings.setValue(QStringLiteral("primegun/look_yaw_sensitivity"),
+    settings.setValue(QStringLiteral("primedgun/look_yaw_sensitivity"),
                       runtime.look_yaw_sensitivity);
-    settings.setValue(QStringLiteral("primegun/snap_turn_enabled"), runtime.snap_turn_enabled);
-    settings.setValue(QStringLiteral("primegun/snap_turn_degrees"), runtime.snap_turn_degrees);
+    settings.setValue(QStringLiteral("primedgun/snap_turn_enabled"), runtime.snap_turn_enabled);
+    settings.setValue(QStringLiteral("primedgun/snap_turn_degrees"), runtime.snap_turn_degrees);
   };
-  load_primegun_runtime_settings();
-  auto* primegun_vr_save_timer = new QTimer(this);
-  connect(primegun_vr_save_timer, &QTimer::timeout, this, [this, save_primegun_runtime_settings] {
+  load_primedgun_runtime_settings();
+  auto* primedgun_vr_save_timer = new QTimer(this);
+  connect(primedgun_vr_save_timer, &QTimer::timeout, this, [this, save_primedgun_runtime_settings] {
     if (PrimedGun::ConsumeVrSettingsSaveRequest())
     {
-      save_primegun_runtime_settings(PrimedGun::GetRuntimeSettings());
+      save_primedgun_runtime_settings(PrimedGun::GetRuntimeSettings());
       PrimedGun::MarkVrSettingsSaved();
     }
 
@@ -2503,7 +2522,7 @@ void MainWindow::ConnectStack()
     if (PrimedGun::ConsumeVrStateSaveRequest())
       StateSaveSlot();
   });
-  primegun_vr_save_timer->start(250);
+  primedgun_vr_save_timer->start(250);
   auto* revision_warning = new QLabel(tr("Wrong revision"), game_tab);
   revision_warning->setObjectName(QStringLiteral("PrimedGunBad"));
   revision_warning->setVisible(false);
@@ -2874,12 +2893,12 @@ void MainWindow::ConnectStack()
   auto* dpad_thumbrest_modifier =
       new QCheckBox(tr("Use Quest thumb rest for visor input"), game_tab);
   dpad_thumbrest_modifier->setChecked(runtime->xr_dpad_use_thumbrest_modifier);
-  auto* primegun_grip_inputs_enabled =
+  auto* primedgun_grip_inputs_enabled =
       new QCheckBox(tr("Use grip input"), game_tab);
-  primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
-  auto* primegun_grip_inputs_use_trackpad =
+  primedgun_grip_inputs_enabled->setChecked(runtime->primedgun_grip_inputs_enabled);
+  auto* primedgun_grip_inputs_use_trackpad =
       new QCheckBox(tr("Use touchpad for PrimedGun grip inputs (Index users)"), game_tab);
-  primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
+  primedgun_grip_inputs_use_trackpad->setChecked(runtime->primedgun_grip_inputs_use_trackpad);
 
   auto float_rows = std::make_shared<std::vector<std::pair<QDoubleSpinBox*, QSlider*>>>();
   const auto add_float_row = [this, game_tab, apply_runtime, float_rows](
@@ -2938,12 +2957,12 @@ void MainWindow::ConnectStack()
   controller_layout->addWidget(section_label(tr("Rumble / Grip Inputs"), game_tab));
   controller_layout->addWidget(rumble_enabled);
   controller_layout->addLayout(rumble_hand_row);
-  controller_layout->addWidget(primegun_grip_inputs_enabled);
-  controller_layout->addWidget(primegun_grip_inputs_use_trackpad);
+  controller_layout->addWidget(primedgun_grip_inputs_enabled);
+  controller_layout->addWidget(primedgun_grip_inputs_use_trackpad);
   auto* trackpad_press_threshold_spin =
       add_float_row(controller_layout, tr("Touchpad sensitivity"), 0.05, 1.00, 0.05,
-                    runtime->primegun_trackpad_press_threshold,
-                    [runtime](float v) { runtime->primegun_trackpad_press_threshold = v; });
+                    runtime->primedgun_trackpad_press_threshold,
+                    [runtime](float v) { runtime->primedgun_trackpad_press_threshold = v; });
   auto* rumble_intensity_spin =
       add_float_row(controller_layout, tr("Rumble intensity"), 0.00, 1.00, 0.05,
                     runtime->rumble_intensity,
@@ -3156,7 +3175,7 @@ void MainWindow::ConnectStack()
 
   QSettings& cannon_settings = Settings::GetQSettings();
   int active_cannon_slot =
-      cannon_settings.value(QStringLiteral("primegun/cannon_texture_slot"), 0).toInt();
+      cannon_settings.value(QStringLiteral("primedgun/cannon_texture_slot"), 0).toInt();
   if (active_cannon_slot < 0 || active_cannon_slot > 5)
     active_cannon_slot = 0;
 
@@ -3184,14 +3203,14 @@ void MainWindow::ConnectStack()
   auto* cannon_texture_box = new QGroupBox(tr("Selected Slot Files"), game_tab);
   auto* cannon_texture_grid = new QGridLayout(cannon_texture_box);
   cannon_texture_grid->setColumnStretch(2, 1);
-  std::array<QLabel*, PRIMEGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_path_labels{};
-  std::array<QLabel*, PRIMEGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_preview_labels{};
-  std::array<QPushButton*, PRIMEGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_import_buttons{};
+  std::array<QLabel*, PRIMEDGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_path_labels{};
+  std::array<QLabel*, PRIMEDGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_preview_labels{};
+  std::array<QPushButton*, PRIMEDGUN_CANNON_TEXTURE_NAMES.size()> cannon_texture_import_buttons{};
   for (int texture_index = 0;
-       texture_index < static_cast<int>(PRIMEGUN_CANNON_TEXTURE_NAMES.size()); ++texture_index)
+       texture_index < static_cast<int>(PRIMEDGUN_CANNON_TEXTURE_NAMES.size()); ++texture_index)
   {
     auto* target_label = new QLabel(
-        tr("%1").arg(QString::fromLatin1(PRIMEGUN_CANNON_TEXTURE_LABELS[texture_index])),
+        tr("%1").arg(QString::fromLatin1(PRIMEDGUN_CANNON_TEXTURE_LABELS[texture_index])),
         cannon_texture_box);
     auto* path_label = new QLabel(cannon_texture_box);
     path_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -3283,7 +3302,7 @@ void MainWindow::ConnectStack()
     const int slot = cannon_slot_group->checkedId();
     QSettings& settings = Settings::GetQSettings();
     for (int texture_index = 0;
-         texture_index < static_cast<int>(PRIMEGUN_CANNON_TEXTURE_NAMES.size()); ++texture_index)
+         texture_index < static_cast<int>(PRIMEDGUN_CANNON_TEXTURE_NAMES.size()); ++texture_index)
     {
       cannon_texture_import_buttons[texture_index]->setVisible(slot == 5);
       QLabel* label = cannon_texture_path_labels[texture_index];
@@ -3312,7 +3331,7 @@ void MainWindow::ConnectStack()
 
   auto apply_cannon_slot = [this, cannon_slot_group, refresh_cannon_texture_ui, cannon_status] {
     const int slot = cannon_slot_group->checkedId();
-    Settings::GetQSettings().setValue(QStringLiteral("primegun/cannon_texture_slot"), slot);
+    Settings::GetQSettings().setValue(QStringLiteral("primedgun/cannon_texture_slot"), slot);
 
     QString error;
     if (!PrimedGunApplyCannonTextureSlot(slot, &error))
@@ -3387,8 +3406,8 @@ void MainWindow::ConnectStack()
 
     const QString source = PrimedGunCannonRemoveShinePresetPath();
     const QString destination = PrimedGunCannonSourcePath(
-        slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX, QStringLiteral(".dds"));
-    PrimedGunRemoveCannonSlotTextureFiles(slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX);
+        slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX, QStringLiteral(".dds"));
+    PrimedGunRemoveCannonSlotTextureFiles(slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX);
     if (!QFile::copy(source, destination))
     {
       ModalMessageBox::critical(this, tr("Cannon Textures"),
@@ -3397,9 +3416,9 @@ void MainWindow::ConnectStack()
     }
 
     QSettings& settings = Settings::GetQSettings();
-    settings.setValue(PrimedGunCannonSlotSetting(slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX),
+    settings.setValue(PrimedGunCannonSlotSetting(slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX),
                       destination);
-    settings.setValue(QStringLiteral("primegun/cannon_texture_slot"), slot);
+    settings.setValue(QStringLiteral("primedgun/cannon_texture_slot"), slot);
 
     if (!PrimedGunApplyCannonTextureSlot(slot, &error))
     {
@@ -3410,10 +3429,10 @@ void MainWindow::ConnectStack()
     Config::SetBaseOrCurrent(Config::GFX_HIRES_TEXTURES, true);
     PrimedGunRefreshCustomTextureConfig(true);
     refresh_cannon_texture_ui();
-    PrimedGunSetCannonPathLabel(cannon_texture_path_labels[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX],
+    PrimedGunSetCannonPathLabel(cannon_texture_path_labels[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX],
                                QDir::toNativeSeparators(destination));
     PrimedGunSetCannonPreviewLabel(
-        cannon_texture_preview_labels[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX], destination);
+        cannon_texture_preview_labels[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX], destination);
     cannon_status->setText(tr("Applied %1 with Remove Shine. Custom textures are enabled.")
                                .arg(PrimedGunCannonSlotName(slot)));
   });
@@ -3447,8 +3466,8 @@ void MainWindow::ConnectStack()
     const QFileInfo source_info(source);
     const QString suffix = source_info.suffix().toLower();
     const QString destination = PrimedGunCannonSourcePath(
-        slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX, QLatin1Char('.') + suffix);
-    PrimedGunRemoveCannonSlotTextureFiles(slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX);
+        slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX, QLatin1Char('.') + suffix);
+    PrimedGunRemoveCannonSlotTextureFiles(slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX);
     if (!QFile::copy(source, destination))
     {
       ModalMessageBox::critical(this, tr("Cannon Textures"),
@@ -3457,9 +3476,9 @@ void MainWindow::ConnectStack()
     }
 
     QSettings& settings = Settings::GetQSettings();
-    settings.setValue(PrimedGunCannonSlotSetting(slot, PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX),
+    settings.setValue(PrimedGunCannonSlotSetting(slot, PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX),
                       destination);
-    settings.setValue(QStringLiteral("primegun/cannon_texture_slot"), slot);
+    settings.setValue(QStringLiteral("primedgun/cannon_texture_slot"), slot);
 
     QString error;
     if (!PrimedGunApplyCannonTextureSlot(slot, &error))
@@ -3471,10 +3490,10 @@ void MainWindow::ConnectStack()
     Config::SetBaseOrCurrent(Config::GFX_HIRES_TEXTURES, true);
     PrimedGunRefreshCustomTextureConfig(true);
     refresh_cannon_texture_ui();
-    PrimedGunSetCannonPathLabel(cannon_texture_path_labels[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX],
+    PrimedGunSetCannonPathLabel(cannon_texture_path_labels[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX],
                                QDir::toNativeSeparators(destination));
     PrimedGunSetCannonPreviewLabel(
-        cannon_texture_preview_labels[PRIMEGUN_CANNON_SHEEN_TEXTURE_INDEX], destination);
+        cannon_texture_preview_labels[PRIMEDGUN_CANNON_SHEEN_TEXTURE_INDEX], destination);
     cannon_status->setText(tr("Restored shine for %1. Cannon base textures are unchanged.")
                                .arg(PrimedGunCannonSlotName(slot)));
   });
@@ -3508,11 +3527,16 @@ void MainWindow::ConnectStack()
       game_tab);
   dolphin_note->setObjectName(QStringLiteral("PrimedGunMuted"));
   dolphin_layout->addWidget(dolphin_note);
+  dolphin_layout->addSpacing(8);
+  dolphin_layout->addWidget(section_label(tr("Configuration"), game_tab));
   auto* open_general = new QPushButton(tr("Dolphin Settings"), game_tab);
   auto* open_hotkeys = new QPushButton(tr("Hotkey Settings"), game_tab);
   auto* open_memcards = new QPushButton(tr("Memory Card Manager"), game_tab);
   auto* open_cheats = new QPushButton(tr("Cheat Manager"), game_tab);
   auto* open_texture_packs = new QPushButton(tr("Resource Pack Manager"), game_tab);
+#ifdef USE_RETRO_ACHIEVEMENTS
+  auto* open_achievements = new QPushButton(tr("Achievements"), game_tab);
+#endif  // USE_RETRO_ACHIEVEMENTS
   auto* suppress_cpu_thread_warnings =
       new QCheckBox(tr("Suppress CPU thread warnings"), game_tab);
   suppress_cpu_thread_warnings->setChecked(
@@ -3521,6 +3545,11 @@ void MainWindow::ConnectStack()
   auto* dump_ram = new QPushButton(tr("Dump RAM"), game_tab);
   dolphin_layout->addWidget(open_general);
   dolphin_layout->addWidget(open_hotkeys);
+  dolphin_layout->addSpacing(16);
+  dolphin_layout->addWidget(section_label(tr("Tools"), game_tab));
+#ifdef USE_RETRO_ACHIEVEMENTS
+  dolphin_layout->addWidget(open_achievements);
+#endif  // USE_RETRO_ACHIEVEMENTS
   dolphin_layout->addWidget(open_memcards);
   dolphin_layout->addWidget(open_cheats);
   dolphin_layout->addWidget(open_texture_packs);
@@ -3533,6 +3562,9 @@ void MainWindow::ConnectStack()
   dolphin_layout->addStretch();
   connect(open_general, &QPushButton::clicked, this, &MainWindow::ShowGeneralWindow);
   connect(open_hotkeys, &QPushButton::clicked, this, &MainWindow::ShowHotkeyDialog);
+#ifdef USE_RETRO_ACHIEVEMENTS
+  connect(open_achievements, &QPushButton::clicked, this, &MainWindow::ShowAchievementsWindow);
+#endif  // USE_RETRO_ACHIEVEMENTS
   connect(open_memcards, &QPushButton::clicked, this, &MainWindow::ShowMemcardManager);
   connect(open_cheats, &QPushButton::clicked, this, &MainWindow::ShowCheatsManager);
   connect(open_texture_packs, &QPushButton::clicked, this, &MainWindow::ShowResourcePackManager);
@@ -3569,9 +3601,9 @@ void MainWindow::ConnectStack()
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
     const QSignalBlocker combat_jump_use_primary_button_blocker{
         combat_jump_use_primary_button};
-    const QSignalBlocker primegun_grip_inputs_enabled_blocker{primegun_grip_inputs_enabled};
-    const QSignalBlocker primegun_grip_inputs_use_trackpad_blocker{
-        primegun_grip_inputs_use_trackpad};
+    const QSignalBlocker primedgun_grip_inputs_enabled_blocker{primedgun_grip_inputs_enabled};
+    const QSignalBlocker primedgun_grip_inputs_use_trackpad_blocker{
+        primedgun_grip_inputs_use_trackpad};
     const QSignalBlocker movement_enabled_blocker{movement_enabled};
     const QSignalBlocker left_stick_blocker{left_stick};
     const QSignalBlocker right_stick_blocker{right_stick};
@@ -3613,8 +3645,8 @@ void MainWindow::ConnectStack()
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
     dpad_thumbrest_modifier->setChecked(runtime->xr_dpad_use_thumbrest_modifier);
     combat_jump_use_primary_button->setChecked(runtime->combat_jump_use_primary_button);
-    primegun_grip_inputs_enabled->setChecked(runtime->primegun_grip_inputs_enabled);
-    primegun_grip_inputs_use_trackpad->setChecked(runtime->primegun_grip_inputs_use_trackpad);
+    primedgun_grip_inputs_enabled->setChecked(runtime->primedgun_grip_inputs_enabled);
+    primedgun_grip_inputs_use_trackpad->setChecked(runtime->primedgun_grip_inputs_use_trackpad);
     movement_enabled->setChecked(runtime->directional_movement_enabled);
     left_stick->setChecked(!runtime->directional_movement_use_right_stick);
     right_stick->setChecked(runtime->directional_movement_use_right_stick);
@@ -3625,7 +3657,7 @@ void MainWindow::ConnectStack()
     visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
     position_marker_enabled->setChecked(runtime->position_marker_enabled);
     set_float(dpad_radius_spin, runtime->xr_dpad_head_radius);
-    set_float(trackpad_press_threshold_spin, runtime->primegun_trackpad_press_threshold);
+    set_float(trackpad_press_threshold_spin, runtime->primedgun_trackpad_press_threshold);
     set_float(rumble_intensity_spin, runtime->rumble_intensity);
     set_float(dpad_below_spin, runtime->xr_dpad_head_y_below);
     set_float(dpad_deadzone_spin, runtime->xr_dpad_deadzone);
@@ -3673,9 +3705,9 @@ void MainWindow::ConnectStack()
     runtime->xr_dpad_enabled = true;
     runtime->xr_dpad_use_thumbrest_modifier = false;
     runtime->combat_jump_use_primary_button = false;
-    runtime->primegun_grip_inputs_enabled = true;
-    runtime->primegun_grip_inputs_use_trackpad = false;
-    runtime->primegun_trackpad_press_threshold = 0.5f;
+    runtime->primedgun_grip_inputs_enabled = true;
+    runtime->primedgun_grip_inputs_use_trackpad = false;
+    runtime->primedgun_trackpad_press_threshold = 0.5f;
     runtime->directional_movement_enabled = true;
     runtime->directional_movement_use_right_stick = false;
     runtime->directional_movement_use_hmd_direction = false;
@@ -3758,14 +3790,14 @@ void MainWindow::ConnectStack()
     runtime->combat_jump_use_primary_button = checked;
     apply_runtime();
   });
-  connect(primegun_grip_inputs_enabled, &QCheckBox::toggled, this,
+  connect(primedgun_grip_inputs_enabled, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
-    runtime->primegun_grip_inputs_enabled = checked;
+    runtime->primedgun_grip_inputs_enabled = checked;
     apply_runtime();
   });
-  connect(primegun_grip_inputs_use_trackpad, &QCheckBox::toggled, this,
+  connect(primedgun_grip_inputs_use_trackpad, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
-    runtime->primegun_grip_inputs_use_trackpad = checked;
+    runtime->primedgun_grip_inputs_use_trackpad = checked;
     apply_runtime();
   });
   connect(movement_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
@@ -3863,7 +3895,7 @@ void MainWindow::ConnectStack()
     apply_runtime();
   });
   connect(save_settings_button, &QPushButton::clicked, this,
-          [save_primegun_runtime_settings, runtime] { save_primegun_runtime_settings(*runtime); });
+          [save_primedgun_runtime_settings, runtime] { save_primedgun_runtime_settings(*runtime); });
 
   auto* runtime_ui_sync_timer = new QTimer(this);
   connect(runtime_ui_sync_timer, &QTimer::timeout, this, [runtime, refresh_visible_settings] {
@@ -3892,7 +3924,7 @@ void MainWindow::ConnectStack()
   connect(pause_button, &QPushButton::clicked, this, &MainWindow::TogglePause);
   connect(stop_button, &QPushButton::clicked, this, &MainWindow::RequestStop);
   connect(transfer_old_save_button, &QPushButton::clicked, this,
-          [this, load_primegun_runtime_settings, runtime, refresh_visible_settings,
+          [this, load_primedgun_runtime_settings, runtime, refresh_visible_settings,
            selected_metroid_game_setting, update_selected_game] {
     if (Core::GetState(m_system) != Core::State::Uninitialized)
     {
@@ -3906,7 +3938,7 @@ void MainWindow::ConnectStack()
     prompt.setText(tr("Transfer old save game."));
     prompt.setInformativeText(
         tr("PrimedGun will search nearby old PrimedGun folders and automatically transfer and "
-           "apply your save, PrimeGun settings, and Dolphin config settings. Per-game "
+           "apply your save, PrimedGun settings, and Dolphin config settings. Per-game "
            "GameSettings, GameSettingsVR, and shader overrides are not transferred."));
     auto* transfer_button = prompt.addButton(tr("Transfer"), QMessageBox::AcceptRole);
     prompt.addButton(QMessageBox::Cancel);
@@ -3996,7 +4028,7 @@ void MainWindow::ConnectStack()
 
     if (imported_settings_count > 0)
     {
-      load_primegun_runtime_settings();
+      load_primedgun_runtime_settings();
       *runtime = PrimedGun::GetRuntimeSettings();
       refresh_visible_settings();
       update_selected_game(Settings::GetQSettings().value(selected_metroid_game_setting).toString());
@@ -4007,11 +4039,11 @@ void MainWindow::ConnectStack()
       message += tr("\n\nPrevious memory card backed up to:\n%1").arg(backup_path);
     if (imported_settings_count > 0)
     {
-      message += tr("\n\nPrimeGun settings transferred from:\n%1").arg(old_settings_path);
+      message += tr("\n\nPrimedGun settings transferred from:\n%1").arg(old_settings_path);
     }
     else
     {
-      message += tr("\n\nNo old PrimeGun settings were found in a folder with PrimedGun.exe.");
+      message += tr("\n\nNo old PrimedGun settings were found in a folder with PrimedGun.exe.");
     }
     if (imported_dolphin_settings_count > 0)
     {

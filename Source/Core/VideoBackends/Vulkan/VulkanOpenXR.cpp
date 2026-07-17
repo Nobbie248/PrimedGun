@@ -1153,8 +1153,8 @@ void VulkanOpenXR::DestroySwapchains()
   if (g_vulkan_context)
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
 
-  DestroyPrimedGunOverlaySwapchain(&m_primegun_overlay_swapchain);
-  DestroyPrimedGunOverlaySwapchain(&m_primegun_position_marker_swapchain);
+  DestroyPrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain);
+  DestroyPrimedGunOverlaySwapchain(&m_primedgun_position_marker_swapchain);
   DestroyPrimedGunLaserSwapchain();
 
   if (m_layered_image_acquired && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
@@ -1257,7 +1257,7 @@ void VulkanOpenXR::DestroyPrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchai
 
 void VulkanOpenXR::DestroyPrimedGunLaserSwapchain()
 {
-  auto& laser = m_primegun_laser_swapchain;
+  auto& laser = m_primedgun_laser_swapchain;
   laser.textures.clear();
   laser.images.clear();
   laser.texture_ready = false;
@@ -1274,7 +1274,7 @@ void VulkanOpenXR::DestroyPrimedGunLaserSwapchain()
 
 bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
 {
-  auto& laser = m_primegun_laser_swapchain;
+  auto& laser = m_primedgun_laser_swapchain;
   if (laser.texture_ready && laser.swapchain != XR_NULL_HANDLE)
     return true;
 
@@ -1534,28 +1534,28 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
     constexpr uint32_t marker_height = 512;
     const std::vector<uint32_t> marker_pixels =
         PGO::BuildPositionMarkerPixels(marker_width, marker_height);
-    if (EnsurePrimedGunOverlaySwapchain(&m_primegun_position_marker_swapchain, 4u, 1u,
+    if (EnsurePrimedGunOverlaySwapchain(&m_primedgun_position_marker_swapchain, 4u, 1u,
                                         marker_width, marker_height, marker_pixels))
     {
-      m_primegun_position_marker_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-      m_primegun_position_marker_layer.layerFlags =
+      m_primedgun_position_marker_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+      m_primedgun_position_marker_layer.layerFlags =
           XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
           XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-      m_primegun_position_marker_layer.space = VR::g_openxr->GetReferenceSpace();
-      m_primegun_position_marker_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-      m_primegun_position_marker_layer.subImage.swapchain =
-          m_primegun_position_marker_swapchain.swapchain;
-      m_primegun_position_marker_layer.subImage.imageRect.offset = {0, 0};
-      m_primegun_position_marker_layer.subImage.imageRect.extent = {
+      m_primedgun_position_marker_layer.space = VR::g_openxr->GetReferenceSpace();
+      m_primedgun_position_marker_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+      m_primedgun_position_marker_layer.subImage.swapchain =
+          m_primedgun_position_marker_swapchain.swapchain;
+      m_primedgun_position_marker_layer.subImage.imageRect.offset = {0, 0};
+      m_primedgun_position_marker_layer.subImage.imageRect.extent = {
           static_cast<int32_t>(marker_width), static_cast<int32_t>(marker_height)};
-      m_primegun_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f,
+      m_primedgun_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f,
                                                            0.70710678f};
-      m_primegun_position_marker_layer.pose.position = {snapshot.tracking_origin_position[0],
+      m_primedgun_position_marker_layer.pose.position = {snapshot.tracking_origin_position[0],
                                                         0.005f,
                                                         snapshot.tracking_origin_position[2]};
-      m_primegun_position_marker_layer.size = {0.356f, 0.356f};
+      m_primedgun_position_marker_layer.size = {0.356f, 0.356f};
       layers->push_back(
-          reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primegun_position_marker_layer));
+          reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_position_marker_layer));
       appended_layer = true;
     }
   }
@@ -1574,18 +1574,18 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   const std::vector<uint32_t> pixels = menu        ? PGO::BuildMenuPixels(width, height, overlay) :
                                        weapon_panel ? PGO::BuildWeaponPanelPixels(width, height, overlay) :
                                                       PGO::BuildPromptPixels(width, height);
-  if (!EnsurePrimedGunOverlaySwapchain(&m_primegun_overlay_swapchain, content_kind, generation,
+  if (!EnsurePrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain, content_kind, generation,
                                        width, height, pixels))
     return appended_layer;
 
-  m_primegun_overlay_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-  m_primegun_overlay_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+  m_primedgun_overlay_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  m_primedgun_overlay_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
                                         XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-  m_primegun_overlay_layer.space = VR::g_openxr->GetReferenceSpace();
-  m_primegun_overlay_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-  m_primegun_overlay_layer.subImage.swapchain = m_primegun_overlay_swapchain.swapchain;
-  m_primegun_overlay_layer.subImage.imageRect.offset = {0, 0};
-  m_primegun_overlay_layer.subImage.imageRect.extent = {static_cast<int32_t>(width),
+  m_primedgun_overlay_layer.space = VR::g_openxr->GetReferenceSpace();
+  m_primedgun_overlay_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  m_primedgun_overlay_layer.subImage.swapchain = m_primedgun_overlay_swapchain.swapchain;
+  m_primedgun_overlay_layer.subImage.imageRect.offset = {0, 0};
+  m_primedgun_overlay_layer.subImage.imageRect.extent = {static_cast<int32_t>(width),
                                                         static_cast<int32_t>(height)};
 
   PGO::HybridControllerPose left_grip_pose = PGO::MakeGripPose(snapshot.controllers[0]);
@@ -1604,69 +1604,69 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   if (menu && panel_pose.valid)
   {
     const XrQuaternionf q = panel_pose.orientation;
-    m_primegun_overlay_layer.pose.orientation = PGO::MulQuat(
+    m_primedgun_overlay_layer.pose.orientation = PGO::MulQuat(
         q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
-    const XrVector3f offset = PGO::RotateVector(m_primegun_overlay_layer.pose.orientation,
+    const XrVector3f offset = PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation,
                                                 {0.0f, 0.10f, -0.18f});
-    m_primegun_overlay_layer.pose.position = {panel_pose.position.x + offset.x,
+    m_primedgun_overlay_layer.pose.position = {panel_pose.position.x + offset.x,
                                               panel_pose.position.y + offset.y,
                                               panel_pose.position.z + offset.z};
-    m_primegun_overlay_layer.size = {1.05f, 0.72f};
+    m_primedgun_overlay_layer.size = {1.05f, 0.72f};
   }
   else if (weapon_panel)
   {
-    m_primegun_overlay_layer.pose.orientation = {overlay.weapon_panel_orientation[0],
+    m_primedgun_overlay_layer.pose.orientation = {overlay.weapon_panel_orientation[0],
                                                  overlay.weapon_panel_orientation[1],
                                                  overlay.weapon_panel_orientation[2],
                                                  overlay.weapon_panel_orientation[3]};
     const XrVector3f offset =
-        PGO::RotateVector(m_primegun_overlay_layer.pose.orientation, {0.0f, 0.055f, -0.26f});
-    m_primegun_overlay_layer.pose.position = {
+        PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.055f, -0.26f});
+    m_primedgun_overlay_layer.pose.position = {
         overlay.weapon_panel_position[0] + snapshot.tracking_origin_position[0] + offset.x,
         overlay.weapon_panel_position[1] + snapshot.tracking_origin_position[1] + offset.y,
         overlay.weapon_panel_position[2] + snapshot.tracking_origin_position[2] + offset.z};
-    m_primegun_overlay_layer.size = {0.42f, 0.42f};
+    m_primedgun_overlay_layer.size = {0.42f, 0.42f};
   }
   else if (snapshot.head_pose.valid)
   {
     const auto& head = snapshot.head_pose;
-    m_primegun_overlay_layer.pose.orientation = {head.orientation[0], head.orientation[1],
+    m_primedgun_overlay_layer.pose.orientation = {head.orientation[0], head.orientation[1],
                                                  head.orientation[2], head.orientation[3]};
     const XrVector3f offset =
-        PGO::RotateVector(m_primegun_overlay_layer.pose.orientation, {0.0f, 0.0f, -1.35f});
-    m_primegun_overlay_layer.pose.position = {
+        PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.0f, -1.35f});
+    m_primedgun_overlay_layer.pose.position = {
         head.position[0] + snapshot.tracking_origin_position[0] + offset.x,
         head.position[1] + snapshot.tracking_origin_position[1] + offset.y,
         head.position[2] + snapshot.tracking_origin_position[2] + offset.z};
-    m_primegun_overlay_layer.size = {0.675f, 0.25f};
+    m_primedgun_overlay_layer.size = {0.675f, 0.25f};
   }
   else
   {
     return appended_layer;
   }
 
-  layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primegun_overlay_layer));
+  layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_overlay_layer));
   appended_layer = true;
 
   if (menu && laser_pose.valid && EnsurePrimedGunLaserSwapchain())
   {
     const XrQuaternionf q = laser_pose.orientation;
     const XrVector3f forward = PGO::RotateVector(q, {0.0f, 0.0f, -1.0f});
-    m_primegun_laser_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-    m_primegun_laser_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+    m_primedgun_laser_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    m_primedgun_laser_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
                                         XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-    m_primegun_laser_layer.space = VR::g_openxr->GetReferenceSpace();
-    m_primegun_laser_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-    m_primegun_laser_layer.subImage.swapchain = m_primegun_laser_swapchain.swapchain;
-    m_primegun_laser_layer.subImage.imageRect.offset = {0, 0};
-    m_primegun_laser_layer.subImage.imageRect.extent = {16, 10};
-    m_primegun_laser_layer.pose.orientation =
+    m_primedgun_laser_layer.space = VR::g_openxr->GetReferenceSpace();
+    m_primedgun_laser_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    m_primedgun_laser_layer.subImage.swapchain = m_primedgun_laser_swapchain.swapchain;
+    m_primedgun_laser_layer.subImage.imageRect.offset = {0, 0};
+    m_primedgun_laser_layer.subImage.imageRect.extent = {16, 10};
+    m_primedgun_laser_layer.pose.orientation =
         PGO::MulQuat(q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
-    m_primegun_laser_layer.pose.position = {laser_pose.position.x + forward.x * 0.40f,
+    m_primedgun_laser_layer.pose.position = {laser_pose.position.x + forward.x * 0.40f,
                                             laser_pose.position.y + forward.y * 0.40f,
                                             laser_pose.position.z + forward.z * 0.40f};
-    m_primegun_laser_layer.size = {0.008f, 0.80f};
-    layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primegun_laser_layer));
+    m_primedgun_laser_layer.size = {0.008f, 0.80f};
+    layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_laser_layer));
   }
 
   return appended_layer;

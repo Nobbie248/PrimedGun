@@ -23,8 +23,6 @@
 #include "Common/WorkQueueThread.h"
 #include "Core/ActionReplay.h"
 #include "Core/Config/AchievementSettings.h"
-#include "Core/Config/FreeLookSettings.h"
-#include "Core/Config/MainSettings.h"
 #include "Core/ConfigLoaders/GameConfigLoader.h"
 #include "Core/Core.h"
 #include "Core/GeckoCode.h"
@@ -390,13 +388,9 @@ std::recursive_mutex& AchievementManager::GetLock()
 
 void AchievementManager::SetHardcoreMode()
 {
-  rc_client_set_hardcore_enabled(m_client, Config::Get(Config::RA_HARDCORE_ENABLED));
-  if (Config::Get(Config::RA_HARDCORE_ENABLED))
-  {
-    if (Config::Get(Config::MAIN_EMULATION_SPEED) < 1.0f)
-      Config::SetBaseOrCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
-    Config::SetBaseOrCurrent(Config::FREE_LOOK_ENABLED, false);
-  }
+  // PrimedGun's required VR runtime patches are not compatible with the
+  // RetroAchievements Hardcore ruleset. Normal achievements remain supported.
+  rc_client_set_hardcore_enabled(m_client, false);
 }
 
 bool AchievementManager::IsHardcoreModeActive() const

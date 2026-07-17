@@ -88,10 +88,10 @@ constexpr int METROID_PRIME1_THERMAL_HEAT_FAR_X100 = 75;
 constexpr u64 METROID_PRIME1_THERMAL_MASK_STAGE7_HASH = 0x8e31231cae45574c;
 constexpr u32 METROID_PRIME1_FULLSCREEN_EFB_EFFECT_PS_HASH = 0x667d9a41;
 constexpr u32 METROID_PRIME1_FULLSCREEN_EFB_EFFECT_SOURCE_STAGE = 7;
-constexpr u64 PRIMEGUN_CANNON_PROBE_PS_HASH = 0x9e0b32f0;
-constexpr u32 PRIMEGUN_CANNON_PROBE_MAX_LOGS = 240;
-constexpr u32 PRIMEGUN_THERMAL_HUD_MAX_LOGS = 240;
-constexpr u32 PRIMEGUN_ELEMENT_HANDLING_MAX_LOGS = 800;
+constexpr u64 PRIMEDGUN_CANNON_PROBE_PS_HASH = 0x9e0b32f0;
+constexpr u32 PRIMEDGUN_CANNON_PROBE_MAX_LOGS = 240;
+constexpr u32 PRIMEDGUN_THERMAL_HUD_MAX_LOGS = 240;
+constexpr u32 PRIMEDGUN_ELEMENT_HANDLING_MAX_LOGS = 800;
 constexpr bool ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING = false;
 constexpr int METROID_HUD_CONTEXT_DEFAULT = 0;
 constexpr int METROID_HUD_CONTEXT_COMBAT = 1;
@@ -116,10 +116,10 @@ struct MetroidLayerBehavior
   ShaderHunter::HandlingType handling = ShaderHunter::HandlingType::Skip;
 };
 
-u32 s_primegun_cannon_probe_log_count = 0;
-bool s_primegun_cannon_probe_suppressed_notice = false;
-u32 s_primegun_thermal_hud_log_count = 0;
-u32 s_primegun_element_handling_log_count = 0;
+u32 s_primedgun_cannon_probe_log_count = 0;
+bool s_primedgun_cannon_probe_suppressed_notice = false;
+u32 s_primedgun_thermal_hud_log_count = 0;
+u32 s_primedgun_element_handling_log_count = 0;
 
 int GetFullscreenMonoPerEyeTextureLayer()
 {
@@ -196,7 +196,7 @@ std::string PrimedGunCannonProbeLogPath()
   const std::string dump_dir = File::GetUserPath(D_DUMP_IDX) + "Shaders/" + game_id + "/";
   if (!File::IsDirectory(dump_dir))
     File::CreateFullPath(dump_dir);
-  return dump_dir + "primegun_cannon_probe.log";
+  return dump_dir + "primedgun_cannon_probe.log";
 }
 
 void AppendPrimedGunCannonProbeLog(std::string_view text)
@@ -222,29 +222,29 @@ void LogPrimedGunCannonProbeDraw(u32 draw_sequence, u64 vs_hash, u64 ps_hash, u6
   if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
     return;
 
-  if (ps_hash != PRIMEGUN_CANNON_PROBE_PS_HASH)
+  if (ps_hash != PRIMEDGUN_CANNON_PROBE_PS_HASH)
     return;
 
-  if (s_primegun_cannon_probe_log_count >= PRIMEGUN_CANNON_PROBE_MAX_LOGS)
+  if (s_primedgun_cannon_probe_log_count >= PRIMEDGUN_CANNON_PROBE_MAX_LOGS)
   {
-    if (!s_primegun_cannon_probe_suppressed_notice)
+    if (!s_primedgun_cannon_probe_suppressed_notice)
     {
-      s_primegun_cannon_probe_suppressed_notice = true;
+      s_primedgun_cannon_probe_suppressed_notice = true;
       AppendPrimedGunCannonProbeLog(fmt::format(
           "\nPrimedGun cannon probe: suppressing further draws after {} matches.\n",
-          PRIMEGUN_CANNON_PROBE_MAX_LOGS));
+          PRIMEDGUN_CANNON_PROBE_MAX_LOGS));
       INFO_LOG_FMT(VIDEO,
                    "PrimedGun cannon probe: suppressing further draws after {} matches. Log: {}",
-                   PRIMEGUN_CANNON_PROBE_MAX_LOGS, PrimedGunCannonProbeLogPath());
+                   PRIMEDGUN_CANNON_PROBE_MAX_LOGS, PrimedGunCannonProbeLogPath());
     }
     return;
   }
 
-  ++s_primegun_cannon_probe_log_count;
+  ++s_primedgun_cannon_probe_log_count;
   std::string out;
   out += fmt::format(
       "\n[PrimedGun cannon probe #{:03}] draw={} VS={:08x} PS={:08x} GS={:08x}\n",
-      s_primegun_cannon_probe_log_count, draw_sequence, static_cast<u32>(vs_hash),
+      s_primedgun_cannon_probe_log_count, draw_sequence, static_cast<u32>(vs_hash),
       static_cast<u32>(ps_hash), static_cast<u32>(gs_hash));
   out += fmt::format(
       "projection={} hfov={} vfov={} near={} far={} ortho=({}, {}, {}, {}) viewport=({}, {}, "
@@ -325,10 +325,10 @@ void LogPrimedGunCannonProbeDraw(u32 draw_sequence, u64 vs_hash, u64 ps_hash, u6
   }
 
   AppendPrimedGunCannonProbeLog(out);
-  if (s_primegun_cannon_probe_log_count == 1)
+  if (s_primedgun_cannon_probe_log_count == 1)
   {
     INFO_LOG_FMT(VIDEO, "PrimedGun cannon probe logging PS {:08x} to {}",
-                 static_cast<u32>(PRIMEGUN_CANNON_PROBE_PS_HASH), PrimedGunCannonProbeLogPath());
+                 static_cast<u32>(PRIMEDGUN_CANNON_PROBE_PS_HASH), PrimedGunCannonProbeLogPath());
   }
 }
 
@@ -345,10 +345,10 @@ void AppendPrimedGunThermalHudLog(std::string_view text)
   if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
     return;
 
-  if (s_primegun_thermal_hud_log_count >= PRIMEGUN_THERMAL_HUD_MAX_LOGS)
+  if (s_primedgun_thermal_hud_log_count >= PRIMEDGUN_THERMAL_HUD_MAX_LOGS)
     return;
 
-  ++s_primegun_thermal_hud_log_count;
+  ++s_primedgun_thermal_hud_log_count;
   File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
   File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunThermalHud.log", "ab");
   if (!file)
@@ -361,10 +361,10 @@ void AppendPrimedGunElementHandlingLog(std::string_view text)
   if (!ENABLE_PRIMEDGUN_VIDEO_DEBUG_LOGGING)
     return;
 
-  if (s_primegun_element_handling_log_count >= PRIMEGUN_ELEMENT_HANDLING_MAX_LOGS)
+  if (s_primedgun_element_handling_log_count >= PRIMEDGUN_ELEMENT_HANDLING_MAX_LOGS)
     return;
 
-  ++s_primegun_element_handling_log_count;
+  ++s_primedgun_element_handling_log_count;
   File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
   File::IOFile file(File::GetUserPath(D_LOGS_IDX) + "PrimedGunElementHandling.log", "ab");
   if (!file)
@@ -1624,17 +1624,17 @@ void VertexManagerBase::Flush()
     if (!skip)
     {
 #ifdef ENABLE_VR
-      const bool primegun_left_hand_mirrored_position_draw =
+      const bool primedgun_left_hand_mirrored_position_draw =
           g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
           !Common::VR::OpenXRInputState::GetPrimedGunOverlay().use_right_hand &&
           DrawUsesMirroredPositionMatrix(current_vertex_format);
 #else
-      constexpr bool primegun_left_hand_mirrored_position_draw = false;
+      constexpr bool primedgun_left_hand_mirrored_position_draw = false;
 #endif
 
       UpdatePipelineConfig();
       UpdatePipelineObject();
-      if (primegun_left_hand_mirrored_position_draw)
+      if (primedgun_left_hand_mirrored_position_draw)
       {
         m_current_pipeline_config.rasterization_state.cull_mode = CullMode::None;
         m_current_uber_pipeline_config.rasterization_state.cull_mode = CullMode::None;
@@ -1655,7 +1655,7 @@ void VertexManagerBase::Flush()
         auto& hunter = ShaderHunter::GetInstance();
         auto& elements = ElementsGroupManager::GetInstance();
         auto& texmgr = TextureElementManager::GetInstance();
-        const bool primegun_cannon_probe_enabled = false;
+        const bool primedgun_cannon_probe_enabled = false;
         const bool hunter_enabled = hunter.IsEnabled();
         const bool hunter_debug_logging = hunter.IsDebugLogging();
         const bool hunter_has_overrides = hunter.HasOverrides();
@@ -1666,7 +1666,7 @@ void VertexManagerBase::Flush()
         const bool hunter_needs_families = hunter.NeedsShaderFamilySignatures();
         const bool hunter_needs_textures = hunter.NeedsTextureHashes();
         const bool hunter_needs_counters = hunter.NeedsOverrideDrawCounters();
-        if (primegun_cannon_probe_enabled || hunter_enabled || hunter_has_overrides ||
+        if (primedgun_cannon_probe_enabled || hunter_enabled || hunter_has_overrides ||
             hunter_debug_logging || elements_runtime_active || texmgr_has_overrides)
         {
           const auto& vs = m_current_pipeline_config.vs_uid;
@@ -1682,10 +1682,10 @@ void VertexManagerBase::Flush()
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
           const bool needs_texture_hashes =
-              primegun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
+              primedgun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
               elements_runtime_active || texmgr_has_overrides;
           const bool needs_texture_names =
-              primegun_cannon_probe_enabled || hunter_enabled || elements_popup_open;
+              primedgun_cannon_probe_enabled || hunter_enabled || elements_popup_open;
           if (needs_texture_hashes || needs_texture_names)
           {
             for (u32 i = 0; i < 8; i++)
@@ -1715,7 +1715,7 @@ void VertexManagerBase::Flush()
           }
 
           ShaderHunter::RuntimeElementSignature draw_signature{};
-          if (primegun_cannon_probe_enabled || hunter_enabled || elements_runtime_active)
+          if (primedgun_cannon_probe_enabled || hunter_enabled || elements_runtime_active)
           {
             draw_signature = BuildRuntimeElementSignature(
                 xfmem, bpmem, system.GetGeometryShaderManager().vr_ortho_draw_counter);
@@ -1723,7 +1723,7 @@ void VertexManagerBase::Flush()
               hunter.SetCurrentDrawSignature(draw_signature);
           }
 
-          if (primegun_cannon_probe_enabled)
+          if (primedgun_cannon_probe_enabled)
           {
             LogPrimedGunCannonProbeDraw(m_draw_counter + 1, vs_hash, ps_hash, gs_hash, tex_hashes,
                                        tex_names, draw_signature);

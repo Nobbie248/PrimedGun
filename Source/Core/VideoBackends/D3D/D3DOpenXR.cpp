@@ -304,7 +304,7 @@ bool D3DOpenXR::CreateSwapchains()
 
 void D3DOpenXR::DestroySwapchains()
 {
-  m_primegun_overlay.Shutdown();
+  m_primedgun_overlay.Shutdown();
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
@@ -410,7 +410,7 @@ bool D3DOpenXR::SubmitFrame()
   {
     std::vector<XrCompositionLayerBaseHeader*> layers = {
         reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer)};
-    m_primegun_overlay.AppendLayers(&layers);
+    m_primedgun_overlay.AppendLayers(&layers);
     return VR::g_openxr->EndFrame(layers);
   }
   if (!cinematic_screen_active)
@@ -450,7 +450,7 @@ bool D3DOpenXR::SubmitFrame()
 
   std::vector<XrCompositionLayerBaseHeader*> layers = {
       reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_projection_layer)};
-  m_primegun_overlay.AppendLayers(&layers);
+  m_primedgun_overlay.AppendLayers(&layers);
 
   return VR::g_openxr->EndFrame(layers);
 }

@@ -249,10 +249,10 @@ constexpr u32 VR_MENU_RESET_TARGETING_ACTION = 2;
 constexpr u32 VR_MENU_RESET_CALIBRATION_ACTION = 3;
 constexpr u32 VR_MENU_RESET_CONTROLLER_ACTION = 4;
 constexpr u32 VR_MENU_RESET_MOVEMENT_ACTION = 5;
-constexpr const char* PRIMEGUN_CANNON_GAME_ID = "GM8E01";
-constexpr const char* PRIMEGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
-constexpr const char* PRIMEGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
-constexpr std::array<const char*, 3> PRIMEGUN_CANNON_TEXTURE_NAMES = {
+constexpr const char* PRIMEDGUN_CANNON_GAME_ID = "GM8E01";
+constexpr const char* PRIMEDGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
+constexpr const char* PRIMEDGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
+constexpr std::array<const char*, 3> PRIMEDGUN_CANNON_TEXTURE_NAMES = {
     "tex1_128x128_m_3c6ded49d64d30f2_14",
     "tex1_128x128_m_bec6d78ea7dd739e_14",
     "tex1_64x64_m_c7625e7ecd9cd5c2_14",
@@ -4553,19 +4553,19 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
 #ifdef ENABLE_VR
 std::string PrimedGunCannonActiveFolder()
 {
-  return File::GetUserPath(D_HIRESTEXTURES_IDX) + PRIMEGUN_CANNON_PACK_FOLDER + DIR_SEP;
+  return File::GetUserPath(D_HIRESTEXTURES_IDX) + PRIMEDGUN_CANNON_PACK_FOLDER + DIR_SEP;
 }
 
 std::string PrimedGunCannonLibraryFolderForSlot(u32 slot)
 {
-  return File::GetUserPath(D_LOAD_IDX) + PRIMEGUN_CANNON_LIBRARY_FOLDER + DIR_SEP + "slot_" +
+  return File::GetUserPath(D_LOAD_IDX) + PRIMEDGUN_CANNON_LIBRARY_FOLDER + DIR_SEP + "slot_" +
          std::to_string(slot) + DIR_SEP;
 }
 
 std::string PrimedGunCannonAppLibraryFolderForSlot(u32 slot)
 {
   return (std::filesystem::path(File::GetSysDirectory()) / ".." / PORTABLE_USER_DIR / LOAD_DIR /
-          PRIMEGUN_CANNON_LIBRARY_FOLDER / ("slot_" + std::to_string(slot)))
+          PRIMEDGUN_CANNON_LIBRARY_FOLDER / ("slot_" + std::to_string(slot)))
              .lexically_normal()
              .string() +
          DIR_SEP;
@@ -4600,24 +4600,24 @@ void PrimedGunCannonRegisterPack()
   const std::string gameids_folder = active_folder + "gameids" DIR_SEP;
   File::CreateDirs(gameids_folder);
   const std::string gameids_path =
-      gameids_folder + std::string(PRIMEGUN_CANNON_GAME_ID) + ".txt";
+      gameids_folder + std::string(PRIMEDGUN_CANNON_GAME_ID) + ".txt";
   if (!File::Exists(gameids_path))
     File::CreateEmptyFile(gameids_path);
 }
 
 void PrimedGunCannonRefreshHiresMap(
-    const std::array<std::string, PRIMEGUN_CANNON_TEXTURE_NAMES.size()>& active_paths)
+    const std::array<std::string, PRIMEDGUN_CANNON_TEXTURE_NAMES.size()>& active_paths)
 {
-  for (const char* texture_name : PRIMEGUN_CANNON_TEXTURE_NAMES)
+  for (const char* texture_name : PRIMEDGUN_CANNON_TEXTURE_NAMES)
     HiresTexture::RemoveAssetPath(texture_name);
 
   HiresTexture::Update();
 
-  for (size_t i = 0; i < PRIMEGUN_CANNON_TEXTURE_NAMES.size(); ++i)
+  for (size_t i = 0; i < PRIMEDGUN_CANNON_TEXTURE_NAMES.size(); ++i)
   {
     if (!active_paths[i].empty())
-      HiresTexture::SetAssetPath(PRIMEGUN_CANNON_TEXTURE_NAMES[i], active_paths[i]);
-    HiresTexture::MarkDirty(PRIMEGUN_CANNON_TEXTURE_NAMES[i]);
+      HiresTexture::SetAssetPath(PRIMEDGUN_CANNON_TEXTURE_NAMES[i], active_paths[i]);
+    HiresTexture::MarkDirty(PRIMEDGUN_CANNON_TEXTURE_NAMES[i]);
   }
 
   AsyncRequests::GetInstance()->PushEvent([] {
@@ -4630,7 +4630,7 @@ bool ApplyPrimedGunCannonTextureSlot(u32 slot)
 {
   PrimedGunCannonRegisterPack();
 
-  for (const char* texture_name : PRIMEGUN_CANNON_TEXTURE_NAMES)
+  for (const char* texture_name : PRIMEDGUN_CANNON_TEXTURE_NAMES)
   {
     File::Delete(PrimedGunCannonActivePath(texture_name, ".dds"),
                  File::IfAbsentBehavior::NoConsoleWarning);
@@ -4638,26 +4638,26 @@ bool ApplyPrimedGunCannonTextureSlot(u32 slot)
                  File::IfAbsentBehavior::NoConsoleWarning);
   }
 
-  std::array<std::string, PRIMEGUN_CANNON_TEXTURE_NAMES.size()> active_paths{};
+  std::array<std::string, PRIMEDGUN_CANNON_TEXTURE_NAMES.size()> active_paths{};
   if (slot != 0)
   {
     bool copied_any = false;
-    for (size_t i = 0; i < PRIMEGUN_CANNON_TEXTURE_NAMES.size(); ++i)
+    for (size_t i = 0; i < PRIMEDGUN_CANNON_TEXTURE_NAMES.size(); ++i)
     {
       const std::string source_path =
-          PrimedGunCannonSourcePath(slot, PRIMEGUN_CANNON_TEXTURE_NAMES[i]);
+          PrimedGunCannonSourcePath(slot, PRIMEDGUN_CANNON_TEXTURE_NAMES[i]);
       if (source_path.empty())
         continue;
 
       const std::filesystem::path source_fs(source_path);
       const std::string extension = source_fs.extension().string();
       const std::string dest_path =
-          PrimedGunCannonActivePath(PRIMEGUN_CANNON_TEXTURE_NAMES[i], extension);
+          PrimedGunCannonActivePath(PRIMEDGUN_CANNON_TEXTURE_NAMES[i], extension);
       File::CreateFullPath(dest_path);
       if (!File::Copy(source_path, dest_path, true))
       {
         WARN_LOG_FMT(VIDEO, "PrimedGun: Failed to apply cannon texture '{}' from '{}'.",
-                     PRIMEGUN_CANNON_TEXTURE_NAMES[i], source_path);
+                     PRIMEDGUN_CANNON_TEXTURE_NAMES[i], source_path);
         continue;
       }
 
@@ -4990,9 +4990,9 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->rumble_enabled = true;
   settings->rumble_intensity = 0.35f;
   settings->rumble_hand_mode = 2;
-  settings->primegun_grip_inputs_enabled = true;
-  settings->primegun_grip_inputs_use_trackpad = false;
-  settings->primegun_trackpad_press_threshold = 0.5f;
+  settings->primedgun_grip_inputs_enabled = true;
+  settings->primedgun_grip_inputs_use_trackpad = false;
+  settings->primedgun_trackpad_press_threshold = 0.5f;
   settings->combat_jump_use_primary_button = false;
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
@@ -5201,8 +5201,8 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
           std::clamp(settings->rumble_intensity + sign * 0.05f, 0.0f, 1.0f);
       break;
     case 9:
-      settings->primegun_trackpad_press_threshold =
-          std::clamp(settings->primegun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
+      settings->primedgun_trackpad_press_threshold =
+          std::clamp(settings->primedgun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
       break;
     case 13:
       settings->xr_dpad_head_radius =
@@ -5345,7 +5345,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 2)
       settings->rumble_hand_mode = (std::clamp(settings->rumble_hand_mode, 0, 2) + 1) % 3;
     else if (actual_index == 4)
-      settings->primegun_grip_inputs_enabled = !settings->primegun_grip_inputs_enabled;
+      settings->primedgun_grip_inputs_enabled = !settings->primedgun_grip_inputs_enabled;
     else if (actual_index == 5)
       settings->combat_jump_use_primary_button = !settings->combat_jump_use_primary_button;
     else if (actual_index == 6)
@@ -5353,7 +5353,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 7)
       settings->vr_menu_requires_head_zone = !settings->vr_menu_requires_head_zone;
     else if (actual_index == 8)
-      settings->primegun_grip_inputs_use_trackpad = !settings->primegun_grip_inputs_use_trackpad;
+      settings->primedgun_grip_inputs_use_trackpad = !settings->primedgun_grip_inputs_use_trackpad;
     else if (actual_index == 10 || actual_index == 11)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
     else if (actual_index == 12)
@@ -5485,9 +5485,9 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.rumble_enabled = settings.rumble_enabled;
   overlay.rumble_intensity = settings.rumble_intensity;
   overlay.rumble_hand_mode = settings.rumble_hand_mode;
-  overlay.primegun_grip_inputs_enabled = settings.primegun_grip_inputs_enabled;
-  overlay.primegun_grip_inputs_use_trackpad = settings.primegun_grip_inputs_use_trackpad;
-  overlay.primegun_trackpad_press_threshold = settings.primegun_trackpad_press_threshold;
+  overlay.primedgun_grip_inputs_enabled = settings.primedgun_grip_inputs_enabled;
+  overlay.primedgun_grip_inputs_use_trackpad = settings.primedgun_grip_inputs_use_trackpad;
+  overlay.primedgun_trackpad_press_threshold = settings.primedgun_trackpad_press_threshold;
   overlay.combat_jump_use_primary_button = settings.combat_jump_use_primary_button;
   overlay.vr_menu_hold_left_stick = settings.vr_menu_hold_left_stick;
   overlay.vr_menu_requires_head_zone = settings.vr_menu_requires_head_zone;
@@ -7642,9 +7642,9 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
   s_settings.world_scale = ClampFinite(s_settings.world_scale, defaults.world_scale, 0.1f, 10.0f);
   s_settings.require_trigger = false;
   s_settings.trigger_threshold = defaults.trigger_threshold;
-  s_settings.primegun_trackpad_press_threshold =
-      ClampFinite(s_settings.primegun_trackpad_press_threshold,
-                  defaults.primegun_trackpad_press_threshold, 0.05f, 1.0f);
+  s_settings.primedgun_trackpad_press_threshold =
+      ClampFinite(s_settings.primedgun_trackpad_press_threshold,
+                  defaults.primedgun_trackpad_press_threshold, 0.05f, 1.0f);
   s_settings.rumble_intensity =
       ClampFinite(s_settings.rumble_intensity, defaults.rumble_intensity, 0.0f, 1.0f);
   s_settings.rumble_hand_mode = std::clamp(s_settings.rumble_hand_mode, 0, 2);

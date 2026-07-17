@@ -394,7 +394,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"RUMBLE", s.rumble_enabled ? "ON" : "OFF"});
       rows.push_back({"RUMBLE TARGET", RumbleHandModeText(s.rumble_hand_mode)});
       rows.push_back({"RUMBLE INTENSITY", FloatText(s.rumble_intensity, 2)});
-      rows.push_back({"GRIP INPUT", s.primegun_grip_inputs_enabled ? "ON" : "OFF"});
+      rows.push_back({"GRIP INPUT", s.primedgun_grip_inputs_enabled ? "ON" : "OFF"});
       rows.push_back({"A BUTTON JUMP", s.combat_jump_use_primary_button ? "ON" : "OFF"});
       rows.push_back({"LONGER HELD PRESS FOR VR MENU", s.vr_menu_hold_left_stick ? "ON" : "OFF"});
       rows.push_back({"MENU REQUIRES HAND NEAR HEAD", s.vr_menu_requires_head_zone ? "ON" : "OFF"});
@@ -402,8 +402,8 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
     else
     {
       rows.push_back(
-          {"GRIP INPUT SOURCE", s.primegun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
-      rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primegun_trackpad_press_threshold, 2)});
+          {"GRIP INPUT SOURCE", s.primedgun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
+      rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primedgun_trackpad_press_threshold, 2)});
       rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
       rows.push_back({"DIRECTION PAD", s.xr_dpad_enabled ? "ON" : "OFF"});
       rows.push_back({"QUEST THUMB REST", s.xr_dpad_use_thumbrest_modifier ? "ON" : "OFF"});
