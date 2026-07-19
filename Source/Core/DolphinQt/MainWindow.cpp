@@ -1298,6 +1298,25 @@ void PrimedGunDumpMem1(QWidget* parent)
       append_vtable(fmt::format("{}VTable", label).c_str(), vtable, 16);
     };
 
+    context += "\nPPC stack trace\n";
+    u32 stack_pointer = ppc_state.gpr[1];
+    for (int frame = 0; frame < 32; ++frame)
+    {
+      const std::optional<u32> caller_stack = read_mem1_u32(stack_pointer);
+      if (!caller_stack || *caller_stack <= stack_pointer || *caller_stack > 0x817FFFFFu ||
+          *caller_stack - stack_pointer > 0x100000u)
+      {
+        context += fmt::format("#{:02} SP={:08X} caller_sp={} stop\n", frame, stack_pointer,
+                               format_u32(caller_stack));
+        break;
+      }
+
+      const std::optional<u32> saved_lr = read_mem1_u32(*caller_stack + 4u);
+      context += fmt::format("#{:02} SP={:08X} caller_sp={:08X} saved_lr={}\n", frame,
+                             stack_pointer, *caller_stack, format_u32(saved_lr));
+      stack_pointer = *caller_stack;
+    }
+
     context += "\nCPU path code windows\n";
     append_code_window("PCWindow", ppc_state.pc, 8, 12);
     append_code_window("NPCWindow", ppc_state.npc, 4, 8);

@@ -43,12 +43,14 @@
 #include <shlwapi.h>
 #endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
 
+// PrimedGun's Dolphin base is 2603, while SCM_DESC_STR is the independent
+// PrimedGun release version. RetroAchievements validates the Dolphin version in
+// this user agent, so do not send the PrimedGun version as the Dolphin version.
 #ifdef ANDROID
 static const Common::HttpRequest::Headers USER_AGENT_HEADER = {
-    {"User-Agent", Common::GetUserAgentStr() + " (Android)"}};
+    {"User-Agent", "Dolphin/2603 (Android)"}};
 #else   // ANDROID
-static const Common::HttpRequest::Headers USER_AGENT_HEADER = {
-    {"User-Agent", Common::GetUserAgentStr()}};
+static const Common::HttpRequest::Headers USER_AGENT_HEADER = {{"User-Agent", "Dolphin/2603"}};
 #endif  // ANDROID
 
 AchievementManager& AchievementManager::GetInstance()
