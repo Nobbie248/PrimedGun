@@ -164,6 +164,8 @@ constexpr u32 MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH = SCRATCH_BASE + 0x694u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH = SCRATCH_BASE + 0x698u;
 constexpr u32 SPRINGBALL_TRIGGER_SCRATCH = SCRATCH_BASE + 0x69Cu;
 constexpr u32 AUDIO_LISTENER_SCRATCH = SCRATCH_BASE + 0x700u;
+constexpr u32 HMD_CAMERA_FACING_CAVE = SCRATCH_BASE + 0x720u;
+constexpr u32 HMD_CAMERA_FACING_SCRATCH = SCRATCH_BASE + 0x7C0u;
 constexpr u32 DPAD_DISABLE_OWNER_MAGIC = 0x50474450u;  // PGDP
 
 constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
@@ -199,6 +201,13 @@ constexpr u32 AUDIO_LISTENER_PATCH_ADDRESS = 0x8000BA88u;
 constexpr u32 AUDIO_LISTENER_PATCH_ORIGINAL = 0xD1010008u;
 constexpr u32 AUDIO_LISTENER_LEGACY_BAD_CAVE = 0x80002300u;
 constexpr u32 AUDIO_LISTENER_LEGACY_HIGH_CAVE = 0x817F8000u;
+constexpr u32 CAMERA_MANAGER_GET_CURRENT_CAMERA_TRANSFORM = 0x8000A968u;
+constexpr u32 ENVFX_RAIN_SOUND_CAMERA_CALL = 0x8020FFC0u;
+constexpr u32 ENVFX_RAIN_SOUND_CAMERA_CALL_ORIGINAL = 0x4BDFA9A9u;
+constexpr u32 ENVFX_RENDER_CAMERA_CALL = 0x802102D8u;
+constexpr u32 ENVFX_RENDER_CAMERA_CALL_ORIGINAL = 0x4BDFA691u;
+constexpr u32 ENVFX_UPDATE_CAMERA_CALL = 0x8021210Cu;
+constexpr u32 ENVFX_UPDATE_CAMERA_CALL_ORIGINAL = 0x4BDF885Du;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ADDRESS = 0x8000E71Cu;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ORIGINAL = 0x801E0304u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_SKIP_ADDRESS = 0x8000E9C4u;
@@ -529,6 +538,14 @@ DynamicPpcPatch s_first_person_orbit_aim_vector_patch{
     FIRST_PERSON_ORBIT_AIM_VECTOR_CAVE, false};
 DynamicPpcPatch s_audio_listener_patch{
     AUDIO_LISTENER_PATCH_ADDRESS, AUDIO_LISTENER_PATCH_ORIGINAL, 0, AUDIO_LISTENER_CAVE, false};
+DynamicPpcPatch s_hmd_camera_facing_patches[] = {
+    {ENVFX_RAIN_SOUND_CAMERA_CALL, ENVFX_RAIN_SOUND_CAMERA_CALL_ORIGINAL, 0,
+     HMD_CAMERA_FACING_CAVE, false},
+    {ENVFX_RENDER_CAMERA_CALL, ENVFX_RENDER_CAMERA_CALL_ORIGINAL, 0, HMD_CAMERA_FACING_CAVE,
+     false},
+    {ENVFX_UPDATE_CAMERA_CALL, ENVFX_UPDATE_CAMERA_CALL_ORIGINAL, 0, HMD_CAMERA_FACING_CAVE,
+     false},
+};
 
 ProjectileTransformPatch s_projectile_transform_patches[] = {
     {0x800E0434u, 0, WAVE_PROJECTILE_TRANSFORM_CAVE, 6, false},
@@ -923,7 +940,7 @@ bool InstructionBlockMatches(const Core::CPUThreadGuard& guard, u32 base,
 void InvalidatePrimedGunPatchICache(Core::System& system)
 {
   auto& jit = system.GetJitInterface();
-  jit.InvalidateICache(0x80000000u, 0x00200000u, true);
+  jit.InvalidateICache(0x80000000u, 0x00300000u, true);
   jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
 }
 
@@ -4085,6 +4102,39 @@ void UpdateAudioListenerScratchFromHmd(const Core::CPUThreadGuard& guard,
   }
 }
 
+void ClearHmdCameraFacingScratch(const Core::CPUThreadGuard& guard)
+{
+  for (u32 offset = 0; offset <= 0x2Cu; offset += 4u)
+    TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH + offset, 0);
+}
+
+bool WriteHmdCameraFacingScratch(const Core::CPUThreadGuard& guard, Matrix3x4 hmd)
+{
+  if (!MatrixNumbersLookValid(hmd) || !RemoveRollFromAimBasis(&hmd))
+    return false;
+
+  if (!WriteBasis9(guard, HMD_CAMERA_FACING_SCRATCH + 4u, hmd))
+  {
+    TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH, 0);
+    return false;
+  }
+
+  return TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH, 1);
+}
+
+void UpdateHmdCameraFacingScratchFromHmd(const Core::CPUThreadGuard& guard,
+                                        const Common::VR::OpenXRInputSnapshot& snapshot,
+                                        float yaw_delta_deg)
+{
+  Matrix3x4 hmd{};
+  if (!snapshot.runtime_active || !snapshot.head_pose.valid ||
+      !MatrixFromHmdSnapshot(snapshot, yaw_delta_deg, &hmd) ||
+      !WriteHmdCameraFacingScratch(guard, hmd))
+  {
+    ClearHmdCameraFacingScratch(guard);
+  }
+}
+
 bool ScanPitchFieldsWritable(const Core::CPUThreadGuard& guard, u32 player)
 {
   if (!PlayerObjectLooksValid(guard, player))
@@ -5850,6 +5900,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   if (!snapshot.runtime_active)
   {
     ClearAudioListenerScratch(guard);
+    ClearHmdCameraFacingScratch(guard);
     PublishVrOverlayState(settings, false);
     return;
   }
@@ -5864,9 +5915,15 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
 
   float yaw_delta_deg = GetPlayerYawDeltaDegrees(guard);
   if (settings.builtin_patches_enabled)
+  {
     UpdateAudioListenerScratchFromHmd(guard, snapshot, yaw_delta_deg);
+    UpdateHmdCameraFacingScratchFromHmd(guard, snapshot, yaw_delta_deg);
+  }
   else
+  {
     ClearAudioListenerScratch(guard);
+    ClearHmdCameraFacingScratch(guard);
+  }
   UpdateDirectionalMovement(guard, snapshot, settings, yaw_delta_deg);
   UpdateXrDpad(guard, snapshot, settings);
   float snap_turn_yaw_deg = 0.0f;
@@ -6782,6 +6839,140 @@ bool RestoreFirstPersonOrbitAimVectorPatch(const Core::CPUThreadGuard& guard)
   return restored;
 }
 
+bool ApplyHmdCameraFacingPatches(const Core::CPUThreadGuard& guard)
+{
+  static const auto assembled = Common::GekkoAssembler::Assemble(
+      fmt::format(R"(
+.defvar HookStart, 0x{:x}
+.defvar Scratch, 0x{:x}
+
+.locate HookStart
+mflr r0
+lis r12, Scratch@ha
+ori r12, r12, Scratch@l
+stw r0, 0x28(r12)
+stw r3, 0x2c(r12)
+.4byte 0x{:08x}
+
+lis r12, Scratch@ha
+ori r12, r12, Scratch@l
+lwz r0, 0(r12)
+cmpwi r0, 0
+beq _restore_lr
+
+lwz r11, 0x2c(r12)
+lfs f0, 0x04(r12)
+stfs f0, 0x00(r11)
+lfs f0, 0x08(r12)
+stfs f0, 0x04(r11)
+lfs f0, 0x0c(r12)
+stfs f0, 0x08(r11)
+
+lfs f0, 0x10(r12)
+stfs f0, 0x10(r11)
+lfs f0, 0x14(r12)
+stfs f0, 0x14(r11)
+lfs f0, 0x18(r12)
+stfs f0, 0x18(r11)
+
+lfs f0, 0x1c(r12)
+stfs f0, 0x20(r11)
+lfs f0, 0x20(r12)
+stfs f0, 0x24(r11)
+lfs f0, 0x24(r12)
+stfs f0, 0x28(r11)
+
+_restore_lr:
+lwz r0, 0x28(r12)
+mtlr r0
+blr
+)",
+                  HMD_CAMERA_FACING_CAVE, HMD_CAMERA_FACING_SCRATCH,
+                  PpcBranch(HMD_CAMERA_FACING_CAVE + 0x14u,
+                            CAMERA_MANAGER_GET_CURRENT_CAMERA_TRANSFORM) |
+                      1u),
+      0);
+
+  if (Common::GekkoAssembler::IsFailure(assembled))
+    return false;
+
+  const auto& blocks = Common::GekkoAssembler::GetT(assembled);
+  bool cave_matches = true;
+  bool cave_in_range = true;
+  for (const auto& block : blocks)
+  {
+    const u32 block_size = static_cast<u32>(block.instructions.size());
+    if (!RangeOverlaps(block.block_address, block_size, SCRATCH_BASE,
+                       SCRATCH_BASE + SCRATCH_ARENA_SIZE) ||
+        block.block_address < HMD_CAMERA_FACING_CAVE ||
+        block.block_address + block_size > HMD_CAMERA_FACING_SCRATCH)
+    {
+      cave_in_range = false;
+      cave_matches = false;
+      continue;
+    }
+
+    for (u32 offset = 0; offset < block_size; offset += 4u)
+    {
+      const u8* bytes = block.instructions.data() + offset;
+      const u32 expected = (static_cast<u32>(bytes[0]) << 24) |
+                           (static_cast<u32>(bytes[1]) << 16) |
+                           (static_cast<u32>(bytes[2]) << 8) | bytes[3];
+      u32 current = 0;
+      if (!TryReadU32(guard, block.block_address + offset, &current) || current != expected)
+        cave_matches = false;
+    }
+  }
+
+  if (!cave_in_range)
+    return false;
+
+  bool wrote = false;
+  if (!cave_matches)
+  {
+    for (const auto& block : blocks)
+    {
+      for (u32 offset = 0; offset < block.instructions.size(); offset += 4u)
+      {
+        const u8* bytes = block.instructions.data() + offset;
+        const u32 instruction = (static_cast<u32>(bytes[0]) << 24) |
+                                (static_cast<u32>(bytes[1]) << 16) |
+                                (static_cast<u32>(bytes[2]) << 8) | bytes[3];
+        wrote = TryWriteInstruction(guard, block.block_address + offset, instruction) || wrote;
+      }
+    }
+  }
+
+  for (DynamicPpcPatch& patch : s_hmd_camera_facing_patches)
+  {
+    const u32 branch = PpcBranch(patch.address, patch.cave) | 1u;
+    u32 current = 0;
+    if (!TryReadU32(guard, patch.address, &current))
+    {
+      patch.applied = false;
+      continue;
+    }
+
+    if (current == branch)
+    {
+      patch.applied = cave_matches || wrote;
+      continue;
+    }
+
+    if (current != patch.original)
+    {
+      patch.applied = false;
+      continue;
+    }
+
+    const bool patched = TryWriteInstruction(guard, patch.address, branch);
+    patch.applied = patched;
+    wrote = patched || wrote;
+  }
+
+  return wrote;
+}
+
 bool ApplyAudioListenerPatch(const Core::CPUThreadGuard& guard)
 {
   auto& patch = s_audio_listener_patch;
@@ -7041,6 +7232,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyFirstPersonOrbitAimVectorPatch(guard) || wrote;
   TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, scan_active ? 1u : 0u);
   wrote = ApplyAudioListenerPatch(guard) || wrote;
+  wrote = ApplyHmdCameraFacingPatches(guard) || wrote;
 
   UpdatePitchZeroHookEnabled(guard, scan_active);
 
@@ -7305,6 +7497,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
+    ClearHmdCameraFacingScratch(guard);
     ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
@@ -7319,6 +7512,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
+    ClearHmdCameraFacingScratch(guard);
     ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
@@ -7345,6 +7539,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
+    ClearHmdCameraFacingScratch(guard);
     if (s_last_patch_player != 0)
       s_patch_reapply_until_frame = s_frame_counter + 180u;
     s_last_patch_player = 0;
@@ -7586,6 +7781,8 @@ void ResetNativeRuntime()
   s_scan_indicator_view_basis_patch.original = DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL;
   s_first_person_orbit_aim_vector_patch.applied = false;
   s_audio_listener_patch.applied = false;
+  for (DynamicPpcPatch& patch : s_hmd_camera_facing_patches)
+    patch.applied = false;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
     patch.applied = false;
   s_combat_elevation_pitch_patch.applied = false;
