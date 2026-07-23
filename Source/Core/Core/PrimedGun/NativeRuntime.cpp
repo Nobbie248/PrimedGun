@@ -166,6 +166,7 @@ constexpr u32 SPRINGBALL_TRIGGER_SCRATCH = SCRATCH_BASE + 0x69Cu;
 constexpr u32 AUDIO_LISTENER_SCRATCH = SCRATCH_BASE + 0x700u;
 constexpr u32 HMD_CAMERA_FACING_CAVE = SCRATCH_BASE + 0x720u;
 constexpr u32 HMD_CAMERA_FACING_SCRATCH = SCRATCH_BASE + 0x7C0u;
+constexpr u32 HMD_CAMERA_FACING_MATRIX = HMD_CAMERA_FACING_SCRATCH + 0x04u;
 constexpr u32 DPAD_DISABLE_OWNER_MAGIC = 0x50474450u;  // PGDP
 
 constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
@@ -208,6 +209,21 @@ constexpr u32 ENVFX_RENDER_CAMERA_CALL = 0x802102D8u;
 constexpr u32 ENVFX_RENDER_CAMERA_CALL_ORIGINAL = 0x4BDFA691u;
 constexpr u32 ENVFX_UPDATE_CAMERA_CALL = 0x8021210Cu;
 constexpr u32 ENVFX_UPDATE_CAMERA_CALL_ORIGINAL = 0x4BDF885Du;
+constexpr u32 HUD_BILLBOARD_CAMERA_CALL = 0x8012FD08u;
+constexpr u32 HUD_BILLBOARD_CAMERA_CALL_ORIGINAL = 0x4BEDAC61u;
+constexpr u32 CGRAPHICS_VIEW_MATRIX = 0x805A61D4u;
+constexpr u32 ELEMENT_GEN_RENDER_LINES_VIEW_LIS = 0x80318B58u;
+constexpr u32 ELEMENT_GEN_RENDER_LINES_VIEW_LIS_ORIGINAL = 0x3C80805Au;
+constexpr u32 ELEMENT_GEN_RENDER_LINES_VIEW_ADDI = 0x80318B60u;
+constexpr u32 ELEMENT_GEN_RENDER_LINES_VIEW_ADDI_ORIGINAL = 0x388461D4u;
+constexpr u32 ELEMENT_GEN_RENDER_INDIRECT_VIEW_LIS = 0x80319338u;
+constexpr u32 ELEMENT_GEN_RENDER_INDIRECT_VIEW_LIS_ORIGINAL = 0x3C80805Au;
+constexpr u32 ELEMENT_GEN_RENDER_INDIRECT_VIEW_ADDI = 0x80319340u;
+constexpr u32 ELEMENT_GEN_RENDER_INDIRECT_VIEW_ADDI_ORIGINAL = 0x388461D4u;
+constexpr u32 ELEMENT_GEN_RENDER_PARTICLES_VIEW_LIS = 0x8031A694u;
+constexpr u32 ELEMENT_GEN_RENDER_PARTICLES_VIEW_LIS_ORIGINAL = 0x3C60805Au;
+constexpr u32 ELEMENT_GEN_RENDER_PARTICLES_VIEW_ADDI = 0x8031A698u;
+constexpr u32 ELEMENT_GEN_RENDER_PARTICLES_VIEW_ADDI_ORIGINAL = 0x388361D4u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ADDRESS = 0x8000E71Cu;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ORIGINAL = 0x801E0304u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_SKIP_ADDRESS = 0x8000E9C4u;
@@ -502,6 +518,18 @@ struct GameFlowFlagPatch
   bool applied = false;
 };
 
+struct ViewMatrixSourcePatch
+{
+  u32 lis_address = 0;
+  u32 lis_original = 0;
+  u32 lis_register = 0;
+  u32 addi_address = 0;
+  u32 addi_original = 0;
+  u32 addi_dest_register = 0;
+  u32 addi_base_register = 0;
+  bool applied = false;
+};
+
 ConditionalPitchLoadPatch s_first_person_pitch_load_patch{
     0x8000E548u, 0xC3FE03ECu, FIRST_PERSON_PITCH_LOAD_CAVE, false};
 
@@ -545,6 +573,20 @@ DynamicPpcPatch s_hmd_camera_facing_patches[] = {
      false},
     {ENVFX_UPDATE_CAMERA_CALL, ENVFX_UPDATE_CAMERA_CALL_ORIGINAL, 0, HMD_CAMERA_FACING_CAVE,
      false},
+    {HUD_BILLBOARD_CAMERA_CALL, HUD_BILLBOARD_CAMERA_CALL_ORIGINAL, 0,
+     HMD_CAMERA_FACING_CAVE, false},
+};
+
+ViewMatrixSourcePatch s_hmd_particle_view_source_patches[] = {
+    {ELEMENT_GEN_RENDER_LINES_VIEW_LIS, ELEMENT_GEN_RENDER_LINES_VIEW_LIS_ORIGINAL, 4u,
+     ELEMENT_GEN_RENDER_LINES_VIEW_ADDI, ELEMENT_GEN_RENDER_LINES_VIEW_ADDI_ORIGINAL, 4u, 4u,
+     false},
+    {ELEMENT_GEN_RENDER_INDIRECT_VIEW_LIS, ELEMENT_GEN_RENDER_INDIRECT_VIEW_LIS_ORIGINAL, 4u,
+     ELEMENT_GEN_RENDER_INDIRECT_VIEW_ADDI, ELEMENT_GEN_RENDER_INDIRECT_VIEW_ADDI_ORIGINAL, 4u,
+     4u, false},
+    {ELEMENT_GEN_RENDER_PARTICLES_VIEW_LIS, ELEMENT_GEN_RENDER_PARTICLES_VIEW_LIS_ORIGINAL, 3u,
+     ELEMENT_GEN_RENDER_PARTICLES_VIEW_ADDI, ELEMENT_GEN_RENDER_PARTICLES_VIEW_ADDI_ORIGINAL, 4u,
+     3u, false},
 };
 
 ProjectileTransformPatch s_projectile_transform_patches[] = {
@@ -941,6 +983,7 @@ void InvalidatePrimedGunPatchICache(Core::System& system)
 {
   auto& jit = system.GetJitInterface();
   jit.InvalidateICache(0x80000000u, 0x00300000u, true);
+  jit.InvalidateICache(0x80310000u, 0x00030000u, true);
   jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
 }
 
@@ -983,6 +1026,17 @@ u32 PpcMr(u32 dest, u32 src)
 u32 PpcLwzR0(u32 base, u32 offset)
 {
   return 0x80000000u | ((base & 31u) << 16) | (offset & 0xffffu);
+}
+
+u32 PpcLis(u32 reg, u32 value)
+{
+  return 0x3C000000u | ((reg & 31u) << 21) | (value & 0xffffu);
+}
+
+u32 PpcAddi(u32 dest, u32 base, u32 value)
+{
+  return 0x38000000u | ((dest & 31u) << 21) | ((base & 31u) << 16) |
+         (value & 0xffffu);
 }
 
 void ClearCannonRuntimeScratch(const Core::CPUThreadGuard& guard)
@@ -1033,6 +1087,50 @@ bool WriteBasis9(const Core::CPUThreadGuard& guard, u32 address, const Matrix3x4
       ++index;
     }
   }
+  return true;
+}
+
+bool WriteTransform3x4(const Core::CPUThreadGuard& guard, u32 address, const Matrix3x4& mat)
+{
+  if (!MatrixNumbersLookValid(mat))
+    return false;
+
+  for (int row = 0; row < 3; ++row)
+  {
+    for (int col = 0; col < 4; ++col)
+    {
+      if (!TryWriteFloat(guard, address + static_cast<u32>((row * 4 + col) * 4),
+                         mat.At(row, col)))
+      {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool ReadTransform3x4(const Core::CPUThreadGuard& guard, u32 address, Matrix3x4* mat)
+{
+  if (mat == nullptr)
+    return false;
+
+  Matrix3x4 out{};
+  for (int row = 0; row < 3; ++row)
+  {
+    for (int col = 0; col < 4; ++col)
+    {
+      if (!TryReadFloat(guard, address + static_cast<u32>((row * 4 + col) * 4),
+                        &out.At(row, col)))
+      {
+        return false;
+      }
+    }
+  }
+
+  if (!MatrixNumbersLookValid(out))
+    return false;
+
+  *mat = out;
   return true;
 }
 
@@ -4104,8 +4202,16 @@ void UpdateAudioListenerScratchFromHmd(const Core::CPUThreadGuard& guard,
 
 void ClearHmdCameraFacingScratch(const Core::CPUThreadGuard& guard)
 {
-  for (u32 offset = 0; offset <= 0x2Cu; offset += 4u)
-    TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH + offset, 0);
+  Matrix3x4 fallback{};
+  if (!ReadTransform3x4(guard, CGRAPHICS_VIEW_MATRIX, &fallback))
+  {
+    fallback.At(0, 0) = 1.0f;
+    fallback.At(1, 1) = 1.0f;
+    fallback.At(2, 2) = 1.0f;
+  }
+
+  WriteTransform3x4(guard, HMD_CAMERA_FACING_MATRIX, fallback);
+  TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH, 0);
 }
 
 bool WriteHmdCameraFacingScratch(const Core::CPUThreadGuard& guard, Matrix3x4 hmd)
@@ -4113,7 +4219,11 @@ bool WriteHmdCameraFacingScratch(const Core::CPUThreadGuard& guard, Matrix3x4 hm
   if (!MatrixNumbersLookValid(hmd) || !RemoveRollFromAimBasis(&hmd))
     return false;
 
-  if (!WriteBasis9(guard, HMD_CAMERA_FACING_SCRATCH + 4u, hmd))
+  hmd.At(0, 3) = 0.0f;
+  hmd.At(1, 3) = 0.0f;
+  hmd.At(2, 3) = 0.0f;
+
+  if (!WriteTransform3x4(guard, HMD_CAMERA_FACING_MATRIX, hmd))
   {
     TryWriteU32(guard, HMD_CAMERA_FACING_SCRATCH, 0);
     return false;
@@ -6850,8 +6960,8 @@ bool ApplyHmdCameraFacingPatches(const Core::CPUThreadGuard& guard)
 mflr r0
 lis r12, Scratch@ha
 ori r12, r12, Scratch@l
-stw r0, 0x28(r12)
-stw r3, 0x2c(r12)
+stw r0, 0x34(r12)
+stw r3, 0x38(r12)
 .4byte 0x{:08x}
 
 lis r12, Scratch@ha
@@ -6860,7 +6970,7 @@ lwz r0, 0(r12)
 cmpwi r0, 0
 beq _restore_lr
 
-lwz r11, 0x2c(r12)
+lwz r11, 0x38(r12)
 lfs f0, 0x04(r12)
 stfs f0, 0x00(r11)
 lfs f0, 0x08(r12)
@@ -6868,22 +6978,22 @@ stfs f0, 0x04(r11)
 lfs f0, 0x0c(r12)
 stfs f0, 0x08(r11)
 
-lfs f0, 0x10(r12)
-stfs f0, 0x10(r11)
 lfs f0, 0x14(r12)
-stfs f0, 0x14(r11)
+stfs f0, 0x10(r11)
 lfs f0, 0x18(r12)
+stfs f0, 0x14(r11)
+lfs f0, 0x1c(r12)
 stfs f0, 0x18(r11)
 
-lfs f0, 0x1c(r12)
-stfs f0, 0x20(r11)
-lfs f0, 0x20(r12)
-stfs f0, 0x24(r11)
 lfs f0, 0x24(r12)
+stfs f0, 0x20(r11)
+lfs f0, 0x28(r12)
+stfs f0, 0x24(r11)
+lfs f0, 0x2c(r12)
 stfs f0, 0x28(r11)
 
 _restore_lr:
-lwz r0, 0x28(r12)
+lwz r0, 0x34(r12)
 mtlr r0
 blr
 )",
@@ -6970,6 +7080,51 @@ blr
     wrote = patched || wrote;
   }
 
+  return wrote;
+}
+
+bool ApplyViewMatrixSourcePatch(const Core::CPUThreadGuard& guard,
+                                ViewMatrixSourcePatch& patch)
+{
+  u32 current_lis = 0;
+  u32 current_addi = 0;
+  if (!TryReadU32(guard, patch.lis_address, &current_lis) ||
+      !TryReadU32(guard, patch.addi_address, &current_addi))
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  const u32 matrix_hi = (HMD_CAMERA_FACING_MATRIX >> 16) & 0xffffu;
+  const u32 matrix_lo = HMD_CAMERA_FACING_MATRIX & 0xffffu;
+  const u32 replacement_lis = PpcLis(patch.lis_register, matrix_hi);
+  const u32 replacement_addi =
+      PpcAddi(patch.addi_dest_register, patch.addi_base_register, matrix_lo);
+
+  if ((current_lis != patch.lis_original && current_lis != replacement_lis) ||
+      (current_addi != patch.addi_original && current_addi != replacement_addi))
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  bool wrote = false;
+  if (current_lis != replacement_lis)
+    wrote = TryWriteInstruction(guard, patch.lis_address, replacement_lis) || wrote;
+  if (current_addi != replacement_addi)
+    wrote = TryWriteInstruction(guard, patch.addi_address, replacement_addi) || wrote;
+
+  patch.applied = TryReadU32(guard, patch.lis_address, &current_lis) &&
+                  TryReadU32(guard, patch.addi_address, &current_addi) &&
+                  current_lis == replacement_lis && current_addi == replacement_addi;
+  return wrote;
+}
+
+bool ApplyHmdParticleViewSourcePatches(const Core::CPUThreadGuard& guard)
+{
+  bool wrote = false;
+  for (ViewMatrixSourcePatch& patch : s_hmd_particle_view_source_patches)
+    wrote = ApplyViewMatrixSourcePatch(guard, patch) || wrote;
   return wrote;
 }
 
@@ -7233,6 +7388,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, scan_active ? 1u : 0u);
   wrote = ApplyAudioListenerPatch(guard) || wrote;
   wrote = ApplyHmdCameraFacingPatches(guard) || wrote;
+  wrote = ApplyHmdParticleViewSourcePatches(guard) || wrote;
 
   UpdatePitchZeroHookEnabled(guard, scan_active);
 
@@ -7753,6 +7909,8 @@ void ResetNativeRuntime()
   s_vr_state_save_requested.store(false, std::memory_order_release);
   s_vr_state_load_newest_requested.store(false, std::memory_order_release);
   s_vr_state_save_oldest_requested.store(false, std::memory_order_release);
+  for (ViewMatrixSourcePatch& patch : s_hmd_particle_view_source_patches)
+    patch.applied = false;
   s_vr_state_slot_select_requested.store(0, std::memory_order_release);
   s_vr_state_slot_from_ui.store(0, std::memory_order_release);
   s_vr_state_slot = 1;
