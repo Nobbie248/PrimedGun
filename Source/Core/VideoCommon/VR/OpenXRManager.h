@@ -297,7 +297,6 @@ private:
   std::thread m_frame_thread;
   std::atomic<bool> m_frame_thread_running{false};
   std::atomic<bool> m_frame_thread_should_exit{false};
-  bool m_frame_thread_eager_heartbeat = false;
   std::mutex m_publish_mutex;
   std::condition_variable m_publish_cv;
   PublishedXRFrame m_published_frame;

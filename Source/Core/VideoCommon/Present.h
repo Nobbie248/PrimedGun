@@ -101,6 +101,10 @@ public:
   const MathUtil::Rectangle<int>& GetTargetRectangle() const { return m_target_rectangle; }
 
 private:
+#ifdef ENABLE_VR
+  bool StartOpenXRFrameNow(bool do_locate_views = true);
+  void PrepareNextOpenXRFrame();
+#endif
   void BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_texture,
                                      const MathUtil::Rectangle<int>& source_rect);
 
@@ -189,10 +193,9 @@ private:
   std::atomic_bool m_immediate_swap_happened_this_field{};
 
 #ifdef ENABLE_VR
-  // When true, WaitFrame+BeginFrame+LocateViews have already been called for the
-  // current frame (at the end of the previous Present() call).  The next Present()
-  // skips the "start" block and goes straight to rendering + EndFrame.
-  bool m_vr_frame_begun = false;
+  // The legacy inline path pre-begins its next XR frame at the end of Present().
+  // Detached pacing owns the XR frame protocol on its worker thread instead.
+  bool m_openxr_frame_prepared = false;
 #endif
 };
 

@@ -893,6 +893,61 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
   }
 }
 
+#ifdef ENABLE_VR
+bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
+{
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !VR::g_openxr)
+    return false;
+
+  if (!VR::g_openxr->PollEvents() || !VR::g_openxr->IsSessionRunning())
+    return false;
+
+  if (!VR::g_openxr->WaitFrame() || !VR::g_openxr->BeginFrame())
+    return false;
+
+  if (do_locate_views && VR::g_openxr->ShouldRender())
+  {
+    if (!VR::g_openxr->LocateViews())
+      return false;
+
+    auto& geometry_shader_manager = Core::System::GetInstance().GetGeometryShaderManager();
+    geometry_shader_manager.SetProjectionChanged();
+    if (!g_ActiveConfig.VRLockHeadPoseEffective())
+      geometry_shader_manager.InvalidateVRHeadPose();
+  }
+
+  return true;
+}
+
+void Presenter::PrepareNextOpenXRFrame()
+{
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !VR::g_openxr)
+  {
+    m_openxr_frame_prepared = false;
+    return;
+  }
+
+  if (VR::g_openxr->IsFrameThreadActive())
+  {
+    // The pacing thread owns the OpenXR frame protocol. Refresh the pose here so
+    // the next game frame, rather than the frame just presented, uses it.
+    if (VR::g_openxr->IsSessionRunning() && VR::g_openxr->ShouldRender() &&
+        VR::g_openxr->LocateViews())
+    {
+      auto& geometry_shader_manager = Core::System::GetInstance().GetGeometryShaderManager();
+      geometry_shader_manager.SetProjectionChanged();
+      if (!g_ActiveConfig.VRLockHeadPoseEffective())
+        geometry_shader_manager.InvalidateVRHeadPose();
+    }
+    m_openxr_frame_prepared = false;
+  }
+  else
+  {
+    m_openxr_frame_prepared = StartOpenXRFrameNow();
+  }
+}
+#endif
+
 void Presenter::BlitCurrentSourceToOpenXREyes(
     const AbstractTexture* source_texture, const MathUtil::Rectangle<int>& source_rect)
 {
@@ -992,51 +1047,17 @@ void Presenter::Present(PresentInfo* present_info)
   //   [game renders frame N+1 — ~33ms]
   //   Present(N+1): EndFrame(N+1) → WaitFrame(N+2) → BeginFrame(N+2) → ...
   //
-  // First frame: m_vr_frame_begun is false, so we do WaitFrame+BeginFrame here.
+  // The first legacy frame is started here if no frame was prepared previously.
   const bool vr_pacing_active =
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
       VR::g_openxr->IsFrameThreadActive();
-  bool vr_frame_started = vr_pacing_active ? VR::g_openxr->IsSessionRunning() :
-                                             m_vr_frame_begun;
-  if (vr_pacing_active)
-    m_vr_frame_begun = false;
-  if (vr_pacing_active && vr_frame_started && VR::g_openxr->ShouldRender())
+  bool vr_frame_started =
+      vr_pacing_active ? VR::g_openxr->IsSessionRunning() : m_openxr_frame_prepared;
+  if (!vr_pacing_active && !vr_frame_started &&
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
   {
-    VR::g_openxr->LocateViews();
-    if (VR::g_openxr->AreEyeViewsValid())
-      Core::System::GetInstance().GetGeometryShaderManager().SetProjectionChanged();
-  }
-  else if (!vr_pacing_active && !vr_frame_started &&
-           g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
-  {
-    // First frame or after a session restart — start the frame here.
-    if (VR::g_openxr->PollEvents() && VR::g_openxr->IsSessionRunning())
-    {
-      if (VR::g_openxr->WaitFrame() && VR::g_openxr->BeginFrame())
-      {
-        vr_frame_started = true;
-        if (VR::g_openxr->ShouldRender())
-        {
-          VR::g_openxr->LocateViews();
-          if (VR::g_openxr->AreEyeViewsValid())
-            Core::System::GetInstance().GetGeometryShaderManager().SetProjectionChanged();
-        }
-      }
-    }
-  }
-  // Throttled diagnostic: log VR state every 300 frames so you can confirm the path is active.
-  {
-    static u32 s_vr_log_count = 0;
-    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && (++s_vr_log_count % 300 == 1))
-    {
-      INFO_LOG_FMT(OPENXR,
-                   "VR frame {}: g_openxr={} session_running={} swapchain={} frame_started={} "
-                   "async_pacing={}",
-                   s_vr_log_count, VR::g_openxr != nullptr,
-                   VR::g_openxr && VR::g_openxr->IsSessionRunning(),
-                   VR::g_openxr && VR::g_openxr->GetSwapchain() != nullptr, vr_frame_started,
-                   vr_pacing_active);
-    }
+    vr_frame_started = StartOpenXRFrameNow();
+    m_openxr_frame_prepared = vr_frame_started;
   }
   const bool vr_skip_duplicate_publish =
       vr_frame_started && present_info != nullptr &&
@@ -1069,7 +1090,14 @@ void Presenter::Present(PresentInfo* present_info)
   {
     std::lock_guard<std::mutex> guard(m_swap_mutex);
 
-    if (present_info != nullptr)
+#ifdef ENABLE_VR
+    const bool openxr_session_active =
+        g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+        VR::g_openxr->IsSessionRunning();
+#else
+    constexpr bool openxr_session_active = false;
+#endif
+    if (present_info != nullptr && !openxr_session_active)
     {
       const auto present_time = GetUpdatedPresentationTime(present_info->intended_present_time);
 
@@ -1088,7 +1116,8 @@ void Presenter::Present(PresentInfo* present_info)
   // xrEndFrame must be called if (and only if) WaitFrame+BeginFrame succeeded.
   if (vr_frame_started && !vr_skip_duplicate_publish)
   {
-    VR::OpenXRManager::ScopedVideoFrameHandoff handoff(VR::g_openxr.get());
+    VR::OpenXRManager::ScopedVideoFrameHandoff handoff(
+        vr_pacing_active ? VR::g_openxr.get() : nullptr);
     if (vr_pacing_active)
     {
       BlitCurrentSourceToOpenXREyes(m_xfb_entry ? m_xfb_entry->texture.get() : nullptr,
@@ -1100,37 +1129,10 @@ void Presenter::Present(PresentInfo* present_info)
       VR::g_openxr->EndFrame({});  // No swapchain yet — submit empty frame
   }
 
-  // --- Immediately prepare the NEXT VR frame ---
-  // By calling WaitFrame+BeginFrame+LocateViews here, the entire game render time
-  // (until the next Present()) falls between BeginFrame and EndFrame.  SteamVR will
-  // see the real frame duration (~11-33ms) instead of just the blit time (~1ms),
-  // which gives the compositor accurate timing for ATW/ASW reprojection.
-  m_vr_frame_begun = false;
-  if (!vr_pacing_active && g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-      VR::g_openxr)
-  {
-    if (VR::g_openxr->PollEvents() && VR::g_openxr->IsSessionRunning())
-    {
-      if (VR::g_openxr->WaitFrame() && VR::g_openxr->BeginFrame())
-      {
-        m_vr_frame_begun = true;
-        if (VR::g_openxr->ShouldRender())
-        {
-          VR::g_openxr->LocateViews();
-          if (VR::g_openxr->AreEyeViewsValid())
-            Core::System::GetInstance().GetGeometryShaderManager().SetProjectionChanged();
-        }
-      }
-    }
-
-    // Preserve the original inline OpenXR EFB lifetime for backends without the
-    // detached pacing thread (notably Vulkan and D3D11).
-    if (!g_ActiveConfig.vr_dont_clear_screen && g_framebuffer_manager)
-    {
-      g_gfx->SetAndClearFramebuffer(g_framebuffer_manager->GetEFBFramebuffer(),
-                                    {0.f, 0.f, 0.f, 0.f}, 0.f);
-    }
-  }
+  // The current inline frame has now been consumed. Detached pacing publishes
+  // content without marking an inline frame as prepared.
+  if (vr_frame_started)
+    m_openxr_frame_prepared = false;
 #endif
 
   if (m_xfb_entry)
@@ -1144,6 +1146,23 @@ void Presenter::Present(PresentInfo* present_info)
     m_onscreen_ui->BeginImGuiFrame(m_backbuffer_width, m_backbuffer_height);
 
   g_gfx->EndUtilityDrawing();
+
+#ifdef ENABLE_VR
+  // Prepare timing and pose state before the game begins drawing its next
+  // frame. Detached pacing only locates views here; legacy backends also
+  // begin their next XR frame inline.
+  PrepareNextOpenXRFrame();
+
+  // Keep the known-good Vulkan/D3D11 EFB lifetime. Detached D3D12 queues its
+  // clear at the FIFO-ordered XFB boundary instead.
+  if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+      !VR::g_openxr->IsFrameThreadActive() && !g_ActiveConfig.vr_dont_clear_screen &&
+      g_framebuffer_manager)
+  {
+    g_gfx->SetAndClearFramebuffer(g_framebuffer_manager->GetEFBFramebuffer(),
+                                  {0.f, 0.f, 0.f, 0.f}, 0.f);
+  }
+#endif
 }
 
 TimePoint Presenter::GetUpdatedPresentationTime(TimePoint intended_presentation_time)

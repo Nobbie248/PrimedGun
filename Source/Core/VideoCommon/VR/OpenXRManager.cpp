@@ -334,7 +334,6 @@ void OpenXRManager::StartFrameThread()
   if (m_frame_thread.joinable())
     return;
 
-  m_frame_thread_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);
   m_frame_thread_should_exit.store(false, std::memory_order_release);
   m_frame_thread_running.store(true, std::memory_order_release);
   m_frame_thread = std::thread(&OpenXRManager::FrameThreadLoop, this);
@@ -347,7 +346,10 @@ void OpenXRManager::StopFrameThread()
     return;
 
   m_frame_thread_should_exit.store(true, std::memory_order_release);
-  m_publish_cv.notify_all();
+  {
+    std::lock_guard<std::mutex> lock(m_publish_mutex);
+    m_publish_cv.notify_all();
+  }
   m_frame_thread.join();
   m_frame_thread_running.store(false, std::memory_order_release);
 
@@ -448,7 +450,7 @@ void OpenXRManager::FrameThreadLoop()
 
   while (!m_frame_thread_should_exit.load(std::memory_order_acquire))
   {
-    const bool eager_heartbeat = m_frame_thread_eager_heartbeat;
+    const bool eager_heartbeat = g_ActiveConfig.vr_eager_heartbeat;
     const uint64_t cycle_start_us = Common::Timer::NowUs();
 
     if (!PollEvents())
@@ -476,18 +478,20 @@ void OpenXRManager::FrameThreadLoop()
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
       continue;
     }
+    const uint64_t wait_frame_return_us = Common::Timer::NowUs();
     if (!BeginFrame())
       continue;
 
     const bool should_render = m_should_render_snapshot.load(std::memory_order_acquire);
     const int64_t period_ns =
         m_predicted_display_period_snapshot.load(std::memory_order_acquire);
-    bool fresh_frame = false;
-
+    const uint64_t content_wait_start_us = Common::Timer::NowUs();
     if (should_render)
     {
-      int64_t budget_ns =
-          period_ns - static_cast<int64_t>(end_frame_cost_us * 1000.0) - 1'000'000;
+      const int64_t since_wait_ns =
+          static_cast<int64_t>(content_wait_start_us - wait_frame_return_us) * 1000;
+      int64_t budget_ns = period_ns - since_wait_ns -
+                          static_cast<int64_t>(end_frame_cost_us * 1000.0) - 1'000'000;
       budget_ns = std::clamp<int64_t>(budget_ns, 0, period_ns);
       if (static_cast<int64_t>(previous_cycle_us) * 1000 >
           period_ns + period_ns / 4)
@@ -510,7 +514,6 @@ void OpenXRManager::FrameThreadLoop()
         last_frame = m_published_frame;
         consumed_serial = m_publish_serial;
         have_frame = true;
-        fresh_frame = true;
       }
     }
 
@@ -521,7 +524,6 @@ void OpenXRManager::FrameThreadLoop()
       std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
 
-    if (!fresh_frame)
     {
       std::lock_guard<std::mutex> lock(m_publish_mutex);
       if (m_publish_serial != consumed_serial)
@@ -1337,8 +1339,22 @@ bool OpenXRManager::WaitFrame()
 
 bool OpenXRManager::BeginFrame()
 {
+  if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("before xrBeginFrame"))
+    return false;
+
   XrFrameBeginInfo begin_info{XR_TYPE_FRAME_BEGIN_INFO};
-  XR_CHECK(xrBeginFrame(m_session, &begin_info));
+  std::unique_lock<std::mutex> queue_lock;
+  if (m_swapchain)
+    queue_lock = m_swapchain->AcquireGraphicsQueueLock();
+
+  const XrResult result = xrBeginFrame(m_session, &begin_info);
+  if (XR_FAILED(result))
+  {
+    char buffer[XR_MAX_RESULT_STRING_SIZE]{};
+    xrResultToString(m_instance, result, buffer);
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrBeginFrame failed: {}", buffer);
+    return false;
+  }
   return true;
 }
 
