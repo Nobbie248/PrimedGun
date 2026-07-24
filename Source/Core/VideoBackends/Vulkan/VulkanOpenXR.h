@@ -157,6 +157,7 @@ public:
 
   // Build the XrCompositionLayerProjection and call xrEndFrame.
   bool SubmitFrame() override;
+  bool SupportsDetachedFrameLoop() const override { return false; }
 
   uint32_t GetEyeWidth() const override
   {

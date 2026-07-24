@@ -128,7 +128,8 @@ std::unique_ptr<DXTexture> DXTexture::Create(const TextureConfig& config, std::s
   return tex;
 }
 
-std::unique_ptr<DXTexture> DXTexture::CreateAdopted(ID3D12Resource* resource)
+std::unique_ptr<DXTexture> DXTexture::CreateAdopted(ID3D12Resource* resource,
+                                                    D3D12_RESOURCE_STATES state)
 {
   const D3D12_RESOURCE_DESC desc = resource->GetDesc();
   const AbstractTextureFormat format = D3DCommon::GetAbstractFormatForDXGIFormat(desc.Format);
@@ -150,8 +151,7 @@ std::unique_ptr<DXTexture> DXTexture::CreateAdopted(ID3D12Resource* resource)
   if (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
     config.flags |= AbstractTextureFlag_ComputeImage;
 
-  auto tex =
-      std::unique_ptr<DXTexture>(new DXTexture(config, resource, D3D12_RESOURCE_STATE_COMMON, ""));
+  auto tex = std::unique_ptr<DXTexture>(new DXTexture(config, resource, state, ""));
   if (!tex->CreateSRVDescriptor())
     return nullptr;
 

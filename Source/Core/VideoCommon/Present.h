@@ -101,6 +101,9 @@ public:
   const MathUtil::Rectangle<int>& GetTargetRectangle() const { return m_target_rectangle; }
 
 private:
+  void BlitCurrentSourceToOpenXREyes(const AbstractTexture* source_texture,
+                                     const MathUtil::Rectangle<int>& source_rect);
+
   // Fetches the XFB texture from the texture cache.
   // Returns true the contents have changed since last time
   bool FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height, u64 ticks);

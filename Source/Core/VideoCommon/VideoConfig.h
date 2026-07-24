@@ -368,6 +368,8 @@ struct VideoConfig final
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;
   int vr_opcode_replay_target_refresh_rate = -1;
   bool vr_use_openxr_play_space_center = false;
+  bool vr_use_xr_pacing_thread = true;
+  bool vr_eager_heartbeat = false;
   bool vr_auto_layer_spread = true;
   bool vr_remove_bars = true;       // Expand scissor/viewport to remove cinematic letterbox bars
   bool vr_ortho_scissor_fix = true;  // Expand scissor for orthographic VR draws
@@ -428,7 +430,13 @@ struct VideoConfig final
     if (!g_backend_info.bSupportsVSLinePointExpand)
       return false;
 #ifdef ENABLE_VR
-    if (stereo_mode == StereoMode::OpenXR && vr_use_vulkan_multiview)
+    // VK_KHR_multiview drops the GS stage entirely, so points/lines must be VS-expanded.
+    // Must match ShaderHostConfig's vk_multiview bit exactly: on backends without multiview
+    // (D3D11/D3D12), OpenXR stereo still renders through the stereo GS, and forcing VS expand
+    // here desyncs the D3D12 GX root signature, which binds either the VS-expand CBV or the
+    // GS CBV; every GS-bearing PSO then fails to build (E_INVALIDARG) and nothing draws.
+    if (stereo_mode == StereoMode::OpenXR && vr_use_vulkan_multiview &&
+        g_backend_info.bSupportsMultiview && iMultisamples == 1)
       return true;
 #endif
     if (!g_backend_info.bSupportsGeometryShaders)
@@ -445,6 +453,13 @@ struct VideoConfig final
     return g_backend_info.bSupportsGPUTextureDecoding && bEnableGPUTextureDecoding;
   }
   bool UseVertexRounding() const { return bVertexRounding && iEFBScale != 1; }
+  // Detached D3D presentation can overlap the next frame's draw stream. Keep one
+  // pose for all draws in that frame without changing Vulkan's established behavior.
+  bool VRLockHeadPoseEffective() const
+  {
+    return vr_lock_head_pose ||
+           (g_backend_info.api_type == APIType::D3D && !bImmediateXFB);
+  }
   bool ManualTextureSamplingWithCustomTextureSizes() const
   {
     // If manual texture sampling is disabled, we don't need to do anything.

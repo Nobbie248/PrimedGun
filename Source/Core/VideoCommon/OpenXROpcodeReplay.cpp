@@ -12,6 +12,9 @@
 #include "Common/Logging/Log.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VideoConfig.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/OpenXRManager.h"
+#endif
 
 namespace VideoCommon::OpenXROpcodeReplay
 {
@@ -115,8 +118,16 @@ int GetConfiguredTargetRefreshRateUnlocked(double display_period_ms)
 
 bool IsConfiguredUnlocked()
 {
-  return g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-         GetConfiguredInputRefreshRateUnlocked() > 0;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
+      GetConfiguredInputRefreshRateUnlocked() <= 0)
+  {
+    return false;
+  }
+#ifdef ENABLE_VR
+  return !VR::g_openxr || !VR::g_openxr->IsFrameThreadActive();
+#else
+  return true;
+#endif
 }
 
 void ClearUnlocked(ReplayState& state)

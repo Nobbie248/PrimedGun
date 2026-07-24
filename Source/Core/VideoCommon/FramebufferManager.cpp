@@ -86,8 +86,26 @@ bool FramebufferManager::Initialize(int efb_scale)
 
   m_end_of_frame_event =
       GetVideoEvents().after_frame_event.Register([this](Core::System&) { EndOfFrame(); });
+  m_before_frame_event =
+      GetVideoEvents().before_frame_event.Register([this] { FlushPendingVRClearEFB(); });
 
   return true;
+}
+
+void FramebufferManager::FlushPendingVRClearEFB()
+{
+  if (!m_vr_efb_clear_pending)
+    return;
+
+  m_vr_efb_clear_pending = false;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR ||
+      g_ActiveConfig.vr_dont_clear_screen)
+  {
+    return;
+  }
+
+  g_gfx->SetAndClearFramebuffer(m_efb_framebuffer.get(), {0.f, 0.f, 0.f, 0.f}, 0.f);
+  BindEFBFramebuffer();
 }
 
 void FramebufferManager::RecreateEFBFramebuffer(int efb_scale)

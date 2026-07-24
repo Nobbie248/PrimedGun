@@ -26,7 +26,7 @@ constexpr Common::EnumMap<const char*, PrimitiveType::TriangleStrip> primitives_
 
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_in_map{1u, 2u, 3u, 3u};
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_out_map{4u, 4u, 4u, 3u};
-constexpr u32 GEOMETRY_SHADER_CODE_VERSION = 40;
+constexpr u32 GEOMETRY_SHADER_CODE_VERSION = 41;
 
 bool geometry_shader_uid_data::IsPassthrough() const
 {
@@ -146,12 +146,7 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
     out.Write("\tVS_OUTPUT o;\n");
 
     if (stereo)
-    {
-      const u32 eye_layer_location =
-          GetVREyeLayerLocation(api_type, uid_data->numTexGens, host_config);
       out.Write("\tuint layer : SV_RenderTargetArrayIndex;\n");
-      out.Write("\tuint eye_layer : TEXCOORD{};\n", eye_layer_location);
-    }
     out.Write("\tfloat4 posout : SV_Position;\n");
 
     out.Write("}};\n");
@@ -600,11 +595,9 @@ static void EmitVertex(ShaderCode& out, const ShaderHostConfig& host_config,
     if (api_type == APIType::OpenGL || api_type == APIType::Vulkan)
       out.Write("\tgl_Layer = eye;\n");
     else
-    {
       out.Write("\tps.layer = eye;\n");
-      out.Write("\tps.eye_layer = eye;\n");
-    }
-    if (!host_config.backend_gl_layer_in_fs)
+    if ((api_type == APIType::OpenGL || api_type == APIType::Vulkan) &&
+        !host_config.backend_gl_layer_in_fs)
       out.Write("\tvr_eye_layer = eye;\n");
   }
 

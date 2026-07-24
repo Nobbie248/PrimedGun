@@ -13,10 +13,14 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "Common/Logging/Log.h"
 #include "Common/Matrix.h"
+#include "Common/Thread.h"
+#include "Common/Timer.h"
 #include "Common/VR/OpenXRInputState.h"
+#include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace VR
@@ -88,6 +92,7 @@ OpenXRManager::OpenXRManager() = default;
 
 OpenXRManager::~OpenXRManager()
 {
+  StopFrameThread();
   DestroyInputActions();
   ResetInputActionsState();
 
@@ -294,6 +299,283 @@ void OpenXRManager::SetSession(XrSession session)
     WARN_LOG_FMT(OPENXR, "OpenXR: Controller input actions unavailable.");
     ResetInputActionsState();
   }
+}
+
+void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
+{
+  if (swapchain == nullptr)
+  {
+    StopFrameThread();
+    m_swapchain = nullptr;
+    m_xfb_pose_stamps = {};
+    m_xfb_pose_stamp_next = 0;
+    m_xfb_pose_stamp_serial = 0;
+    m_present_eye_views_valid = false;
+    return;
+  }
+
+  m_swapchain = swapchain;
+  if (!swapchain->SupportsDetachedFrameLoop())
+  {
+    INFO_LOG_FMT(OPENXR, "OpenXR: backend requires the inline frame flow.");
+  }
+  else if (Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD))
+  {
+    StartFrameThread();
+  }
+  else
+  {
+    INFO_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing disabled; using inline frame flow.");
+  }
+}
+
+void OpenXRManager::StartFrameThread()
+{
+  if (m_frame_thread.joinable())
+    return;
+
+  m_frame_thread_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);
+  m_frame_thread_should_exit.store(false, std::memory_order_release);
+  m_frame_thread_running.store(true, std::memory_order_release);
+  m_frame_thread = std::thread(&OpenXRManager::FrameThreadLoop, this);
+  INFO_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing thread started.");
+}
+
+void OpenXRManager::StopFrameThread()
+{
+  if (!m_frame_thread.joinable())
+    return;
+
+  m_frame_thread_should_exit.store(true, std::memory_order_release);
+  m_publish_cv.notify_all();
+  m_frame_thread.join();
+  m_frame_thread_running.store(false, std::memory_order_release);
+
+  std::lock_guard<std::mutex> lock(m_publish_mutex);
+  m_published_frame.layers.clear();
+  m_publish_serial = 0;
+  INFO_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing thread stopped.");
+}
+
+void OpenXRManager::PublishFrame(
+    const std::array<XrCompositionLayerProjectionView, 2>& views,
+    XrCompositionLayerFlags layer_flags)
+{
+  XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+  projection.layerFlags = layer_flags;
+  projection.space = m_reference_space;
+  projection.viewCount = static_cast<uint32_t>(views.size());
+  projection.views = views.data();
+  std::vector<XrCompositionLayerBaseHeader*> layers = {
+      reinterpret_cast<XrCompositionLayerBaseHeader*>(&projection)};
+  PublishLayers(layers);
+}
+
+void OpenXRManager::PublishLayers(
+    const std::vector<XrCompositionLayerBaseHeader*>& layers)
+{
+  PublishedXRFrame frame;
+  frame.layers.reserve(layers.size());
+
+  for (const XrCompositionLayerBaseHeader* header : layers)
+  {
+    if (header == nullptr)
+      continue;
+
+    PublishedXRLayer layer;
+    if (header->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION)
+    {
+      const auto* projection =
+          reinterpret_cast<const XrCompositionLayerProjection*>(header);
+      if (projection->views == nullptr || projection->viewCount < 2)
+        continue;
+
+      const auto valid_orientation = [](const XrQuaternionf& q) {
+        return q.x != 0.0f || q.y != 0.0f || q.z != 0.0f || q.w != 0.0f;
+      };
+      if (!valid_orientation(projection->views[0].pose.orientation) ||
+          !valid_orientation(projection->views[1].pose.orientation))
+      {
+        continue;
+      }
+
+      layer.kind = PublishedXRLayer::Kind::Projection;
+      layer.layer_flags = projection->layerFlags;
+      layer.space = projection->space;
+      std::copy_n(projection->views, layer.projection_views.size(),
+                  layer.projection_views.begin());
+    }
+    else if (header->type == XR_TYPE_COMPOSITION_LAYER_QUAD)
+    {
+      layer.kind = PublishedXRLayer::Kind::Quad;
+      layer.quad = *reinterpret_cast<const XrCompositionLayerQuad*>(header);
+    }
+    else
+    {
+      static std::atomic<bool> s_logged_unsupported_layer{false};
+      if (!s_logged_unsupported_layer.exchange(true, std::memory_order_relaxed))
+      {
+        WARN_LOG_FMT(OPENXR,
+                     "OpenXR: asynchronous pacing ignored unsupported layer type {}.",
+                     static_cast<int>(header->type));
+      }
+      continue;
+    }
+
+    frame.layers.emplace_back(std::move(layer));
+  }
+
+  if (frame.layers.empty())
+    return;
+
+  {
+    std::lock_guard<std::mutex> lock(m_publish_mutex);
+    m_published_frame = std::move(frame);
+    ++m_publish_serial;
+  }
+  m_publish_cv.notify_all();
+}
+
+void OpenXRManager::FrameThreadLoop()
+{
+  Common::SetCurrentThreadName("OpenXR Pacing");
+
+  PublishedXRFrame last_frame;
+  bool have_frame = false;
+  uint64_t consumed_serial = 0;
+  double end_frame_cost_us = 500.0;
+  uint64_t previous_cycle_us = 0;
+
+  while (!m_frame_thread_should_exit.load(std::memory_order_acquire))
+  {
+    const bool eager_heartbeat = m_frame_thread_eager_heartbeat;
+    const uint64_t cycle_start_us = Common::Timer::NowUs();
+
+    if (!PollEvents())
+      break;
+
+    if (!m_session_running.load(std::memory_order_acquire))
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      continue;
+    }
+
+    if (!eager_heartbeat)
+    {
+      std::unique_lock<std::mutex> lock(m_publish_mutex);
+      m_publish_cv.wait_for(lock, std::chrono::milliseconds(150), [&] {
+        return m_publish_serial != consumed_serial ||
+               m_frame_thread_should_exit.load(std::memory_order_acquire);
+      });
+      if (m_frame_thread_should_exit.load(std::memory_order_acquire))
+        break;
+    }
+
+    if (!WaitFrame())
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      continue;
+    }
+    if (!BeginFrame())
+      continue;
+
+    const bool should_render = m_should_render_snapshot.load(std::memory_order_acquire);
+    const int64_t period_ns =
+        m_predicted_display_period_snapshot.load(std::memory_order_acquire);
+    bool fresh_frame = false;
+
+    if (should_render)
+    {
+      int64_t budget_ns =
+          period_ns - static_cast<int64_t>(end_frame_cost_us * 1000.0) - 1'000'000;
+      budget_ns = std::clamp<int64_t>(budget_ns, 0, period_ns);
+      if (static_cast<int64_t>(previous_cycle_us) * 1000 >
+          period_ns + period_ns / 4)
+      {
+        budget_ns = 0;
+      }
+      if (!eager_heartbeat)
+        budget_ns = 0;
+
+      std::unique_lock<std::mutex> lock(m_publish_mutex);
+      if (budget_ns > 0 && m_publish_serial == consumed_serial)
+      {
+        m_publish_cv.wait_for(lock, std::chrono::nanoseconds(budget_ns), [&] {
+          return m_publish_serial != consumed_serial ||
+                 m_frame_thread_should_exit.load(std::memory_order_acquire);
+        });
+      }
+      if (m_publish_serial != consumed_serial)
+      {
+        last_frame = m_published_frame;
+        consumed_serial = m_publish_serial;
+        have_frame = true;
+        fresh_frame = true;
+      }
+    }
+
+    for (int spins = 0;
+         m_video_handoff_active.load(std::memory_order_acquire) > 0 && spins < 40;
+         ++spins)
+    {
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+
+    if (!fresh_frame)
+    {
+      std::lock_guard<std::mutex> lock(m_publish_mutex);
+      if (m_publish_serial != consumed_serial)
+      {
+        last_frame = m_published_frame;
+        consumed_serial = m_publish_serial;
+        have_frame = true;
+      }
+    }
+
+    std::vector<XrCompositionLayerProjection> projections;
+    std::vector<XrCompositionLayerQuad> quads;
+    std::vector<XrCompositionLayerBaseHeader*> submitted_layers;
+    projections.reserve(last_frame.layers.size());
+    quads.reserve(last_frame.layers.size());
+    submitted_layers.reserve(last_frame.layers.size());
+
+    const bool submit_content = should_render && have_frame;
+    if (submit_content)
+    {
+      for (PublishedXRLayer& published_layer : last_frame.layers)
+      {
+        if (published_layer.kind == PublishedXRLayer::Kind::Projection)
+        {
+          XrCompositionLayerProjection projection{
+              XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+          projection.layerFlags = published_layer.layer_flags;
+          projection.space = published_layer.space;
+          projection.viewCount =
+              static_cast<uint32_t>(published_layer.projection_views.size());
+          projection.views = published_layer.projection_views.data();
+          projections.emplace_back(projection);
+          submitted_layers.push_back(
+              reinterpret_cast<XrCompositionLayerBaseHeader*>(&projections.back()));
+        }
+        else
+        {
+          quads.emplace_back(published_layer.quad);
+          submitted_layers.push_back(
+              reinterpret_cast<XrCompositionLayerBaseHeader*>(&quads.back()));
+        }
+      }
+    }
+
+    const uint64_t end_start_us = Common::Timer::NowUs();
+    EndFrameDetached(m_frame_state.predictedDisplayTime, GetActiveBlendMode(),
+                     submit_content, submitted_layers);
+    const uint64_t end_us = Common::Timer::NowUs() - end_start_us;
+    end_frame_cost_us = end_frame_cost_us * 0.8 + static_cast<double>(end_us) * 0.2;
+    previous_cycle_us = Common::Timer::NowUs() - cycle_start_us;
+  }
+
+  m_frame_thread_running.store(false, std::memory_order_release);
+  INFO_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing thread exiting.");
 }
 
 bool OpenXRManager::InitializeInputActions()
@@ -1037,6 +1319,18 @@ bool OpenXRManager::WaitFrame()
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
   m_frame_state = {XR_TYPE_FRAME_STATE};
   XR_CHECK(xrWaitFrame(m_session, &wait_info, &m_frame_state));
+  m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
+                                          std::memory_order_release);
+  m_predicted_display_period_snapshot.store(m_frame_state.predictedDisplayPeriod,
+                                            std::memory_order_release);
+  m_should_render_snapshot.store(m_frame_state.shouldRender == XR_TRUE,
+                                 std::memory_order_release);
+  if (m_frame_state.predictedDisplayPeriod > 0)
+  {
+    m_native_display_period_ms.store(
+        static_cast<double>(m_frame_state.predictedDisplayPeriod) / 1'000'000.0,
+        std::memory_order_release);
+  }
   UpdateInputActions();
   return true;
 }
@@ -1066,6 +1360,16 @@ bool OpenXRManager::EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& l
   return true;
 }
 
+XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
+{
+  if (GetActiveBlendMode() == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+  {
+    return XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+           XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+  }
+  return 0;
+}
+
 bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                      XrEnvironmentBlendMode environment_blend_mode,
                                      bool should_render,
@@ -1081,15 +1385,27 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
     end_info.layers = layers.data();
   }
 
+  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                  std::unique_lock<std::mutex>{};
   XR_CHECK(xrEndFrame(m_session, &end_info));
   return true;
 }
 
 bool OpenXRManager::LocateViews()
 {
+  const XrTime snapshot_time =
+      m_predicted_display_time_snapshot.load(std::memory_order_acquire);
+  if (snapshot_time == 0)
+    return false;
+
+  const XrTime display_time =
+      IsFrameThreadActive() ?
+          snapshot_time +
+              m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
+          snapshot_time;
   XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
   locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-  locate_info.displayTime = m_frame_state.predictedDisplayTime;
+  locate_info.displayTime = display_time;
   locate_info.space = m_reference_space;
 
   XrViewState view_state{XR_TYPE_VIEW_STATE};
@@ -1162,6 +1478,55 @@ void OpenXRManager::RecordRenderedEyeViews()
 {
   m_submitted_eye_views = m_eye_views;
   m_submitted_eye_views_valid = m_eye_views_valid;
+}
+
+void OpenXRManager::StampXFBPose(uint32_t xfb_addr)
+{
+  if (!m_submitted_eye_views_valid)
+    return;
+
+  XFBPoseStamp* slot = nullptr;
+  for (auto& stamp : m_xfb_pose_stamps)
+  {
+    if (stamp.serial != 0 && stamp.xfb_addr == xfb_addr)
+    {
+      slot = &stamp;
+      break;
+    }
+  }
+
+  if (!slot)
+  {
+    slot = &m_xfb_pose_stamps[m_xfb_pose_stamp_next];
+    m_xfb_pose_stamp_next = (m_xfb_pose_stamp_next + 1) % m_xfb_pose_stamps.size();
+  }
+
+  slot->xfb_addr = xfb_addr;
+  slot->serial = ++m_xfb_pose_stamp_serial;
+  slot->views = m_submitted_eye_views;
+}
+
+void OpenXRManager::SelectPresentPoseForXFB(uint32_t xfb_addr)
+{
+  const XFBPoseStamp* match = nullptr;
+  const XFBPoseStamp* newest = nullptr;
+  for (const auto& stamp : m_xfb_pose_stamps)
+  {
+    if (stamp.serial == 0)
+      continue;
+    if (stamp.xfb_addr == xfb_addr)
+      match = &stamp;
+    if (!newest || stamp.serial > newest->serial)
+      newest = &stamp;
+  }
+
+  if (!match)
+    match = newest;
+  if (match)
+  {
+    m_present_eye_views = match->views;
+    m_present_eye_views_valid = true;
+  }
 }
 
 bool OpenXRManager::IsExtensionEnabled(const char* extension_name) const

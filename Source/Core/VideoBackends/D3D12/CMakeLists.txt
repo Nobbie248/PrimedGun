@@ -40,3 +40,14 @@ if(MSVC)
   # Add precompiled header
   target_link_libraries(videod3d12 PRIVATE use_pch)
 endif()
+
+if(ENABLE_VR)
+  target_sources(videod3d12 PRIVATE
+    D3D12OpenXR.cpp
+    D3D12OpenXR.h
+    D3D12PrimedGunOverlay.cpp
+    D3D12PrimedGunOverlay.h
+  )
+  target_link_libraries(videod3d12 PRIVATE openxr_loader)
+  target_include_directories(videod3d12 PRIVATE "${CMAKE_SOURCE_DIR}/Externals/OpenXR/include")
+endif()

@@ -280,7 +280,7 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
-          // When vr_lock_head_pose is ON, only re-fetch the head pose from OpenXR when
+          // When the head-pose lock is on, only re-fetch the head pose from OpenXR when
           // we've been explicitly invalidated (at the XFB-copy frame boundary).  This
           // prevents mid-frame LocateViews() updates from desynchronising different draw
           // calls within the same game frame.  When OFF, refetch every call (legacy
@@ -292,9 +292,9 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           // with, producing alternating-frame flicker on head rotation.
           const bool is_replay = VideoCommon::OpenXROpcodeReplay::IsReplaying();
           const bool upm_changed = std::abs(upm - m_cached_units_per_meter) > 0.0001f;
-          const bool need_refresh = !is_replay && (upm_changed ||
-                                                   !g_ActiveConfig.vr_lock_head_pose ||
-                                                   m_vr_pose_needs_refresh);
+          const bool need_refresh =
+              !is_replay && (upm_changed || !g_ActiveConfig.VRLockHeadPoseEffective() ||
+                             m_vr_pose_needs_refresh);
           if (need_refresh)
           {
             std::array<std::array<float, 4>, 4> eye_projection_rows{};

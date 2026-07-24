@@ -7,10 +7,13 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <openxr/openxr.h>
@@ -63,6 +66,8 @@ public:
   virtual bool SupportsLayeredRendering() const { return false; }
   virtual AbstractFramebuffer* AcquireLayeredFramebuffer() { return nullptr; }
   virtual void ReleaseLayeredTexture() {}
+  virtual XrSwapchain GetFlatSwapchain() const { return XR_NULL_HANDLE; }
+  virtual bool SupportsDetachedFrameLoop() const { return true; }
   virtual std::unique_lock<std::mutex> AcquireGraphicsQueueLock() { return {}; }
   virtual bool WaitForPendingFrameFinalization(std::string_view reason = {}) { return true; }
 };
@@ -95,7 +100,7 @@ public:
 
   // Step 3b: Register the backend swapchain implementation for use by the presenter.
   // Raw pointer — the backend object outlives the manager.
-  void SetSwapchain(IOpenXRSwapchain* swapchain) { m_swapchain = swapchain; }
+  void SetSwapchain(IOpenXRSwapchain* swapchain);
   IOpenXRSwapchain* GetSwapchain() const { return m_swapchain; }
 
   // Step 4: Create the local reference space used for head tracking.
@@ -120,6 +125,43 @@ public:
                         bool should_render,
                         const std::vector<XrCompositionLayerBaseHeader*>& layers);
 
+  // Dedicated OpenXR pacing loop. The pacing thread owns the frame protocol and
+  // re-submits the most recently published layers while the game renders its next frame.
+  void StartFrameThread();
+  void StopFrameThread();
+  bool IsFrameThreadActive() const
+  {
+    return m_frame_thread_running.load(std::memory_order_acquire);
+  }
+  void PublishFrame(const std::array<XrCompositionLayerProjectionView, 2>& views,
+                    XrCompositionLayerFlags layer_flags);
+  void PublishLayers(const std::vector<XrCompositionLayerBaseHeader*>& layers);
+
+  // Prevent the pacing thread from submitting a newly released swapchain image
+  // before the video thread has published the matching composition-layer pose.
+  void BeginVideoFrameHandoff() { m_video_handoff_active.fetch_add(1, std::memory_order_release); }
+  void EndVideoFrameHandoff() { m_video_handoff_active.fetch_sub(1, std::memory_order_release); }
+  class ScopedVideoFrameHandoff
+  {
+  public:
+    explicit ScopedVideoFrameHandoff(OpenXRManager* manager) : m_manager(manager)
+    {
+      if (m_manager)
+        m_manager->BeginVideoFrameHandoff();
+    }
+    ~ScopedVideoFrameHandoff()
+    {
+      if (m_manager)
+        m_manager->EndVideoFrameHandoff();
+    }
+
+    ScopedVideoFrameHandoff(const ScopedVideoFrameHandoff&) = delete;
+    ScopedVideoFrameHandoff& operator=(const ScopedVideoFrameHandoff&) = delete;
+
+  private:
+    OpenXRManager* m_manager;
+  };
+
   // xrLocateViews — fills m_eye_views with the predicted head pose for each eye.
   // Call between BeginFrame and rendering.
   bool LocateViews();
@@ -132,22 +174,35 @@ public:
   XrSession GetSession() const { return m_session; }
   XrSpace GetReferenceSpace() const { return m_reference_space; }
 
-  XrTime GetPredictedDisplayTime() const { return m_frame_state.predictedDisplayTime; }
-  bool IsSessionRunning() const { return m_session_running; }
-  bool ShouldRender() const { return m_frame_state.shouldRender == XR_TRUE; }
+  XrTime GetPredictedDisplayTime() const
+  {
+    return m_predicted_display_time_snapshot.load(std::memory_order_acquire);
+  }
+  bool IsSessionRunning() const { return m_session_running.load(std::memory_order_acquire); }
+  bool ShouldRender() const { return m_should_render_snapshot.load(std::memory_order_acquire); }
   bool IsExtensionEnabled(const char* extension_name) const;
   bool ShouldUseVulkanLegacyProjectionFallback() const;
   bool IsQuestOrVirtualDesktopRuntime() const;
   XrEnvironmentBlendMode GetActiveBlendMode() const { return m_active_blend_mode; }
-  double GetNativeDisplayPeriodMs() const { return m_native_display_period_ms; }
+  XrCompositionLayerFlags GetProjectionLayerExtraFlags() const;
+  double GetNativeDisplayPeriodMs() const
+  {
+    return m_native_display_period_ms.load(std::memory_order_acquire);
+  }
   float GetStartupDisplayRefreshRateHz() const
   {
-    return m_native_display_period_ms > 0.0 ? static_cast<float>(1000.0 / m_native_display_period_ms) :
-                                              0.0f;
+    const double period_ms = m_native_display_period_ms.load(std::memory_order_acquire);
+    return period_ms > 0.0 ? static_cast<float>(1000.0 / period_ms) : 0.0f;
   }
 
   const std::array<XREyeView, 2>& GetEyeViews() const { return m_eye_views; }
   const std::array<XREyeView, 2>& GetSubmittedEyeViews() const { return m_submitted_eye_views; }
+  void StampXFBPose(uint32_t xfb_addr);
+  void SelectPresentPoseForXFB(uint32_t xfb_addr);
+  const std::array<XREyeView, 2>& GetPresentEyeViews() const
+  {
+    return m_present_eye_views_valid ? m_present_eye_views : m_submitted_eye_views;
+  }
   bool AreEyeViewsValid() const { return m_eye_views_valid; }
   bool AreSubmittedEyeViewsValid() const { return m_submitted_eye_views_valid; }
   const std::array<XrViewConfigurationView, 2>& GetViewConfigViews() const
@@ -196,6 +251,27 @@ private:
   void ResetInputActionsState();
 
   void HandleSessionStateChange(XrSessionState new_state);
+  void FrameThreadLoop();
+
+  struct PublishedXRLayer
+  {
+    enum class Kind : uint8_t
+    {
+      Projection,
+      Quad
+    };
+
+    Kind kind = Kind::Projection;
+    XrCompositionLayerFlags layer_flags = 0;
+    XrSpace space = XR_NULL_HANDLE;
+    std::array<XrCompositionLayerProjectionView, 2> projection_views{};
+    XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  };
+
+  struct PublishedXRFrame
+  {
+    std::vector<PublishedXRLayer> layers;
+  };
 
   XrInstance m_instance = XR_NULL_HANDLE;
   std::string m_runtime_name;
@@ -208,12 +284,25 @@ private:
   std::vector<std::string> m_enabled_extensions;
 
   XrSessionState m_session_state = XR_SESSION_STATE_UNKNOWN;
-  bool m_session_running = false;
+  std::atomic<bool> m_session_running{false};
   bool m_exit_render_loop = false;
 
   XrFrameState m_frame_state{XR_TYPE_FRAME_STATE};
+  std::atomic<XrTime> m_predicted_display_time_snapshot{0};
+  std::atomic<int64_t> m_predicted_display_period_snapshot{0};
+  std::atomic<bool> m_should_render_snapshot{false};
   XrEnvironmentBlendMode m_active_blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-  double m_native_display_period_ms = 0.0;
+  std::atomic<double> m_native_display_period_ms{0.0};
+
+  std::thread m_frame_thread;
+  std::atomic<bool> m_frame_thread_running{false};
+  std::atomic<bool> m_frame_thread_should_exit{false};
+  bool m_frame_thread_eager_heartbeat = false;
+  std::mutex m_publish_mutex;
+  std::condition_variable m_publish_cv;
+  PublishedXRFrame m_published_frame;
+  uint64_t m_publish_serial = 0;
+  std::atomic<int> m_video_handoff_active{0};
 
   // OpenXR input action set used to expose VR controller input to Dolphin's
   // regular controller mapping UI.
@@ -246,6 +335,19 @@ private:
   std::array<XrView, 2> m_views{};
   std::array<XREyeView, 2> m_eye_views{};
   std::array<XREyeView, 2> m_submitted_eye_views{};
+
+  struct XFBPoseStamp
+  {
+    uint32_t xfb_addr = 0;
+    uint64_t serial = 0;
+    std::array<XREyeView, 2> views{};
+  };
+  std::array<XFBPoseStamp, 8> m_xfb_pose_stamps{};
+  size_t m_xfb_pose_stamp_next = 0;
+  uint64_t m_xfb_pose_stamp_serial = 0;
+  std::array<XREyeView, 2> m_present_eye_views{};
+  bool m_present_eye_views_valid = false;
+
   bool m_eye_views_valid = false;
   bool m_submitted_eye_views_valid = false;
 

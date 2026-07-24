@@ -487,10 +487,19 @@ bool PostProcessing::NeedsIntermediaryBuffer() const
   return !m_config.GetShader().empty();
 }
 
-bool PostProcessing::CanBlitFromTextureLayeredMultiview() const
+bool PostProcessing::CanBlitFromTextureLayered() const
 {
-  return g_backend_info.api_type == APIType::Vulkan && g_backend_info.bSupportsMultiview &&
-         !NeedsIntermediaryBuffer() && m_multiview_vertex_shader != nullptr &&
+  if (NeedsIntermediaryBuffer())
+    return false;
+
+  if (g_backend_info.api_type == APIType::Vulkan)
+  {
+    return g_backend_info.bSupportsMultiview && m_multiview_vertex_shader != nullptr &&
+           m_multiview_pipeline != nullptr;
+  }
+
+  return g_backend_info.api_type == APIType::D3D && g_backend_info.bSupportsGeometryShaders &&
+         g_shader_cache && g_shader_cache->GetTexcoordGeometryShader() != nullptr &&
          m_multiview_pipeline != nullptr;
 }
 
@@ -639,12 +648,12 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
   }
 }
 
-bool PostProcessing::BlitFromTextureLayeredMultiview(const MathUtil::Rectangle<int>& dst,
-                                                     const MathUtil::Rectangle<int>& src,
-                                                     const AbstractTexture* src_tex)
+bool PostProcessing::BlitFromTextureLayered(const MathUtil::Rectangle<int>& dst,
+                                            const MathUtil::Rectangle<int>& src,
+                                            const AbstractTexture* src_tex)
 {
   AbstractFramebuffer* const current_framebuffer = g_gfx->GetCurrentFramebuffer();
-  if (!CanBlitFromTextureLayeredMultiview() || !current_framebuffer || !src_tex ||
+  if (!CanBlitFromTextureLayered() || !current_framebuffer || !src_tex ||
       current_framebuffer->GetLayers() < 2 || src_tex->GetLayers() < 2)
   {
     return false;
@@ -1211,13 +1220,21 @@ bool PostProcessing::CompilePipeline()
     return false;
   }
 
-  if (g_backend_info.api_type == APIType::Vulkan && g_backend_info.bSupportsMultiview &&
-      !needs_intermediary_buffer && m_default_multiview_vertex_shader &&
-      m_multiview_vertex_shader)
+  const bool vulkan_multiview_blit = g_backend_info.api_type == APIType::Vulkan &&
+                                     g_backend_info.bSupportsMultiview &&
+                                     m_default_multiview_vertex_shader &&
+                                     m_multiview_vertex_shader;
+  const bool d3d_layered_gs_blit = g_backend_info.api_type == APIType::D3D &&
+                                   g_backend_info.bSupportsGeometryShaders && g_shader_cache &&
+                                   g_shader_cache->GetTexcoordGeometryShader() != nullptr;
+  if ((vulkan_multiview_blit || d3d_layered_gs_blit) && !needs_intermediary_buffer)
   {
     AbstractPipelineConfig multiview_config = {};
-    multiview_config.vertex_shader = m_default_multiview_vertex_shader.get();
-    multiview_config.geometry_shader = nullptr;
+    multiview_config.vertex_shader = vulkan_multiview_blit ?
+                                         m_default_multiview_vertex_shader.get() :
+                                         m_default_vertex_shader.get();
+    multiview_config.geometry_shader =
+        vulkan_multiview_blit ? nullptr : g_shader_cache->GetTexcoordGeometryShader();
     multiview_config.pixel_shader = m_default_pixel_shader.get();
     multiview_config.rasterization_state =
         RenderState::GetNoCullRasterizationState(PrimitiveType::Triangles);
@@ -1225,17 +1242,18 @@ bool PostProcessing::CompilePipeline()
     multiview_config.blending_state = RenderState::GetNoBlendingBlendState();
     multiview_config.framebuffer_state =
         RenderState::GetColorFramebufferState(m_framebuffer_format);
-    multiview_config.framebuffer_state.multiview = 1;
+    multiview_config.framebuffer_state.multiview = vulkan_multiview_blit ? 1 : 0;
     multiview_config.usage = AbstractPipelineUsage::Utility;
 
     if (multiview_config.pixel_shader)
       format_pipelines.default_multiview_pipeline = g_gfx->CreatePipeline(multiview_config);
 
-    multiview_config.vertex_shader = m_multiview_vertex_shader.get();
+    multiview_config.vertex_shader =
+        vulkan_multiview_blit ? m_multiview_vertex_shader.get() : m_vertex_shader.get();
     multiview_config.pixel_shader = m_pixel_shader.get();
     format_pipelines.multiview_pipeline = g_gfx->CreatePipeline(multiview_config);
     if (!format_pipelines.multiview_pipeline)
-      WARN_LOG_FMT(VIDEO, "Failed to create multiview post-processing pipeline");
+      WARN_LOG_FMT(VIDEO, "Failed to create layered post-processing pipeline");
   }
 
   SetActivePipelines(format_pipelines);

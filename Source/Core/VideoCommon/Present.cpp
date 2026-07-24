@@ -161,6 +161,12 @@ bool Presenter::FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_heigh
     m_last_xfb_id = m_xfb_entry->id;
 
     m_xfb_entry->AcquireContentLock();
+
+#ifdef ENABLE_VR
+    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+        VR::g_openxr->IsFrameThreadActive())
+      VR::g_openxr->SelectPresentPoseForXFB(xfb_addr);
+#endif
   }
   m_last_xfb_addr = xfb_addr;
   m_last_xfb_ticks = ticks;
@@ -847,7 +853,6 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
 #ifdef ENABLE_VR
   else if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
   {
-    constexpr bool kForceOpenXRLayer0ToBothEyes = false;  // diagnostic
     const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
     const bool cinematic_screen_active = primedgun_overlay.cinematic_screen_enabled &&
                                          primedgun_overlay.cinematic_screen_active;
@@ -859,8 +864,6 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
                    VR::g_openxr != nullptr,
                    VR::g_openxr && VR::g_openxr->GetSwapchain() != nullptr,
                    VR::g_openxr && VR::g_openxr->ShouldRender());
-      INFO_LOG_FMT(OPENXR, "VR: OpenXR diagnostic force_layer0_both_eyes={}",
-                   kForceOpenXRLayer0ToBothEyes);
       s_first_openxr_render = false;
     }
     // Mirror view on the desktop window (side-by-side, left eye | right eye).
@@ -876,63 +879,10 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
       m_post_processor->BlitFromTexture(right_rc, source_rc, source_texture, 1);
     }
 
-    // Blit each eye layer into its dedicated OpenXR swapchain image.
-    // We save and restore the current framebuffer so the UI still renders to the desktop.
-    if (VR::g_openxr && VR::g_openxr->GetSwapchain() && VR::g_openxr->ShouldRender())
-    {
-      VR::IOpenXRSwapchain* sc = VR::g_openxr->GetSwapchain();
-      AbstractFramebuffer* saved_fb = g_gfx->GetCurrentFramebuffer();
-      const MathUtil::Rectangle<int> eye_rect{
-          0, 0, static_cast<int>(sc->GetEyeWidth()), static_cast<int>(sc->GetEyeHeight())};
-      bool rendered_layered = false;
-
-      if (!cinematic_screen_active && sc->SupportsLayeredRendering() &&
-          m_post_processor->CanBlitFromTextureLayeredMultiview())
-      {
-        AbstractFramebuffer* layered_fb = sc->AcquireLayeredFramebuffer();
-        if (layered_fb)
-        {
-          g_gfx->SetAndClearFramebuffer(layered_fb, {0.f, 0.f, 0.f, 1.f});
-          if (m_post_processor->BlitFromTextureLayeredMultiview(eye_rect, source_rc,
-                                                                source_texture))
-          {
-            sc->ReleaseLayeredTexture();
-            rendered_layered = true;
-          }
-          else
-          {
-            static bool s_logged_layered_blit_fallback = false;
-            if (!s_logged_layered_blit_fallback)
-            {
-              WARN_LOG_FMT(VIDEO,
-                           "OpenXR: layered multiview post-process blit failed; falling back to "
-                           "per-eye swapchains.");
-              s_logged_layered_blit_fallback = true;
-            }
-            sc->ReleaseLayeredTexture();
-          }
-        }
-      }
-
-      const uint32_t eye_count = cinematic_screen_active ? 1u : 2u;
-      for (uint32_t eye = 0; !rendered_layered && eye < eye_count; ++eye)
-      {
-        AbstractFramebuffer* eye_fb = sc->AcquireEyeFramebuffer(eye);
-        if (eye_fb)
-        {
-          g_gfx->SetAndClearFramebuffer(eye_fb, {0.f, 0.f, 0.f, 1.f});
-          const int source_layer =
-              (cinematic_screen_active || kForceOpenXRLayer0ToBothEyes) ? 0 : static_cast<int>(eye);
-          m_post_processor->BlitFromTexture(eye_rect, source_rc, source_texture,
-                                            source_layer);
-          sc->ReleaseEyeTexture(eye);
-        }
-      }
-
-      // Restore the desktop backbuffer so subsequent ImGui rendering targets the window.
-      if (saved_fb)
-        g_gfx->SetFramebuffer(saved_fb);
-    }
+    // Backends that use Dolphin's original inline OpenXR lifecycle must populate
+    // their swapchain during the XFB render. Detached pacing does this at Present().
+    if (!VR::g_openxr || !VR::g_openxr->IsFrameThreadActive())
+      BlitCurrentSourceToOpenXREyes(source_texture, source_rc);
   }
 #endif
   // Every other case will be treated the same (stereo or not).
@@ -941,6 +891,64 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
   {
     m_post_processor->BlitFromTexture(target_rc, source_rc, source_texture);
   }
+}
+
+void Presenter::BlitCurrentSourceToOpenXREyes(
+    const AbstractTexture* source_texture, const MathUtil::Rectangle<int>& source_rect)
+{
+#ifdef ENABLE_VR
+  if (source_texture == nullptr || !VR::g_openxr || !VR::g_openxr->ShouldRender())
+  {
+    return;
+  }
+  if (source_texture->GetLayers() < 2)
+    return;
+
+  VR::IOpenXRSwapchain* const swapchain = VR::g_openxr->GetSwapchain();
+  if (swapchain == nullptr)
+    return;
+
+  const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  const bool cinematic_screen_active =
+      overlay.cinematic_screen_enabled && overlay.cinematic_screen_active;
+  AbstractFramebuffer* const saved_framebuffer = g_gfx->GetCurrentFramebuffer();
+  const MathUtil::Rectangle<int> eye_rect{
+      0, 0, static_cast<int>(swapchain->GetEyeWidth()),
+      static_cast<int>(swapchain->GetEyeHeight())};
+  bool rendered_layered = false;
+
+  if (!cinematic_screen_active && swapchain->SupportsLayeredRendering() &&
+      m_post_processor->CanBlitFromTextureLayered())
+  {
+    AbstractFramebuffer* const layered_framebuffer =
+        swapchain->AcquireLayeredFramebuffer();
+    if (layered_framebuffer)
+    {
+      g_gfx->SetAndClearFramebuffer(layered_framebuffer, {0.f, 0.f, 0.f, 1.f});
+      rendered_layered = m_post_processor->BlitFromTextureLayered(
+          eye_rect, source_rect, source_texture);
+      swapchain->ReleaseLayeredTexture();
+    }
+  }
+
+  const uint32_t eye_count = cinematic_screen_active ? 1u : 2u;
+  for (uint32_t eye = 0; !rendered_layered && eye < eye_count; ++eye)
+  {
+    AbstractFramebuffer* const eye_framebuffer =
+        swapchain->AcquireEyeFramebuffer(eye);
+    if (eye_framebuffer == nullptr)
+      continue;
+
+    g_gfx->SetAndClearFramebuffer(eye_framebuffer, {0.f, 0.f, 0.f, 1.f});
+    const int source_layer =
+        cinematic_screen_active ? 0 : static_cast<int>(eye);
+    m_post_processor->BlitFromTexture(eye_rect, source_rect, source_texture, source_layer);
+    swapchain->ReleaseEyeTexture(eye);
+  }
+
+  if (saved_framebuffer)
+    g_gfx->SetFramebuffer(saved_framebuffer);
+#endif
 }
 
 void Presenter::Present(PresentInfo* present_info)
@@ -985,8 +993,21 @@ void Presenter::Present(PresentInfo* present_info)
   //   Present(N+1): EndFrame(N+1) → WaitFrame(N+2) → BeginFrame(N+2) → ...
   //
   // First frame: m_vr_frame_begun is false, so we do WaitFrame+BeginFrame here.
-  bool vr_frame_started = m_vr_frame_begun;
-  if (!vr_frame_started && g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
+  const bool vr_pacing_active =
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+      VR::g_openxr->IsFrameThreadActive();
+  bool vr_frame_started = vr_pacing_active ? VR::g_openxr->IsSessionRunning() :
+                                             m_vr_frame_begun;
+  if (vr_pacing_active)
+    m_vr_frame_begun = false;
+  if (vr_pacing_active && vr_frame_started && VR::g_openxr->ShouldRender())
+  {
+    VR::g_openxr->LocateViews();
+    if (VR::g_openxr->AreEyeViewsValid())
+      Core::System::GetInstance().GetGeometryShaderManager().SetProjectionChanged();
+  }
+  else if (!vr_pacing_active && !vr_frame_started &&
+           g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
   {
     // First frame or after a session restart — start the frame here.
     if (VR::g_openxr->PollEvents() && VR::g_openxr->IsSessionRunning())
@@ -1009,12 +1030,18 @@ void Presenter::Present(PresentInfo* present_info)
     if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && (++s_vr_log_count % 300 == 1))
     {
       INFO_LOG_FMT(OPENXR,
-                   "VR frame {}: g_openxr={} session_running={} swapchain={} frame_started={}",
+                   "VR frame {}: g_openxr={} session_running={} swapchain={} frame_started={} "
+                   "async_pacing={}",
                    s_vr_log_count, VR::g_openxr != nullptr,
                    VR::g_openxr && VR::g_openxr->IsSessionRunning(),
-                   VR::g_openxr && VR::g_openxr->GetSwapchain() != nullptr, vr_frame_started);
+                   VR::g_openxr && VR::g_openxr->GetSwapchain() != nullptr, vr_frame_started,
+                   vr_pacing_active);
     }
   }
+  const bool vr_skip_duplicate_publish =
+      vr_frame_started && present_info != nullptr &&
+      present_info->reason == PresentInfo::PresentReason::VideoInterfaceDuplicate &&
+      VR::g_openxr && VR::g_openxr->IsFrameThreadActive();
 #endif
 
   g_gfx->BeginUtilityDrawing();
@@ -1059,11 +1086,17 @@ void Presenter::Present(PresentInfo* present_info)
 #ifdef ENABLE_VR
   // --- End current VR frame ---
   // xrEndFrame must be called if (and only if) WaitFrame+BeginFrame succeeded.
-  if (vr_frame_started)
+  if (vr_frame_started && !vr_skip_duplicate_publish)
   {
+    VR::OpenXRManager::ScopedVideoFrameHandoff handoff(VR::g_openxr.get());
+    if (vr_pacing_active)
+    {
+      BlitCurrentSourceToOpenXREyes(m_xfb_entry ? m_xfb_entry->texture.get() : nullptr,
+                                    m_xfb_rect);
+    }
     if (VR::IOpenXRSwapchain* sc = VR::g_openxr->GetSwapchain())
       sc->SubmitFrame();
-    else
+    else if (!vr_pacing_active)
       VR::g_openxr->EndFrame({});  // No swapchain yet — submit empty frame
   }
 
@@ -1073,7 +1106,8 @@ void Presenter::Present(PresentInfo* present_info)
   // see the real frame duration (~11-33ms) instead of just the blit time (~1ms),
   // which gives the compositor accurate timing for ATW/ASW reprojection.
   m_vr_frame_begun = false;
-  if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
+  if (!vr_pacing_active && g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+      VR::g_openxr)
   {
     if (VR::g_openxr->PollEvents() && VR::g_openxr->IsSessionRunning())
     {
@@ -1089,11 +1123,8 @@ void Presenter::Present(PresentInfo* present_info)
       }
     }
 
-    // Clear the EFB so the next game frame starts on a clean slate.
-    // Without this, areas outside the virtual screen (or areas the game doesn't
-    // redraw) retain stale data from previous frames, causing visible trails.
-    // The "Don't Clear Screen" option disables this for games that rely on the
-    // EFB retaining data between frames (e.g. to fake 60fps from 30fps rendering).
+    // Preserve the original inline OpenXR EFB lifetime for backends without the
+    // detached pacing thread (notably Vulkan and D3D11).
     if (!g_ActiveConfig.vr_dont_clear_screen && g_framebuffer_manager)
     {
       g_gfx->SetAndClearFramebuffer(g_framebuffer_manager->GetEFBFramebuffer(),

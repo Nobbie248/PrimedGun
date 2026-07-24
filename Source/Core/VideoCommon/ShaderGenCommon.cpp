@@ -263,43 +263,6 @@ void GenerateVSOutputMembers(ShaderCode& object, APIType api_type, u32 texgens,
   }
 }
 
-u32 GetVREyeLayerLocation(APIType api_type, u32 texgens, const ShaderHostConfig& host_config)
-{
-  if (api_type == APIType::D3D)
-  {
-    u32 location = 3;
-
-    if (host_config.backend_geometry_shaders)
-      location += 2;
-
-    location += texgens;
-
-    if (!host_config.fast_depth_calc)
-      ++location;
-
-    if (host_config.per_pixel_lighting)
-      location += 2;
-
-    if (host_config.vr_stereo)
-      ++location;
-
-    return location;
-  }
-
-  u32 location = 2 + texgens;
-
-  if (!host_config.fast_depth_calc)
-    ++location;
-
-  if (host_config.per_pixel_lighting)
-    location += 2;
-
-  if (host_config.vr_stereo)
-    ++location;
-
-  return location;
-}
-
 void AssignVSOutputMembers(ShaderCode& object, std::string_view a, std::string_view b, u32 texgens,
                            const ShaderHostConfig& host_config)
 {

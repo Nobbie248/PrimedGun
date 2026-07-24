@@ -197,8 +197,6 @@ void GenerateVSOutputMembers(ShaderCode& object, APIType api_type, u32 texgens,
                              const ShaderHostConfig& host_config, std::string_view qualifier,
                              ShaderStage stage);
 
-u32 GetVREyeLayerLocation(APIType api_type, u32 texgens, const ShaderHostConfig& host_config);
-
 void AssignVSOutputMembers(ShaderCode& object, std::string_view a, std::string_view b, u32 texgens,
                            const ShaderHostConfig& host_config);
 

@@ -4,6 +4,7 @@
 #include "VideoCommon/BPStructs.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <string>
 
@@ -39,6 +40,9 @@
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/VideoEvents.h"
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/OpenXRManager.h"
+#endif
 #include "VideoCommon/XFStateManager.h"
 
 using namespace BPFunctions;
@@ -356,6 +360,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
       //       Might also clean up some issues with games doing XFB copies they don't intend to
       //       display.
 
+#ifdef ENABLE_VR
+      if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+          VR::g_openxr->IsFrameThreadActive() && VR::g_openxr->IsSessionRunning())
+      {
+        VR::g_openxr->StampXFBPose(destAddr);
+        if (g_framebuffer_manager)
+          g_framebuffer_manager->RequestVRClearEFB();
+      }
+#endif
+
       if (g_ActiveConfig.bImmediateXFB)
       {
         // below div two to convert from bytes to pixels - it expects width, not stride
@@ -369,6 +383,27 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
           vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
         }
       }
+
+#ifdef ENABLE_VR
+      if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+          g_ActiveConfig.VRLockHeadPoseEffective() && VR::g_openxr &&
+          VR::g_openxr->IsFrameThreadActive() && VR::g_openxr->IsSessionRunning() &&
+          VR::g_openxr->ShouldRender())
+      {
+        static bool s_first_locate = true;
+        static auto s_last_locate_time = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        const double ms_since_last =
+            std::chrono::duration<double, std::milli>(now - s_last_locate_time).count();
+        if (s_first_locate || ms_since_last >= 5.0)
+        {
+          VR::g_openxr->LocateViews();
+          system.GetGeometryShaderManager().InvalidateVRHeadPose();
+          s_last_locate_time = now;
+          s_first_locate = false;
+        }
+      }
+#endif
     }
 
     // Clear the rectangular region after copying it.

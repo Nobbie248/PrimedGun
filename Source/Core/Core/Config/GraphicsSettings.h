@@ -200,6 +200,8 @@ extern const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW;
 extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;
 extern const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER;
+extern const Info<bool> GFX_VR_USE_XR_PACING_THREAD;
+extern const Info<bool> GFX_VR_EAGER_HEARTBEAT;
 extern const Info<int> GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE;
 extern const Info<int> GFX_VR_FORCED_VBI_FREQUENCY;
 extern const Info<bool> GFX_VR_AUTO_VBI_FROM_HMD;

@@ -67,6 +67,10 @@ public:
   // Build the XrCompositionLayerProjection and call xrEndFrame.
   bool SubmitFrame() override;
 
+  // The D3D11 immediate context is owned by the video thread. Running xrEndFrame
+  // from the detached pacing thread can race swapchain rendering and shutdown.
+  bool SupportsDetachedFrameLoop() const override { return false; }
+
   uint32_t GetEyeWidth() const override { return m_eye_swapchains[0].width; }
   uint32_t GetEyeHeight() const override { return m_eye_swapchains[0].height; }
 

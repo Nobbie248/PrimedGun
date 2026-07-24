@@ -23,7 +23,9 @@ public:
   ~DXTexture() override;
 
   static std::unique_ptr<DXTexture> Create(const TextureConfig& config, std::string_view name);
-  static std::unique_ptr<DXTexture> CreateAdopted(ID3D12Resource* resource);
+  static std::unique_ptr<DXTexture>
+  CreateAdopted(ID3D12Resource* resource,
+                D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON);
 
   void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer, size_t buffer_size,
             u32 layer) override;
@@ -42,6 +44,11 @@ public:
   u32 CalcSubresource(u32 level, u32 layer) const { return level + layer * m_config.levels; }
 
   void TransitionToState(D3D12_RESOURCE_STATES state) const;
+
+  // Replaces the tracked resource state without recording a barrier. Used for resources whose
+  // state is changed externally (e.g. OpenXR swapchain images, which the runtime returns in a
+  // RENDER_TARGET-compatible layout on acquire).
+  void OverrideState(D3D12_RESOURCE_STATES state) const { m_state = state; }
 
   // Destroys the resource backing this texture. The resource must not be in use by the GPU.
   void DestroyResource();

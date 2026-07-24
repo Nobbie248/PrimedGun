@@ -6,6 +6,7 @@
 #include <string>
 
 #include "Common/CommonTypes.h"
+#include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 
 #include "Core/ConfigManager.h"
@@ -18,11 +19,19 @@
 #include "VideoBackends/D3D12/D3D12VertexManager.h"
 #include "VideoBackends/D3D12/DX12Context.h"
 
+#ifdef ENABLE_VR
+#include "VideoBackends/D3D12/D3D12OpenXR.h"
+#endif
+
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/ShaderCache.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
+
+#ifdef ENABLE_VR
+#include "VideoCommon/VR/OpenXRManager.h"
+#endif
 
 namespace DX12
 {
@@ -123,10 +132,32 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
     return false;
   }
 
+#ifdef ENABLE_VR
+  INFO_LOG_FMT(VIDEO, "VR: stereo_mode={} (OpenXR={})",
+               static_cast<int>(g_ActiveConfig.stereo_mode),
+               g_ActiveConfig.stereo_mode == StereoMode::OpenXR ? "YES" : "NO");
+  if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+  {
+    auto openxr = std::make_unique<DX12::D3D12OpenXR>();
+    if (!openxr->Initialize())
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR initialization failed; continuing without VR.");
+    }
+    else
+    {
+      DX12::g_openxr_d3d12 = std::move(openxr);
+    }
+  }
+#endif
+
   std::unique_ptr<SwapChain> swap_chain;
   if (wsi.render_surface && !(swap_chain = SwapChain::Create(wsi)))
   {
     PanicAlertFmtT("Failed to create D3D swap chain");
+#ifdef ENABLE_VR
+    DX12::g_openxr_d3d12.reset();
+    VR::g_openxr.reset();
+#endif
     DXContext::Destroy();
     ShutdownShared();
     return false;
@@ -147,6 +178,15 @@ void VideoBackend::Shutdown()
   // Keep the debug runtime happy...
   if (g_gfx)
     Gfx::GetInstance()->ExecuteCommandList(true);
+
+#ifdef ENABLE_VR
+  // Shut down VR before the D3D12 context is destroyed.
+  // g_openxr_d3d12 first (releases the DXTexture/DXFramebuffer wrappers and waits for the
+  // GPU so the deferred references on the runtime-owned textures are dropped), then
+  // g_openxr (calls xrDestroySession/Instance and releases the runtime's D3D12 refs).
+  DX12::g_openxr_d3d12.reset();
+  VR::g_openxr.reset();
+#endif
 
   ShutdownShared();
   DXContext::Destroy();

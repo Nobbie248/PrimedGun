@@ -59,6 +59,8 @@ private:
   ConfigBool* m_disable_cpu_cull = nullptr;
   ConfigBool* m_ortho_scissor_fix = nullptr;
   ConfigBool* m_metroid_visor_fix = nullptr;
+  ConfigBool* m_xr_pacing_thread = nullptr;
+  ConfigBool* m_eager_heartbeat = nullptr;
   ConfigChoiceMap<OpenXROpcodeReplayMode>* m_opcode_replay_mode = nullptr;
   ConfigChoiceMap<OpenXRMirrorView>* m_mirror_view = nullptr;
   ConfigChoiceMap<int>* m_replay_refresh_rate = nullptr;

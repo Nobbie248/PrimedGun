@@ -218,6 +218,13 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
         QString::asprintf("%.2f", m_head_locked_curvature->GetValue()));
   });
 
+  m_xr_pacing_thread =
+      new ConfigBool(tr("Asynchronous OpenXR Pacing"), Config::GFX_VR_USE_XR_PACING_THREAD);
+  m_eager_heartbeat =
+      new ConfigBool(tr("Eager Frame Heartbeat"), Config::GFX_VR_EAGER_HEARTBEAT);
+  framerate_layout->addWidget(m_xr_pacing_thread, 0, 0, 1, 3);
+  framerate_layout->addWidget(m_eager_heartbeat, 1, 0, 1, 3);
+
   m_opcode_replay_mode = new ConfigChoiceMap<OpenXROpcodeReplayMode>(
       {{tr("Off"), OpenXROpcodeReplayMode::Off},
        {tr("25 Hz Input"), OpenXROpcodeReplayMode::Input25Hz},
@@ -225,8 +232,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
        {tr("50 Hz Input"), OpenXROpcodeReplayMode::Input50Hz},
        {tr("60 Hz Input"), OpenXROpcodeReplayMode::Input60Hz}},
       Config::GFX_VR_OPCODE_REPLAY);
-  framerate_layout->addWidget(new QLabel(tr("Opcode Replay Input:")), 0, 0);
-  framerate_layout->addWidget(m_opcode_replay_mode, 0, 1, 1, 2);
+  framerate_layout->addWidget(new QLabel(tr("Legacy Opcode Replay Input:")), 2, 0);
+  framerate_layout->addWidget(m_opcode_replay_mode, 2, 1, 1, 2);
 
   m_replay_refresh_rate = new ConfigChoiceMap<int>(
       {{tr("Auto"), Config::GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE_AUTO},
@@ -234,14 +241,23 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
        {tr("90 Hz"), Config::GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE_90},
        {tr("120 Hz"), Config::GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE_120}},
       Config::GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE);
-  framerate_layout->addWidget(new QLabel(tr("Replay Refresh Rate:")), 1, 0);
-  framerate_layout->addWidget(m_replay_refresh_rate, 1, 1, 1, 2);
+  framerate_layout->addWidget(new QLabel(tr("Replay Refresh Rate:")), 3, 0);
+  framerate_layout->addWidget(m_replay_refresh_rate, 3, 1, 1, 2);
   auto update_replay_refresh_rate_enabled = [this] {
     m_replay_refresh_rate->setEnabled(m_opcode_replay_mode->currentIndex() > 0);
   };
   update_replay_refresh_rate_enabled();
   connect(m_opcode_replay_mode, &QComboBox::currentIndexChanged, this,
           update_replay_refresh_rate_enabled);
+  auto update_pacing_controls = [this] {
+    const bool pacing_enabled = m_xr_pacing_thread->isChecked();
+    m_eager_heartbeat->setEnabled(pacing_enabled);
+    m_opcode_replay_mode->setEnabled(!pacing_enabled);
+    m_replay_refresh_rate->setEnabled(!pacing_enabled &&
+                                      m_opcode_replay_mode->currentIndex() > 0);
+  };
+  update_pacing_controls();
+  connect(m_xr_pacing_thread, &QCheckBox::toggled, this, update_pacing_controls);
 
   m_forced_vbi_frequency = new ConfigChoiceMap<int>(
       {{tr("Auto"), Config::GFX_VR_FORCED_VBI_FREQUENCY_AUTO},
@@ -250,8 +266,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
        {tr("90 Hz"), Config::GFX_VR_FORCED_VBI_FREQUENCY_90},
        {tr("120 Hz"), Config::GFX_VR_FORCED_VBI_FREQUENCY_120}},
       Config::GFX_VR_FORCED_VBI_FREQUENCY);
-  framerate_layout->addWidget(new QLabel(tr("Forced VBI Frequency:")), 2, 0);
-  framerate_layout->addWidget(m_forced_vbi_frequency, 2, 1, 1, 2);
+  framerate_layout->addWidget(new QLabel(tr("Forced VBI Frequency:")), 4, 0);
+  framerate_layout->addWidget(m_forced_vbi_frequency, 4, 1, 1, 2);
   connect(m_forced_vbi_frequency, &QComboBox::currentIndexChanged, this,
           [](int) { Config::SetBaseOrCurrent(Config::GFX_VR_AUTO_VBI_FROM_HMD, false); });
 
@@ -762,6 +778,12 @@ void VRPane::AddDescriptions()
   m_head_locked_curvature->SetDescription(tr(TR_HEAD_LOCKED_CURVATURE_DESCRIPTION));
   m_dont_clear_screen->SetDescription(tr(TR_DONT_CLEAR_SCREEN_DESCRIPTION));
   m_disable_cpu_cull->SetDescription(tr(TR_DISABLE_CPU_CULL_DESCRIPTION));
+  m_xr_pacing_thread->SetDescription(
+      tr("Runs OpenXR frame pacing on a dedicated thread so emulation does not block in "
+         "xrWaitFrame. This replaces Opcode Replay while enabled."));
+  m_eager_heartbeat->SetDescription(
+      tr("Re-submits the latest frame at headset refresh rate. Leave this off on PC so "
+         "SteamVR, Virtual Desktop, or Meta Link can manage motion smoothing."));
   m_opcode_replay_mode->SetDescription(tr(TR_OPCODE_REPLAY_DESCRIPTION));
   m_mirror_view->SetDescription(tr(TR_MIRROR_VIEW_DESCRIPTION));
   m_replay_refresh_rate->SetDescription(tr(TR_REPLAY_REFRESH_RATE_DESCRIPTION));
@@ -788,6 +810,8 @@ void VRPane::OnEmulationStateChanged(Core::State state)
   m_enable_openxr->setEnabled(!running);
   m_reference_space_mode->setEnabled(!running);
   m_use_vulkan_multiview->setEnabled(!running);
+  m_xr_pacing_thread->setEnabled(!running);
+  m_eager_heartbeat->setEnabled(!running && m_xr_pacing_thread->isChecked());
   m_reset_general_settings->setEnabled(!running);
 }
 
@@ -821,6 +845,10 @@ void VRPane::ResetGeneralSettings()
                            Config::GFX_VR_SCREEN_SIZE.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_HEAD_LOCKED_CURVATURE,
                            Config::GFX_VR_HEAD_LOCKED_CURVATURE.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_USE_XR_PACING_THREAD,
+                           Config::GFX_VR_USE_XR_PACING_THREAD.GetDefaultValue());
+  Config::SetBaseOrCurrent(Config::GFX_VR_EAGER_HEARTBEAT,
+                           Config::GFX_VR_EAGER_HEARTBEAT.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_OPCODE_REPLAY,
                            Config::GFX_VR_OPCODE_REPLAY.GetDefaultValue());
   Config::SetBaseOrCurrent(Config::GFX_VR_MIRROR_VIEW,

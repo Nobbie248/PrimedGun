@@ -162,7 +162,7 @@ constexpr Common::EnumMap<const char*, TevOutput::Color2> tev_a_output_table{
 
 constexpr Common::EnumMap<char, ColorChannel::Alpha> rgba_swizzle{'r', 'g', 'b', 'a'};
 
-static constexpr u32 PIXEL_SHADER_CODE_VERSION = 9;
+static constexpr u32 PIXEL_SHADER_CODE_VERSION = 10;
 
 PixelShaderUid GetPixelShaderUid()
 {
@@ -879,7 +879,7 @@ ShaderCode GeneratePixelShaderCode(APIType api_type, const ShaderHostConfig& hos
     out.Write("#define depth gl_FragDepth\n");
 
   const bool use_explicit_layer_varying =
-      stereo && (api_type == APIType::D3D || !host_config.backend_gl_layer_in_fs);
+      stereo && api_type != APIType::D3D && !host_config.backend_gl_layer_in_fs;
 
   if (host_config.backend_geometry_shaders)
   {
@@ -889,15 +889,7 @@ ShaderCode GeneratePixelShaderCode(APIType api_type, const ShaderHostConfig& hos
 
     out.Write("}};\n");
     if (use_explicit_layer_varying)
-    {
-      if (api_type == APIType::D3D)
-      {
-        out.Write("VARYING_LOCATION({}) flat in uint vr_eye_layer;\n",
-                  GetVREyeLayerLocation(api_type, uid_data->genMode_numtexgens, host_config));
-      }
-      else
-        out.Write("flat in int vr_eye_layer;\n");
-    }
+      out.Write("flat in int vr_eye_layer;\n");
   }
   else
   {
@@ -993,13 +985,8 @@ ShaderCode GeneratePixelShaderCode(APIType api_type, const ShaderHostConfig& hos
   else if (host_config.backend_geometry_shaders && stereo)
   {
     if (use_explicit_layer_varying)
-    {
-      if (api_type == APIType::D3D)
-        out.Write("\tint layer = int(vr_eye_layer);\n");
-      else
-        out.Write("\tint layer = vr_eye_layer;\n");
-    }
-    else if (host_config.backend_gl_layer_in_fs)
+      out.Write("\tint layer = vr_eye_layer;\n");
+    else if (api_type == APIType::D3D || host_config.backend_gl_layer_in_fs)
       out.Write("\tint layer = gl_Layer;\n");
   }
   else

@@ -411,17 +411,19 @@ bool D3DOpenXR::SubmitFrame()
     std::vector<XrCompositionLayerBaseHeader*> layers = {
         reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer)};
     m_primedgun_overlay.AppendLayers(&layers);
+    if (VR::g_openxr->IsFrameThreadActive())
+    {
+      VR::g_openxr->PublishLayers(layers);
+      return true;
+    }
     return VR::g_openxr->EndFrame(layers);
   }
   if (!cinematic_screen_active)
     ResetCinematicScreenAnchor();
 
-  // Use the submit snapshot captured when the GS pose cache was last refreshed. Using
-  // live m_eye_views here would pick up LocateViews that ran between the last draw and
-  // xrEndFrame, causing ATW to reproject against the wrong pose.
-  const auto& eye_views = VR::g_openxr->GetSubmittedEyeViews();
+  const auto& eye_views = VR::g_openxr->GetPresentEyeViews();
   if (!VR::g_openxr->AreSubmittedEyeViewsValid())
-    return VR::g_openxr->EndFrame({});
+    return VR::g_openxr->IsFrameThreadActive() ? true : VR::g_openxr->EndFrame({});
 
   for (uint32_t eye = 0; eye < 2; ++eye)
   {
@@ -452,6 +454,11 @@ bool D3DOpenXR::SubmitFrame()
       reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_projection_layer)};
   m_primedgun_overlay.AppendLayers(&layers);
 
+  if (VR::g_openxr->IsFrameThreadActive())
+  {
+    VR::g_openxr->PublishLayers(layers);
+    return true;
+  }
   return VR::g_openxr->EndFrame(layers);
 }
 
