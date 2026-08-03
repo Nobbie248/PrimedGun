@@ -192,6 +192,7 @@ constexpr u32 SCAN_INDICATOR_UPDATE_TRACE_CAVE = PATCH_CODE_ARENA_BASE + 0x5C0u;
 constexpr u32 SCAN_INDICATOR_VIEW_BASIS_CAVE = PATCH_CODE_ARENA_BASE + 0x600u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_CAVE = PATCH_CODE_ARENA_BASE + 0x6C0u;
 constexpr u32 HMD_FRUSTUM_CAVE = PATCH_CODE_ARENA_BASE + 0x880u;
+constexpr u32 HMD_RENDERER_VIEW_PLANE_CAVE = PATCH_CODE_ARENA_BASE + 0x920u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_ADDRESS = 0x8000A9B4u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_CAVE = PATCH_CODE_ARENA_BASE + 0x680u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_ORIGINAL = 0x80010054u;
@@ -211,6 +212,8 @@ constexpr u32 PRE_RENDER_FRUSTUM_CALL_ORIGINAL = 0x482FDDCDu;
 constexpr u32 SETUP_VIEW_FRUSTUM_CALL = 0x800471ECu;
 constexpr u32 SETUP_VIEW_FRUSTUM_CALL_ORIGINAL = 0x482FE069u;
 constexpr u32 FRUSTUM_PLANES_CONSTRUCTOR = 0x80345254u;
+constexpr u32 RENDERER_VIEW_PLANE_PATCH_ADDRESS = 0x802BDE28u;
+constexpr u32 RENDERER_VIEW_PLANE_PATCH_ORIGINAL = 0xC09F0014u;
 constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS = 0x80345200u;
 constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS_PATCHED = 0x4BCBD080u;
 constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS_ORIGINAL = 0x7FA3EB78u;
@@ -585,6 +588,9 @@ DynamicPpcPatch s_hmd_frustum_patches[] = {
     {PRE_RENDER_FRUSTUM_CALL, PRE_RENDER_FRUSTUM_CALL_ORIGINAL, 0, HMD_FRUSTUM_CAVE, false},
     {SETUP_VIEW_FRUSTUM_CALL, SETUP_VIEW_FRUSTUM_CALL_ORIGINAL, 0, HMD_FRUSTUM_CAVE, false},
 };
+DynamicPpcPatch s_hmd_renderer_view_plane_patch{
+    RENDERER_VIEW_PLANE_PATCH_ADDRESS, RENDERER_VIEW_PLANE_PATCH_ORIGINAL, 0,
+    HMD_RENDERER_VIEW_PLANE_CAVE, false};
 DynamicPpcPatch s_hmd_camera_facing_patches[] = {
     {ENVFX_RAIN_SOUND_CAMERA_CALL, ENVFX_RAIN_SOUND_CAMERA_CALL_ORIGINAL, 0,
      HMD_CAMERA_FACING_CAVE, false},
@@ -7074,6 +7080,83 @@ bool ApplyHmdFrustumPatches(const Core::CPUThreadGuard& guard, float cone_degree
   return wrote;
 }
 
+bool ApplyHmdRendererViewPlanePatch(const Core::CPUThreadGuard& guard)
+{
+  auto& patch = s_hmd_renderer_view_plane_patch;
+  constexpr u32 scratch_hi = (HMD_CAMERA_FACING_SCRATCH >> 16) & 0xffffu;
+  constexpr u32 scratch_lo = HMD_CAMERA_FACING_SCRATCH & 0xffffu;
+  constexpr u32 fallback_label = HMD_RENDERER_VIEW_PLANE_CAVE + 0x24u;
+  constexpr u32 build_plane_label = HMD_RENDERER_VIEW_PLANE_CAVE + 0x30u;
+  constexpr u32 return_address = RENDERER_VIEW_PLANE_PATCH_ADDRESS + 0x34u;
+
+  const std::initializer_list<HookWrite> cave_writes{
+      // CCubeRenderer has a second camera-facing plane outside CFrustumPlanes.
+      // Water uses it as an early visibility test, and render buckets use it
+      // for transparent geometry, particles, and sorted actors.
+      {0x00u, 0x3D800000u | scratch_hi},  // lis r12, Scratch@ha
+      {0x04u, 0x618C0000u | scratch_lo},  // ori r12, r12, Scratch@l
+      {0x08u, 0x800C0000u},               // lwz r0, hmd_valid(r12)
+      {0x0Cu, 0x2C000000u},               // cmpwi r0, 0
+      {0x10u, PpcBeq(HMD_RENDERER_VIEW_PLANE_CAVE + 0x10u, fallback_label)},
+
+      {0x14u, 0xC06C0014u},  // lfs f3, hmd_forward.x(r12)
+      {0x18u, 0xC08C0018u},  // lfs f4, hmd_forward.y(r12)
+      {0x1Cu, 0xC0AC001Cu},  // lfs f5, hmd_forward.z(r12)
+      {0x20u, PpcBranch(HMD_RENDERER_VIEW_PLANE_CAVE + 0x20u, build_plane_label)},
+
+      {0x24u, 0xC07F0004u},  // lfs f3, camera_forward.x(r31)
+      {0x28u, 0xC09F0014u},  // lfs f4, camera_forward.y(r31)
+      {0x2Cu, 0xC0BF0024u},  // lfs f5, camera_forward.z(r31)
+
+      // Keep the real game camera translation. Only the plane direction is
+      // HMD-relative, so this cannot add a second world-view rotation.
+      {0x30u, 0xC01F000Cu},  // lfs f0, camera_translation.x(r31)
+      {0x34u, 0xEC030032u},  // fmuls f0, f3, f0
+      {0x38u, 0xC03F001Cu},  // lfs f1, camera_translation.y(r31)
+      {0x3Cu, 0xEC04007Au},  // fmadds f0, f4, f1, f0
+      {0x40u, 0xC05F002Cu},  // lfs f2, camera_translation.z(r31)
+      {0x44u, 0xEC0500BAu},  // fmadds f0, f5, f2, f0
+      {0x48u, 0xD07E00B0u},  // stfs f3, renderer.view_plane.normal.x(r30)
+      {0x4Cu, 0xD09E00B4u},  // stfs f4, renderer.view_plane.normal.y(r30)
+      {0x50u, 0xD0BE00B8u},  // stfs f5, renderer.view_plane.normal.z(r30)
+      {0x54u, 0xD01E00BCu},  // stfs f0, renderer.view_plane.constant(r30)
+      {0x58u, PpcBranch(HMD_RENDERER_VIEW_PLANE_CAVE + 0x58u, return_address)},
+  };
+
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current))
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  const u32 branch = PpcBranch(patch.address, patch.cave);
+  if (current != patch.original && current != branch)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  bool wrote = false;
+  const bool cave_matches = InstructionBlockMatches(guard, patch.cave, cave_writes);
+  if (!cave_matches)
+  {
+    if (!TryWriteInstructionBlock(guard, patch.cave, cave_writes))
+    {
+      patch.applied = false;
+      return false;
+    }
+    wrote = true;
+  }
+
+  if (current != branch)
+    wrote = TryWriteInstruction(guard, patch.address, branch) || wrote;
+
+  patch.applied = InstructionBlockMatches(guard, patch.cave, cave_writes) &&
+                  TryReadU32(guard, patch.address, &current) && current == branch;
+  return wrote;
+}
+
 bool ApplyHmdCameraFacingPatches(const Core::CPUThreadGuard& guard)
 {
   static const auto assembled = Common::GekkoAssembler::Assemble(
@@ -7515,6 +7598,7 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard,
   wrote = ApplyAudioListenerPatch(guard) || wrote;
   wrote = RestoreLegacyFrustumCullingBypasses(guard) || wrote;
   wrote = ApplyHmdFrustumPatches(guard, settings.frustum_culling_degrees) || wrote;
+  wrote = ApplyHmdRendererViewPlanePatch(guard) || wrote;
   wrote = ApplyHmdCameraFacingPatches(guard) || wrote;
   wrote = ApplyHmdParticleViewSourcePatches(guard) || wrote;
 
@@ -8075,6 +8159,7 @@ void ResetNativeRuntime()
   s_audio_listener_patch.applied = false;
   for (DynamicPpcPatch& patch : s_hmd_frustum_patches)
     patch.applied = false;
+  s_hmd_renderer_view_plane_patch.applied = false;
   for (DynamicPpcPatch& patch : s_hmd_camera_facing_patches)
     patch.applied = false;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)

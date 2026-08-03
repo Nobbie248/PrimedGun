@@ -2176,6 +2176,7 @@ void MainWindow::ConnectStack()
   auto* pause_button = new QPushButton(tr("Pause"), game_tab);
   auto* stop_button = new QPushButton(tr("Stop"), game_tab);
   auto* options_button = new QPushButton(tr("Game Options..."), game_tab);
+  auto* setup_notes_button = new QPushButton(tr("Setup Notes"), game_tab);
   auto* select_state_slot_button = new QPushButton(tr("Select State Slot"), game_tab);
   auto* transfer_old_save_button =
       new QPushButton(tr("Transfer Old Memory Card / Settings"), game_tab);
@@ -2220,6 +2221,7 @@ void MainWindow::ConnectStack()
   pause_button->setFlat(true);
   stop_button->setFlat(true);
   options_button->setFlat(true);
+  setup_notes_button->setFlat(true);
   select_state_slot_button->setFlat(true);
   transfer_old_save_button->setFlat(true);
   select_button->setStyleSheet(game_button_style);
@@ -2227,6 +2229,7 @@ void MainWindow::ConnectStack()
   pause_button->setStyleSheet(game_button_style);
   stop_button->setStyleSheet(game_button_style);
   options_button->setStyleSheet(game_button_style);
+  setup_notes_button->setStyleSheet(game_button_style);
   select_state_slot_button->setStyleSheet(game_button_style);
   transfer_old_save_button->setStyleSheet(game_button_style);
   QSettings& settings = Settings::GetQSettings();
@@ -2841,9 +2844,7 @@ void MainWindow::ConnectStack()
   auto* setup_layout = make_scroll_tab(tr("Setup"));
   setup_layout->setContentsMargins(12, 10, 12, 0);
   setup_layout->addWidget(section_label(tr("Setup"), game_tab));
-  auto* notes = new QLabel(tr("Use the README for setup instructions."), game_tab);
-  notes->setObjectName(QStringLiteral("PrimedGunMuted"));
-  setup_layout->addWidget(notes);
+  setup_layout->addWidget(setup_notes_button);
   separator(setup_layout);
   setup_layout->addWidget(selected_game);
   auto* select_game_row = new QHBoxLayout;
@@ -2879,6 +2880,57 @@ void MainWindow::ConnectStack()
     setup_art->setFixedHeight(scaled_samus.height());
   }
   setup_layout->addWidget(setup_art, 0, Qt::AlignLeft | Qt::AlignBottom);
+
+  connect(setup_notes_button, &QPushButton::clicked, this, [this, game_tab] {
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Setup Notes"));
+    dialog.setModal(true);
+    dialog.resize(680, 500);
+    dialog.setMinimumSize(520, 360);
+    dialog.setStyleSheet(game_tab->styleSheet());
+
+    auto* dialog_layout = new QVBoxLayout(&dialog);
+    dialog_layout->setContentsMargins(16, 14, 16, 14);
+    dialog_layout->setSpacing(12);
+
+    auto* title = new QLabel(tr("Setup Notes"), &dialog);
+    title->setObjectName(QStringLiteral("PrimedGunSection"));
+    dialog_layout->addWidget(title);
+
+    auto* scroll = new QScrollArea(&dialog);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget(scroll);
+    auto* content_layout = new QVBoxLayout(content);
+    content_layout->setContentsMargins(14, 12, 14, 12);
+
+    auto* notes = new QLabel(
+        tr(R"(<ul style="margin: 0; padding-left: 22px;">
+<li>The game runs at 60 fps, set your HMD to 120 Hz to correct frame pacing.</li>
+<li>Meta's own OpenXR environment is not recommended; try SteamVR or Virtual Desktop instead.</li>
+<li>Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.</li>
+<li>Check the Layout tab for controller bindings.</li>
+<li>To transfer your old saves, go to <code>User\GC</code>, copy your memory card, and place it into the new folder. Then go to Dolphin Settings, open the GameCube tab, and select the save there.</li>
+<li>Do not transfer save states across versions. Make sure to save normally before you transfer.</li>
+<li>Once in game, click the right stick to set your height.</li>
+<li>Click the left thumbstick to open or close the in-headset settings menu.</li>
+<li>Try to stay in the centre of your play space and face forward, this mod is not roomscaled.</li>
+<li>Use Save Settings after changing PrimedGun options to apply them.</li>
+</ul>)"),
+        content);
+    notes->setTextFormat(Qt::RichText);
+    notes->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    notes->setWordWrap(true);
+    notes->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    content_layout->addWidget(notes);
+    content_layout->addStretch();
+    scroll->setWidget(content);
+    dialog_layout->addWidget(scroll, 1);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    dialog_layout->addWidget(buttons);
+    dialog.exec();
+  });
 
   auto* controller_layout = make_scroll_tab(tr("Controller"));
   controller_layout->addWidget(section_label(tr("Controller Mapping"), game_tab));
