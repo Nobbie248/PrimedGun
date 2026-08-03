@@ -1228,8 +1228,9 @@ void PrimedGunDumpMem1(QWidget* parent)
             format_f32(read_mem1_f32(base + 0x08u)), format_f32(read_mem1_f32(base + 0x0Cu)));
       }
     };
-    const auto append_branch_watch = [&](const char* label, u32 site, u32 original, u32 cave) {
-      const u32 branch = ppc_branch(site, cave);
+    const auto append_branch_watch = [&](const char* label, u32 site, u32 original, u32 cave,
+                                         bool link = false) {
+      const u32 branch = ppc_branch(site, cave) | (link ? 1u : 0u);
       const std::optional<u32> actual = read_mem1_u32(site);
       std::string status = "unreadable";
       if (actual)
@@ -1329,7 +1330,9 @@ void PrimedGunDumpMem1(QWidget* parent)
          {0x8000A968u, 0x8000A9B4u, 0x8000E548u, 0x80041A8Cu, 0x8000E7B4u,
           0x8000E808u, 0x8000E83Cu, 0x8000E71Cu,
           0x8000FA50u, 0x800BD808u, 0x800BE25Cu, 0x80112508u, 0x801122CCu,
-          0x800E0434u, 0x801B9070u, 0x800830A0u, 0x8026529Cu, 0x80345200u,
+          0x800E0434u, 0x801B9070u, 0x800830A0u, 0x8026529Cu, 0x800471ECu,
+          0x80047488u,
+          0x80345200u, 0x801E9F58u,
           0x8017EACCu, 0x8018C950u, 0x8018C988u, 0x800243CCu, 0x80024414u,
           0x80024450u, 0x8002448Cu, 0x800244C8u, 0x80024504u})
     {
@@ -1342,7 +1345,7 @@ void PrimedGunDumpMem1(QWidget* parent)
          {0x80001C00u, 0x80001C80u, 0x80001D00u, 0x80001D40u, 0x80001D80u,
           0x80001DC0u, 0x80001E00u, 0x80001E80u, 0x80001F00u, 0x80001FA0u,
           0x80002000u, 0x80002180u, 0x80002200u, 0x80002280u, 0x800022C0u,
-          0x80002300u,
+          0x80002300u, 0x80002480u,
           0x800023A0u, 0x80002400u, 0x80002620u, 0x80002660u, 0x800026D0u,
           0x80002740u, 0x80002780u})
     {
@@ -1361,13 +1364,15 @@ void PrimedGunDumpMem1(QWidget* parent)
     append_branch_watch("ScanIndicatorViewBasis", 0x801122CCu, 0xC0410074u, 0x80002200u);
     append_branch_watch("BallCameraLevel", 0x800830A0u, 0x387F0034u, 0x80002740u);
     append_branch_watch("InterpolationCameraLevel", 0x8026529Cu, 0x887E00E4u, 0x80002780u);
+    append_branch_watch("HmdActorFrustum", 0x80047488u, 0x482FDDCDu, 0x80002480u, true);
+    append_branch_watch("HmdRendererFrustum", 0x800471ECu, 0x482FE069u, 0x80002480u, true);
     append_words("FirstPersonPitchCave", 0x80001C00u, 8);
     append_words("CombatPitchCave0", 0x80001D40u, 8);
     append_words("CombatPitchCave1", 0x80001D80u, 8);
     append_words("CombatPitchCave2", 0x80001DC0u, 8);
     append_words("CombatElevationPitchCave", 0x80001E00u, 12);
     append_words("ScanIndicatorViewBasisCave", 0x80002200u, 8);
-    append_words("DisableFrustumCullingCave", 0x80002280u, 10);
+    append_words("HmdFrustumCave", 0x80002480u, 35);
     append_words("FirstPersonOrbitAimVectorCave", 0x800022C0u, 4);
     append_words("BallCameraLevelCave", 0x80002740u, 16);
     append_words("InterpolationCameraLevelCave", 0x80002780u, 20);
@@ -2261,7 +2266,7 @@ void MainWindow::ConnectStack()
     runtime.patch_reticle =
         settings.value(QStringLiteral("primedgun/patch_reticle"), runtime.patch_reticle).toBool();
     runtime.builtin_patches_enabled = true;
-    runtime.patch_disable_frustum_culling = true;
+    runtime.patch_disable_frustum_culling = false;
     runtime.patch_no_idle_sway = true;
     runtime.patch_disable_arm_cannon_idle_fidget = true;
     runtime.patch_beam_projectile_timing = true;
@@ -2324,6 +2329,14 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primedgun/cinematic_screen_enabled"),
                        runtime.cinematic_screen_enabled)
             .toBool();
+    runtime.frustum_culling_enabled =
+        settings.value(QStringLiteral("primedgun/frustum_culling_enabled"),
+                       runtime.frustum_culling_enabled)
+            .toBool();
+    runtime.frustum_culling_degrees =
+        settings.value(QStringLiteral("primedgun/frustum_culling_degrees"),
+                       runtime.frustum_culling_degrees)
+            .toFloat();
     runtime.metroid_hud_distance =
         settings.value(QStringLiteral("primedgun/metroid_hud_distance"),
                        runtime.metroid_hud_distance)
@@ -2377,11 +2390,7 @@ void MainWindow::ConnectStack()
             .toBool();
     runtime.xr_dpad_enabled =
         settings.value(QStringLiteral("primedgun/xr_dpad_enabled"), runtime.xr_dpad_enabled).toBool();
-    runtime.xr_dpad_use_thumbrest_modifier =
-        settings
-            .value(QStringLiteral("primedgun/xr_dpad_use_thumbrest_modifier"),
-                   runtime.xr_dpad_use_thumbrest_modifier)
-            .toBool();
+    settings.remove(QStringLiteral("primedgun/xr_dpad_use_thumbrest_modifier"));
     runtime.xr_dpad_head_radius =
         settings.value(QStringLiteral("primedgun/xr_dpad_head_radius"),
                        runtime.xr_dpad_head_radius)
@@ -2479,6 +2488,10 @@ void MainWindow::ConnectStack()
                       runtime.vr_menu_requires_head_zone);
     settings.setValue(QStringLiteral("primedgun/cinematic_screen_enabled"),
                       runtime.cinematic_screen_enabled);
+    settings.setValue(QStringLiteral("primedgun/frustum_culling_enabled"),
+                      runtime.frustum_culling_enabled);
+    settings.setValue(QStringLiteral("primedgun/frustum_culling_degrees"),
+                      runtime.frustum_culling_degrees);
     settings.setValue(QStringLiteral("primedgun/metroid_hud_distance"),
                       runtime.metroid_hud_distance);
     settings.setValue(QStringLiteral("primedgun/metroid_hud_size"), runtime.metroid_hud_size);
@@ -2503,8 +2516,6 @@ void MainWindow::ConnectStack()
     settings.setValue(QStringLiteral("primedgun/position_marker_enabled"),
                       runtime.position_marker_enabled);
     settings.setValue(QStringLiteral("primedgun/xr_dpad_enabled"), runtime.xr_dpad_enabled);
-    settings.setValue(QStringLiteral("primedgun/xr_dpad_use_thumbrest_modifier"),
-                      runtime.xr_dpad_use_thumbrest_modifier);
     settings.setValue(QStringLiteral("primedgun/xr_dpad_head_radius"), runtime.xr_dpad_head_radius);
     settings.setValue(QStringLiteral("primedgun/xr_dpad_head_y_below"),
                       runtime.xr_dpad_head_y_below);
@@ -2921,9 +2932,6 @@ void MainWindow::ConnectStack()
   rumble_hand_row->addStretch();
   auto* dpad_enabled = new QCheckBox(tr("Enable visor gesture input"), game_tab);
   dpad_enabled->setChecked(runtime->xr_dpad_enabled);
-  auto* dpad_thumbrest_modifier =
-      new QCheckBox(tr("Use Quest thumb rest for visor input"), game_tab);
-  dpad_thumbrest_modifier->setChecked(runtime->xr_dpad_use_thumbrest_modifier);
   auto* primedgun_grip_inputs_enabled =
       new QCheckBox(tr("Use grip input"), game_tab);
   primedgun_grip_inputs_enabled->setChecked(runtime->primedgun_grip_inputs_enabled);
@@ -3001,7 +3009,6 @@ void MainWindow::ConnectStack()
   separator(controller_layout);
   controller_layout->addWidget(section_label(tr("D-pad"), game_tab));
   controller_layout->addWidget(dpad_enabled);
-  controller_layout->addWidget(dpad_thumbrest_modifier);
   auto* dpad_radius_spin =
       add_float_row(controller_layout, tr("Head radius"), 0.08, 0.28, 0.01,
                     runtime->xr_dpad_head_radius,
@@ -3109,6 +3116,15 @@ void MainWindow::ConnectStack()
   auto* position_marker_enabled = new QCheckBox(tr("Show floor position marker"), game_tab);
   position_marker_enabled->setChecked(runtime->position_marker_enabled);
   calibration_layout->addWidget(position_marker_enabled);
+  separator(calibration_layout);
+  calibration_layout->addWidget(section_label(tr("Culling"), game_tab));
+  auto* frustum_culling_enabled = new QCheckBox(tr("Enable frustum culling"), game_tab);
+  frustum_culling_enabled->setChecked(runtime->frustum_culling_enabled);
+  calibration_layout->addWidget(frustum_culling_enabled);
+  auto* frustum_culling_degrees_spin =
+      add_float_row(calibration_layout, tr("Culling cone"), 70.0, 175.0, 1.0,
+                    runtime->frustum_culling_degrees,
+                    [runtime](float v) { runtime->frustum_culling_degrees = v; });
   separator(calibration_layout);
   calibration_layout->addWidget(section_label(tr("HUD"), game_tab));
   auto* reset_hud = new QPushButton(tr("Reset HUD"), game_tab);
@@ -3627,6 +3643,7 @@ void MainWindow::ConnectStack()
     const QSignalBlocker vr_menu_hold_left_stick_blocker{vr_menu_hold_left_stick};
     const QSignalBlocker vr_menu_requires_head_zone_blocker{vr_menu_requires_head_zone};
     const QSignalBlocker cinematic_screen_enabled_blocker{cinematic_screen_enabled};
+    const QSignalBlocker frustum_culling_enabled_blocker{frustum_culling_enabled};
     const QSignalBlocker rumble_enabled_blocker{rumble_enabled};
     const QSignalBlocker rumble_hand_mode_blocker{rumble_hand_mode};
     const QSignalBlocker dpad_enabled_blocker{dpad_enabled};
@@ -3671,10 +3688,10 @@ void MainWindow::ConnectStack()
     vr_menu_hold_left_stick->setChecked(runtime->vr_menu_hold_left_stick);
     vr_menu_requires_head_zone->setChecked(runtime->vr_menu_requires_head_zone);
     cinematic_screen_enabled->setChecked(runtime->cinematic_screen_enabled);
+    frustum_culling_enabled->setChecked(runtime->frustum_culling_enabled);
     rumble_enabled->setChecked(runtime->rumble_enabled);
     rumble_hand_mode->setCurrentIndex(std::clamp(runtime->rumble_hand_mode, 0, 2));
     dpad_enabled->setChecked(runtime->xr_dpad_enabled);
-    dpad_thumbrest_modifier->setChecked(runtime->xr_dpad_use_thumbrest_modifier);
     combat_jump_use_primary_button->setChecked(runtime->combat_jump_use_primary_button);
     primedgun_grip_inputs_enabled->setChecked(runtime->primedgun_grip_inputs_enabled);
     primedgun_grip_inputs_use_trackpad->setChecked(runtime->primedgun_grip_inputs_use_trackpad);
@@ -3697,6 +3714,7 @@ void MainWindow::ConnectStack()
     set_float(movement_accel_spin, runtime->directional_movement_accel);
     set_float(movement_air_accel_spin, runtime->directional_movement_air_accel);
     set_float(look_yaw_sensitivity_spin, runtime->look_yaw_sensitivity);
+    set_float(frustum_culling_degrees_spin, runtime->frustum_culling_degrees);
     set_float(metroid_hud_distance_spin, runtime->metroid_hud_distance);
     set_float(metroid_hud_size_spin, runtime->metroid_hud_size);
     set_float(metroid_hud_offset_vertical_spin,
@@ -3734,7 +3752,6 @@ void MainWindow::ConnectStack()
     runtime->rumble_intensity = 0.35f;
     runtime->rumble_hand_mode = 2;
     runtime->xr_dpad_enabled = true;
-    runtime->xr_dpad_use_thumbrest_modifier = false;
     runtime->combat_jump_use_primary_button = false;
     runtime->primedgun_grip_inputs_enabled = true;
     runtime->primedgun_grip_inputs_use_trackpad = false;
@@ -3798,6 +3815,11 @@ void MainWindow::ConnectStack()
     runtime->cinematic_screen_enabled = checked;
     apply_runtime();
   });
+  connect(frustum_culling_enabled, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->frustum_culling_enabled = checked;
+    apply_runtime();
+  });
   connect(rumble_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
     runtime->rumble_enabled = checked;
     apply_runtime();
@@ -3809,11 +3831,6 @@ void MainWindow::ConnectStack()
   });
   connect(dpad_enabled, &QCheckBox::toggled, this, [runtime, apply_runtime](bool checked) {
     runtime->xr_dpad_enabled = checked;
-    apply_runtime();
-  });
-  connect(dpad_thumbrest_modifier, &QCheckBox::toggled, this,
-          [runtime, apply_runtime](bool checked) {
-    runtime->xr_dpad_use_thumbrest_modifier = checked;
     apply_runtime();
   });
   connect(combat_jump_use_primary_button, &QCheckBox::toggled, this,

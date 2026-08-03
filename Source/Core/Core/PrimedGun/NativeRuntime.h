@@ -15,7 +15,7 @@ struct RuntimeSettings
 {
   bool enabled = true;
   bool builtin_patches_enabled = true;
-  bool patch_disable_frustum_culling = true;
+  bool patch_disable_frustum_culling = false;
   bool patch_no_idle_sway = true;
   bool patch_disable_arm_cannon_idle_fidget = true;
   bool patch_beam_projectile_timing = true;
@@ -52,6 +52,8 @@ struct RuntimeSettings
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
   bool cinematic_screen_enabled = false;
+  bool frustum_culling_enabled = true;
+  float frustum_culling_degrees = 115.0f;
   float metroid_hud_distance = 0.5f;
   float metroid_hud_size = 0.5f;
   float metroid_hud_offset_up = 0.0f;
@@ -60,7 +62,6 @@ struct RuntimeSettings
   float metroid_hud_offset_right = 0.0f;
   bool position_marker_enabled = false;
   bool xr_dpad_enabled = true;
-  bool xr_dpad_use_thumbrest_modifier = false;
   float xr_dpad_head_radius = 0.28f;
   float xr_dpad_head_y_below = 0.02f;
   float xr_dpad_deadzone = 0.45f;

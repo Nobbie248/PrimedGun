@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
@@ -167,6 +168,7 @@ constexpr u32 AUDIO_LISTENER_SCRATCH = SCRATCH_BASE + 0x700u;
 constexpr u32 HMD_CAMERA_FACING_CAVE = SCRATCH_BASE + 0x720u;
 constexpr u32 HMD_CAMERA_FACING_SCRATCH = SCRATCH_BASE + 0x7C0u;
 constexpr u32 HMD_CAMERA_FACING_MATRIX = HMD_CAMERA_FACING_SCRATCH + 0x04u;
+constexpr u32 HMD_FRUSTUM_DISABLE_CULLING_SCRATCH = HMD_CAMERA_FACING_SCRATCH + 0x3Cu;
 constexpr u32 DPAD_DISABLE_OWNER_MAGIC = 0x50474450u;  // PGDP
 
 constexpr u32 FIRST_PERSON_PITCH_LOAD_CAVE = PATCH_CODE_ARENA_BASE + 0x000u;
@@ -189,6 +191,7 @@ constexpr u32 SCAN_RETICLE_TRACE_CURR_CAVE = PATCH_CODE_ARENA_BASE + 0x580u;
 constexpr u32 SCAN_INDICATOR_UPDATE_TRACE_CAVE = PATCH_CODE_ARENA_BASE + 0x5C0u;
 constexpr u32 SCAN_INDICATOR_VIEW_BASIS_CAVE = PATCH_CODE_ARENA_BASE + 0x600u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_CAVE = PATCH_CODE_ARENA_BASE + 0x6C0u;
+constexpr u32 HMD_FRUSTUM_CAVE = PATCH_CODE_ARENA_BASE + 0x880u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_ADDRESS = 0x8000A9B4u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_CAVE = PATCH_CODE_ARENA_BASE + 0x680u;
 constexpr u32 LEGACY_MORPHBALL_CAMERA_RETURN_ORIGINAL = 0x80010054u;
@@ -203,6 +206,17 @@ constexpr u32 AUDIO_LISTENER_PATCH_ORIGINAL = 0xD1010008u;
 constexpr u32 AUDIO_LISTENER_LEGACY_BAD_CAVE = 0x80002300u;
 constexpr u32 AUDIO_LISTENER_LEGACY_HIGH_CAVE = 0x817F8000u;
 constexpr u32 CAMERA_MANAGER_GET_CURRENT_CAMERA_TRANSFORM = 0x8000A968u;
+constexpr u32 PRE_RENDER_FRUSTUM_CALL = 0x80047488u;
+constexpr u32 PRE_RENDER_FRUSTUM_CALL_ORIGINAL = 0x482FDDCDu;
+constexpr u32 SETUP_VIEW_FRUSTUM_CALL = 0x800471ECu;
+constexpr u32 SETUP_VIEW_FRUSTUM_CALL_ORIGINAL = 0x482FE069u;
+constexpr u32 FRUSTUM_PLANES_CONSTRUCTOR = 0x80345254u;
+constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS = 0x80345200u;
+constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS_PATCHED = 0x4BCBD080u;
+constexpr u32 LEGACY_FRUSTUM_PLANES_BYPASS_ORIGINAL = 0x7FA3EB78u;
+constexpr u32 LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS = 0x801E9F58u;
+constexpr u32 LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS_PATCHED = 0x38600001u;
+constexpr u32 LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS_ORIGINAL = 0x4815B0D5u;
 constexpr u32 ENVFX_RAIN_SOUND_CAMERA_CALL = 0x8020FFC0u;
 constexpr u32 ENVFX_RAIN_SOUND_CAMERA_CALL_ORIGINAL = 0x4BDFA9A9u;
 constexpr u32 ENVFX_RENDER_CAMERA_CALL = 0x802102D8u;
@@ -245,15 +259,15 @@ constexpr u32 VR_MENU_LAYOUT_TAB = 0;
 constexpr u32 VR_MENU_CALIBRATION_TAB = 1;
 constexpr float VR_MENU_TEXTURE_WIDTH = 1024.0f;
 constexpr float VR_MENU_TEXTURE_HEIGHT = 512.0f;
-constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 10;
-constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 20;
+constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 12;
+constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 22;
 constexpr u32 VR_MENU_CALIBRATION_PAGE_COUNT = 2;
 constexpr u32 VR_MENU_CONTROL_TAB = 2;
 constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
 constexpr u32 VR_MENU_CANNON_TAB = 4;
 constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 17;
+constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 16;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
 constexpr std::array<int, 4> SNAP_TURN_DEGREES_CHOICES = {30, 45, 60, 90};
 constexpr float VR_MENU_ROW_TEXT_Y = 146.0f;
@@ -413,6 +427,7 @@ bool s_last_vr_menu_stick_right = false;
 bool s_vr_menu_visible = false;
 bool s_cinematic_screen_active = false;
 u64 s_cinematic_screen_hold_until_frame = 0;
+u64 s_cinematic_no_cull_hold_until_frame = 0;
 u32 s_cinematic_screen_generation = 0;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
@@ -566,6 +581,10 @@ DynamicPpcPatch s_first_person_orbit_aim_vector_patch{
     FIRST_PERSON_ORBIT_AIM_VECTOR_CAVE, false};
 DynamicPpcPatch s_audio_listener_patch{
     AUDIO_LISTENER_PATCH_ADDRESS, AUDIO_LISTENER_PATCH_ORIGINAL, 0, AUDIO_LISTENER_CAVE, false};
+DynamicPpcPatch s_hmd_frustum_patches[] = {
+    {PRE_RENDER_FRUSTUM_CALL, PRE_RENDER_FRUSTUM_CALL_ORIGINAL, 0, HMD_FRUSTUM_CAVE, false},
+    {SETUP_VIEW_FRUSTUM_CALL, SETUP_VIEW_FRUSTUM_CALL_ORIGINAL, 0, HMD_FRUSTUM_CAVE, false},
+};
 DynamicPpcPatch s_hmd_camera_facing_patches[] = {
     {ENVFX_RAIN_SOUND_CAMERA_CALL, ENVFX_RAIN_SOUND_CAMERA_CALL_ORIGINAL, 0,
      HMD_CAMERA_FACING_CAVE, false},
@@ -1016,6 +1035,12 @@ u32 PpcBeq(u32 from, u32 to)
 {
   const s32 offset = static_cast<s32>(to - from);
   return 0x41820000u | (static_cast<u32>(offset) & 0x0000FFFCu);
+}
+
+u32 PpcBne(u32 from, u32 to)
+{
+  const s32 offset = static_cast<s32>(to - from);
+  return 0x40820000u | (static_cast<u32>(offset) & 0x0000FFFCu);
 }
 
 u32 PpcMr(u32 dest, u32 src)
@@ -3903,25 +3928,6 @@ bool LeftControllerNearHead(const Pose& left, const Pose& hmd, const RuntimeSett
          dy >= -(settings.xr_dpad_head_y_below + 0.04f) && dy <= 0.28f;
 }
 
-bool IsQuestTouchPlusProfile(std::string_view profile)
-{
-  return profile.find("/interaction_profiles/meta/touch_controller_plus") != std::string_view::npos;
-}
-
-bool QuestTouchPlusThumbrestModifierActive(const Common::VR::OpenXRInputSnapshot& snapshot)
-{
-  for (std::size_t hand = 0; hand < snapshot.controllers.size(); ++hand)
-  {
-    if (snapshot.controllers[hand].thumbrest_touch &&
-        IsQuestTouchPlusProfile(snapshot.interaction_profiles[hand]))
-    {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 void ClearDpadDisableOwnershipScratch(const Core::CPUThreadGuard& guard)
 {
   TryWriteU32(guard, DPAD_DISABLE_OWNER_SCRATCH, 0);
@@ -4449,45 +4455,31 @@ void UpdateXrDpad(const Core::CPUThreadGuard& guard,
   const Common::VR::OpenXRControllerState& dpad_hand =
       snapshot.controllers[settings.use_right_hand ? 0 : 1];
 
-  if (settings.xr_dpad_use_thumbrest_modifier)
+  if (!dpad_hand.connected || !dpad_hand.aim_pose.valid || !snapshot.head_pose.valid)
   {
-    if (!dpad_hand.connected || !QuestTouchPlusThumbrestModifierActive(snapshot))
-    {
-      disarm();
-      return;
-    }
+    disarm();
+    return;
+  }
 
-    dpad_modifier_active = true;
-    dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
+  const Pose hand_pose = PoseFromOpenXR(dpad_hand.aim_pose);
+  const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
+  bool in_head_zone = LeftControllerNearHead(hand_pose, hmd_pose, settings);
+  if (in_head_zone)
+  {
+    s_last_near_head_frame = s_frame_counter;
+  }
+  else if (s_last_near_head_frame != 0 && s_frame_counter - s_last_near_head_frame < 16)
+  {
+    in_head_zone = true;
   }
   else
   {
-    if (!dpad_hand.connected || !dpad_hand.aim_pose.valid || !snapshot.head_pose.valid)
-    {
-      disarm();
-      return;
-    }
-
-    const Pose hand_pose = PoseFromOpenXR(dpad_hand.aim_pose);
-    const Pose hmd_pose = PoseFromOpenXR(snapshot.head_pose);
-    bool in_head_zone = LeftControllerNearHead(hand_pose, hmd_pose, settings);
-    if (in_head_zone)
-    {
-      s_last_near_head_frame = s_frame_counter;
-    }
-    else if (s_last_near_head_frame != 0 && s_frame_counter - s_last_near_head_frame < 16)
-    {
-      in_head_zone = true;
-    }
-    else
-    {
-      disarm();
-      return;
-    }
-
-    dpad_modifier_active = in_head_zone;
-    dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
+    disarm();
+    return;
   }
+
+  dpad_modifier_active = in_head_zone;
+  dir = StickToDpad(dpad_hand.thumbstick_x, dpad_hand.thumbstick_y, deadzone, s_last_dir);
 
   if (dir != DpadNone)
   {
@@ -4598,13 +4590,6 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
   const Pose controller_move_pose = PoseFromOpenXR(controller.aim_pose);
   const Pose move_pose =
       settings.directional_movement_use_hmd_direction ? hmd_pose : controller_move_pose;
-  if (settings.xr_dpad_enabled && settings.xr_dpad_use_thumbrest_modifier &&
-      QuestTouchPlusThumbrestModifierActive(snapshot))
-  {
-    s_directional_move_speed = 0.0f;
-    return;
-  }
-
   const Common::VR::OpenXRControllerState& dpad_hand =
       snapshot.controllers[settings.use_right_hand ? 0 : 1];
   if (dpad_hand.connected && dpad_hand.aim_pose.valid &&
@@ -4993,13 +4978,13 @@ int VrMenuCalibrationActualIndex(u32 local_index)
 u32 VrMenuResetActionForSelection()
 {
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 9)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 11)
     return VR_MENU_RESET_TARGETING_ACTION;
   if (s_vr_menu_tab == VR_MENU_CALIBRATION_TAB &&
-      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 17)
+      VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
-      VrMenuControlActualIndex(s_vr_menu_selected_index) == 16)
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 15)
   {
     return VR_MENU_RESET_CONTROLLER_ACTION;
   }
@@ -5018,8 +5003,8 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuCalibrationActualIndex(index);
-    return (actual_index >= 1 && actual_index <= 6) ||
-           (actual_index >= 10 && actual_index <= 15);
+    return (actual_index >= 1 && actual_index <= 6) || actual_index == 10 ||
+           (actual_index >= 12 && actual_index <= 17);
   }
   case VR_MENU_CONTROL_TAB:
   {
@@ -5027,8 +5012,8 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuControlActualIndex(index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 13 ||
-           actual_index == 14 || actual_index == 15;
+    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
+           actual_index == 13 || actual_index == 14;
   }
   case VR_MENU_MOVEMENT_TAB:
     return (index >= 3 && index <= 7) || index == 9;
@@ -5157,7 +5142,6 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
   settings->xr_dpad_enabled = true;
-  settings->xr_dpad_use_thumbrest_modifier = false;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
   settings->xr_dpad_deadzone = 0.45f;
@@ -5203,6 +5187,21 @@ bool ElevatorWorldTransitionActive(const Core::CPUThreadGuard& guard)
   u32 trans_type = 0;
   return TryReadU32(guard, trans_manager + WORLD_TRANS_MANAGER_TYPE_OFFSET, &trans_type) &&
          trans_type == WORLD_TRANS_MANAGER_TYPE_ELEVATOR;
+}
+
+void UpdateCinematicFrustumCulling(const Core::CPUThreadGuard& guard,
+                                   const RuntimeSettings& settings)
+{
+  if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard))
+  {
+    s_cinematic_no_cull_hold_until_frame =
+        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
+  }
+
+  const bool disable_culling =
+      !settings.frustum_culling_enabled ||
+      s_frame_counter < s_cinematic_no_cull_hold_until_frame;
+  TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, disable_culling ? 1u : 0u);
 }
 
 void SetCinematicScreenActive(bool active)
@@ -5323,21 +5322,25 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
           std::clamp(settings->gun_targeting_radius + sign * 0.1f, 0.1f, 25.0f);
       break;
     case 10:
-      settings->model_offset_x += sign * 0.01f;
-      break;
-    case 11:
-      settings->model_offset_y += sign * 0.01f;
+      settings->frustum_culling_degrees =
+          std::clamp(settings->frustum_culling_degrees + sign * 1.0f, 70.0f, 175.0f);
       break;
     case 12:
-      settings->model_offset_z += sign * 0.01f;
+      settings->model_offset_x += sign * 0.01f;
       break;
     case 13:
-      settings->rot_offset_x += sign * 1.0f;
+      settings->model_offset_y += sign * 0.01f;
       break;
     case 14:
-      settings->rot_offset_y += sign * 1.0f;
+      settings->model_offset_z += sign * 0.01f;
       break;
     case 15:
+      settings->rot_offset_x += sign * 1.0f;
+      break;
+    case 16:
+      settings->rot_offset_y += sign * 1.0f;
+      break;
+    case 17:
       settings->rot_offset_z += sign * 1.0f;
       break;
     default:
@@ -5364,15 +5367,15 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       settings->primedgun_trackpad_press_threshold =
           std::clamp(settings->primedgun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
       break;
-    case 13:
+    case 12:
       settings->xr_dpad_head_radius =
           std::clamp(settings->xr_dpad_head_radius + sign * 0.01f, 0.05f, 0.60f);
       break;
-    case 14:
+    case 13:
       settings->xr_dpad_head_y_below =
           std::clamp(settings->xr_dpad_head_y_below + sign * 0.01f, 0.0f, 0.60f);
       break;
-    case 15:
+    case 14:
       settings->xr_dpad_deadzone =
           std::clamp(settings->xr_dpad_deadzone + sign * 0.05f, 0.0f, 0.95f);
       break;
@@ -5439,6 +5442,8 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 8)
       settings->height_prompt_enabled = !settings->height_prompt_enabled;
     else if (actual_index == 9)
+      settings->frustum_culling_enabled = !settings->frustum_culling_enabled;
+    else if (actual_index == 11)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5448,9 +5453,9 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->gun_targeting_radius = 4.0f;
       settings->visor_helmet_enabled = false;
     }
-    else if (actual_index == 16)
+    else if (actual_index == 18)
       settings->position_marker_enabled = !settings->position_marker_enabled;
-    else if (actual_index == 17)
+    else if (actual_index == 19)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5462,7 +5467,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 18)
+    else if (actual_index == 20)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;
@@ -5474,7 +5479,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = DEFAULT_ROT_OFFSET_Y;
       settings->rot_offset_z = DEFAULT_ROT_OFFSET_Z;
     }
-    else if (actual_index == 19)
+    else if (actual_index == 21)
     {
       settings->offset_x = 0.0f;
       settings->offset_y = 0.0f;
@@ -5516,9 +5521,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->primedgun_grip_inputs_use_trackpad = !settings->primedgun_grip_inputs_use_trackpad;
     else if (actual_index == 10 || actual_index == 11)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
-    else if (actual_index == 12)
-      settings->xr_dpad_use_thumbrest_modifier = !settings->xr_dpad_use_thumbrest_modifier;
-    else if (actual_index == 16)
+    else if (actual_index == 15)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5659,10 +5662,11 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.height_prompt_enabled = settings.height_prompt_enabled;
   overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
-  overlay.xr_dpad_use_thumbrest_modifier = settings.xr_dpad_use_thumbrest_modifier;
   overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
   overlay.cinematic_screen_active = settings.cinematic_screen_enabled && s_cinematic_screen_active;
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
+  overlay.frustum_culling_enabled = settings.frustum_culling_enabled;
+  overlay.frustum_culling_degrees = settings.frustum_culling_degrees;
   overlay.metroid_hud_distance = settings.metroid_hud_distance;
   overlay.metroid_hud_size = settings.metroid_hud_size;
   overlay.metroid_hud_offset_up = settings.metroid_hud_offset_up;
@@ -6949,6 +6953,127 @@ bool RestoreFirstPersonOrbitAimVectorPatch(const Core::CPUThreadGuard& guard)
   return restored;
 }
 
+bool RestoreLegacyFrustumCullingBypasses(const Core::CPUThreadGuard& guard)
+{
+  bool wrote = false;
+  const std::pair<u32, std::pair<u32, u32>> legacy_patches[] = {
+      {LEGACY_FRUSTUM_PLANES_BYPASS,
+       {LEGACY_FRUSTUM_PLANES_BYPASS_PATCHED, LEGACY_FRUSTUM_PLANES_BYPASS_ORIGINAL}},
+      {LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS,
+       {LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS_PATCHED,
+        LEGACY_WALL_CRAWLER_FRUSTUM_BYPASS_ORIGINAL}},
+  };
+
+  for (const auto& [address, values] : legacy_patches)
+  {
+    u32 current = 0;
+    if (TryReadU32(guard, address, &current) && current == values.first)
+      wrote = TryWriteInstruction(guard, address, values.second) || wrote;
+  }
+  return wrote;
+}
+
+bool ApplyHmdFrustumPatches(const Core::CPUThreadGuard& guard, float cone_degrees)
+{
+  constexpr u32 scratch_hi = (HMD_CAMERA_FACING_SCRATCH >> 16) & 0xffffu;
+  constexpr u32 scratch_lo = HMD_CAMERA_FACING_SCRATCH & 0xffffu;
+  constexpr u32 frustum_angle_address = HMD_FRUSTUM_CAVE + 0x78u;
+  constexpr u32 frustum_aspect_address = HMD_FRUSTUM_CAVE + 0x7Cu;
+  const float cone_radians = std::clamp(cone_degrees, 70.0f, 175.0f) *
+                             (static_cast<float>(MathUtil::PI) / 180.0f);
+  const u32 cone_radians_bits = std::bit_cast<u32>(cone_radians);
+  const std::initializer_list<HookWrite> cave_writes{
+      // Change only the transform copy passed to CFrustumPlanes, preserving
+      // camera translation and every vanilla projection/clip parameter.
+      {0x00u, 0x3D800000u | scratch_hi},  // lis r12, Scratch@ha
+      {0x04u, 0x618C0000u | scratch_lo},  // ori r12, r12, Scratch@l
+      {0x08u, 0x800C003Cu},               // lwz r0, disable_culling(r12)
+      {0x0Cu, 0x2C000000u},               // cmpwi r0, 0
+      {0x10u, PpcBne(HMD_FRUSTUM_CAVE + 0x10u, HMD_FRUSTUM_CAVE + 0x80u)},
+
+      {0x14u, 0x800C0000u},  // lwz r0, hmd_valid(r12)
+      {0x18u, 0x2C000000u},  // cmpwi r0, 0
+      {0x1Cu, PpcBeq(HMD_FRUSTUM_CAVE + 0x1Cu, HMD_FRUSTUM_CAVE + 0x74u)},
+
+      // Prime calculates horizontal FOV as vertical FOV times aspect. Use
+      // aspect 1 so the user-selected angle is symmetric on both axes.
+      {0x20u, 0x3D600000u | ((frustum_angle_address >> 16) & 0xffffu)},
+      {0x24u, 0xC02B0000u | (frustum_angle_address & 0xffffu)},  // lfs f1, angle(r11)
+      {0x28u, 0xC04B0000u | (frustum_aspect_address & 0xffffu)},  // lfs f2, aspect(r11)
+
+      {0x2Cu, 0x816C0004u},  // right.x
+      {0x30u, 0x91640000u},
+      {0x34u, 0x816C0008u},  // right.y
+      {0x38u, 0x91640004u},
+      {0x3Cu, 0x816C000Cu},  // right.z
+      {0x40u, 0x91640008u},
+
+      {0x44u, 0x816C0014u},  // forward.x
+      {0x48u, 0x91640010u},
+      {0x4Cu, 0x816C0018u},  // forward.y
+      {0x50u, 0x91640014u},
+      {0x54u, 0x816C001Cu},  // forward.z
+      {0x58u, 0x91640018u},
+
+      {0x5Cu, 0x816C0024u},  // up.x
+      {0x60u, 0x91640020u},
+      {0x64u, 0x816C0028u},  // up.y
+      {0x68u, 0x91640024u},
+      {0x6Cu, 0x816C002Cu},  // up.z
+      {0x70u, 0x91640028u},
+
+      // Tail-call the original constructor so LR returns to whichever state
+      // manager frustum call entered this shared wrapper.
+      {0x74u, PpcBranch(HMD_FRUSTUM_CAVE + 0x74u, FRUSTUM_PLANES_CONSTRUCTOR)},
+      {0x78u, cone_radians_bits},
+      {0x7Cu, 0x3F800000u},  // 1.0f aspect
+
+      // An empty reserved_vector is a valid CFrustumPlanes object and makes
+      // all of Prime's point/sphere/box tests pass during cinematics.
+      {0x80u, 0x38000000u},  // li r0, 0
+      {0x84u, 0x90030000u},  // stw r0, 0(r3)
+      {0x88u, 0x4E800020u},  // blr
+  };
+
+  const bool cave_matches = InstructionBlockMatches(guard, HMD_FRUSTUM_CAVE, cave_writes);
+  bool wrote = false;
+  if (!cave_matches)
+  {
+    if (!TryWriteInstructionBlock(guard, HMD_FRUSTUM_CAVE, cave_writes))
+    {
+      for (DynamicPpcPatch& patch : s_hmd_frustum_patches)
+        patch.applied = false;
+      return false;
+    }
+    wrote = true;
+  }
+
+  for (DynamicPpcPatch& patch : s_hmd_frustum_patches)
+  {
+    u32 current = 0;
+    if (!TryReadU32(guard, patch.address, &current))
+    {
+      patch.applied = false;
+      continue;
+    }
+
+    const u32 unlinked_branch = PpcBranch(patch.address, patch.cave);
+    const u32 linked_branch = unlinked_branch | 1u;
+    if (current != linked_branch && current != unlinked_branch && current != patch.original)
+    {
+      patch.applied = false;
+      continue;
+    }
+
+    if (current != linked_branch)
+      wrote = TryWriteInstruction(guard, patch.address, linked_branch) || wrote;
+
+    patch.applied = InstructionBlockMatches(guard, patch.cave, cave_writes) &&
+                    TryReadU32(guard, patch.address, &current) && current == linked_branch;
+  }
+  return wrote;
+}
+
 bool ApplyHmdCameraFacingPatches(const Core::CPUThreadGuard& guard)
 {
   static const auto assembled = Common::GekkoAssembler::Assemble(
@@ -7366,7 +7491,8 @@ _allowedNormalZ:
   return TryWriteInstruction(guard, SPRINGBALL_HOOK_ADDRESS, branch) || wrote;
 }
 
-bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
+bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard,
+                             const RuntimeSettings& settings)
 {
   bool wrote = false;
   u32 player = 0;
@@ -7387,6 +7513,8 @@ bool ApplyCombatPitchPatches(const Core::CPUThreadGuard& guard)
   wrote = ApplyFirstPersonOrbitAimVectorPatch(guard) || wrote;
   TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, scan_active ? 1u : 0u);
   wrote = ApplyAudioListenerPatch(guard) || wrote;
+  wrote = RestoreLegacyFrustumCullingBypasses(guard) || wrote;
+  wrote = ApplyHmdFrustumPatches(guard, settings.frustum_culling_degrees) || wrote;
   wrote = ApplyHmdCameraFacingPatches(guard) || wrote;
   wrote = ApplyHmdParticleViewSourcePatches(guard) || wrote;
 
@@ -7654,6 +7782,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
     ClearHmdCameraFacingScratch(guard);
+    TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
+    s_cinematic_no_cull_hold_until_frame = 0;
     ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
@@ -7669,6 +7799,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
     ClearAudioListenerScratch(guard);
     ClearHmdCameraFacingScratch(guard);
+    TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
+    s_cinematic_no_cull_hold_until_frame = 0;
     ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
@@ -7681,6 +7813,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
 
   s_game_was_active = true;
   UpdateCinematicScreenState(guard, settings);
+  UpdateCinematicFrustumCulling(guard, settings);
   UpdateShaderHunterGameFlowFlags(guard);
   if (settings.builtin_patches_enabled && RestoreLegacyMorphBallCameraReturnPatch(guard))
     InvalidatePrimedGunPatchICache(system);
@@ -7722,7 +7855,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   bool dynamic_patch_applied = false;
   if (settings.builtin_patches_enabled)
   {
-    dynamic_patch_applied = ApplyCombatPitchPatches(guard) || dynamic_patch_applied;
+    dynamic_patch_applied = ApplyCombatPitchPatches(guard, settings) || dynamic_patch_applied;
     if (settings.patch_beam_projectile_timing)
       dynamic_patch_applied = ApplyProjectileTransformPatches(guard) || dynamic_patch_applied;
   }
@@ -7876,6 +8009,7 @@ void ResetNativeRuntime()
   s_cinematic_screen_generation = 0;
   s_cinematic_screen_active = false;
   s_cinematic_screen_hold_until_frame = 0;
+  s_cinematic_no_cull_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;
   s_cannon_hand_pose_ready = false;
@@ -7939,6 +8073,8 @@ void ResetNativeRuntime()
   s_scan_indicator_view_basis_patch.original = DRAW_SCAN_INDICATOR_MODEL_BASIS_ORIGINAL;
   s_first_person_orbit_aim_vector_patch.applied = false;
   s_audio_listener_patch.applied = false;
+  for (DynamicPpcPatch& patch : s_hmd_frustum_patches)
+    patch.applied = false;
   for (DynamicPpcPatch& patch : s_hmd_camera_facing_patches)
     patch.applied = false;
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
@@ -8007,6 +8143,9 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
       ClampFinite(s_settings.gun_targeting_distance, defaults.gun_targeting_distance, 1.0f, 500.0f);
   s_settings.gun_targeting_radius =
       ClampFinite(s_settings.gun_targeting_radius, defaults.gun_targeting_radius, 0.1f, 50.0f);
+  s_settings.frustum_culling_degrees =
+      ClampFinite(s_settings.frustum_culling_degrees, defaults.frustum_culling_degrees, 70.0f,
+                  175.0f);
   s_settings.metroid_hud_distance =
       ClampFinite(s_settings.metroid_hud_distance, defaults.metroid_hud_distance, 0.1f, 3.0f);
   s_settings.metroid_hud_size =

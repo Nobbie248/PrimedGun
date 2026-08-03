@@ -304,7 +304,7 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
       return true;
 
     const int actual_index = CalibrationMenuActualIndex(s.calibration_page, index);
-    return (actual_index >= 1 && actual_index <= 8) ||
+    return (actual_index >= 1 && actual_index <= 6) || actual_index == 10 ||
            (actual_index >= 12 && actual_index <= 17);
   }
   case VR_MENU_MOVEMENT_TAB:
@@ -315,8 +315,8 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
       return true;
 
     const int actual_index = ControlMenuActualIndex(s.control_page, index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 13 ||
-           actual_index == 14 || actual_index == 15;
+    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
+           actual_index == 13 || actual_index == 14;
   }
   default:
     return false;
@@ -366,6 +366,8 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"TARGET RADIUS", FloatText(s.gun_targeting_radius, 1)});
       rows.push_back({"VISOR HELMET", s.visor_helmet_enabled ? "ON" : "OFF"});
       rows.push_back({"HEIGHT PROMPT", s.height_prompt_enabled ? "ON" : "OFF"});
+      rows.push_back({"FRUSTUM CULLING", s.frustum_culling_enabled ? "ON" : "OFF"});
+      rows.push_back({"CULLING CONE", FloatText(s.frustum_culling_degrees, 0)});
       rows.push_back({"RESET TARGETING", ConfirmText(s, RESET_TARGETING_ACTION)});
     }
     else
@@ -406,7 +408,6 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primedgun_trackpad_press_threshold, 2)});
       rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
       rows.push_back({"DIRECTION PAD", s.xr_dpad_enabled ? "ON" : "OFF"});
-      rows.push_back({"QUEST THUMB REST", s.xr_dpad_use_thumbrest_modifier ? "ON" : "OFF"});
       rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
       rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
       rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});

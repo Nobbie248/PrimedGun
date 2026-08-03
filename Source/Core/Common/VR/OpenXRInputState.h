@@ -114,12 +114,13 @@ struct PrimedGunVrOverlayState
   bool vr_overlays_enabled = true;
   bool height_prompt_enabled = true;
   bool xr_dpad_enabled = true;
-  bool xr_dpad_use_thumbrest_modifier = false;
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
   bool cinematic_screen_enabled = false;
   bool cinematic_screen_active = false;
   uint32_t cinematic_screen_generation = 0;
+  bool frustum_culling_enabled = true;
+  float frustum_culling_degrees = 115.0f;
   float metroid_hud_distance = 0.5f;
   float metroid_hud_size = 0.5f;
   float metroid_hud_offset_up = 0.0f;
