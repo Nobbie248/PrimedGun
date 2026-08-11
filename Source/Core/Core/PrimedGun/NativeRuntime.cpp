@@ -446,6 +446,7 @@ u64 s_cinematic_no_cull_hold_until_frame = 0;
 u32 s_cinematic_screen_generation = 0;
 bool s_game_menu_screen_active = false;
 bool s_game_map_screen_active = false;
+u64 s_game_menu_screen_hold_until_frame = 0;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -5277,6 +5278,7 @@ void ClearCinematicScreenState(bool enabled)
   SetCinematicScreenActive(false);
   s_game_menu_screen_active = false;
   s_game_map_screen_active = false;
+  s_game_menu_screen_hold_until_frame = 0;
   s_cinematic_screen_hold_until_frame = 0;
 #ifdef ENABLE_VR
   Common::VR::PrimedGunVrOverlayState overlay =
@@ -5297,21 +5299,37 @@ void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const Runtime
   }
 
   u32 gameflow = GAMEFLOW_NONE;
-  const bool game_menu_active =
-      settings.game_menu_screen_enabled &&
-      TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow) &&
+  const bool have_gameflow = TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow);
+  const bool game_menu_detected =
+      settings.game_menu_screen_enabled && have_gameflow &&
       (gameflow == GAMEFLOW_LOGBOOK || gameflow == GAMEFLOW_PAUSE || gameflow == GAMEFLOW_MAP);
-  s_game_menu_screen_active = game_menu_active;
-  s_game_map_screen_active = game_menu_active && gameflow == GAMEFLOW_MAP;
+  if (game_menu_detected)
+  {
+    s_game_menu_screen_active = true;
+    s_game_map_screen_active = gameflow == GAMEFLOW_MAP;
+    s_game_menu_screen_hold_until_frame =
+        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
+  }
+  else if (!settings.game_menu_screen_enabled ||
+           s_frame_counter >= s_game_menu_screen_hold_until_frame)
+  {
+    s_game_menu_screen_active = false;
+    s_game_map_screen_active = false;
+  }
+  const bool game_menu_active = s_game_menu_screen_active;
   const bool cutscene_active =
       settings.cinematic_screen_enabled &&
       (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard));
 
+  if (cutscene_active || game_menu_detected)
+  {
+    s_cinematic_screen_hold_until_frame =
+        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
+  }
+
   if (cutscene_active || game_menu_active)
   {
     SetCinematicScreenActive(true);
-    s_cinematic_screen_hold_until_frame =
-        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
     return;
   }
 
@@ -8204,6 +8222,7 @@ void ResetNativeRuntime()
   s_cinematic_screen_hold_until_frame = 0;
   s_game_menu_screen_active = false;
   s_game_map_screen_active = false;
+  s_game_menu_screen_hold_until_frame = 0;
   s_cinematic_no_cull_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;
