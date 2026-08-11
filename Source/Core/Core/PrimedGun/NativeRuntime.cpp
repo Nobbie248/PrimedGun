@@ -164,6 +164,7 @@ constexpr u32 GAMEFLOW_MENU_SCRATCH = SCRATCH_BASE + 0x690u;
 constexpr u32 MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH = SCRATCH_BASE + 0x694u;
 constexpr u32 FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH = SCRATCH_BASE + 0x698u;
 constexpr u32 SPRINGBALL_TRIGGER_SCRATCH = SCRATCH_BASE + 0x69Cu;
+constexpr u32 GAMEFLOW_OWNER_SCRATCH = SCRATCH_BASE + 0x6A0u;
 constexpr u32 AUDIO_LISTENER_SCRATCH = SCRATCH_BASE + 0x700u;
 constexpr u32 HMD_CAMERA_FACING_CAVE = SCRATCH_BASE + 0x720u;
 constexpr u32 HMD_CAMERA_FACING_SCRATCH = SCRATCH_BASE + 0x7C0u;
@@ -320,12 +321,22 @@ constexpr u32 RSTL_REF_DATA_OBJECT_OFFSET = 0x00u;
 constexpr u32 WORLD_TRANS_MANAGER_TYPE_OFFSET = 0x30u;
 constexpr u32 WORLD_TRANS_MANAGER_TYPE_ELEVATOR = 1u;
 constexpr u64 CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES = 10u;
+constexpr u64 GAME_MENU_CINEMA_EXIT_GRACE_FRAMES = 1u;
 constexpr u32 GAMEFLOW_NONE = 0u;
 constexpr u32 GAMEFLOW_MESSAGE = 1u;
 constexpr u32 GAMEFLOW_SAVE = 2u;
 constexpr u32 GAMEFLOW_LOGBOOK = 3u;
 constexpr u32 GAMEFLOW_PAUSE = 4u;
 constexpr u32 GAMEFLOW_MAP = 5u;
+constexpr u32 MF_GAME_GUI_MANAGER_REF_OFFSET = 0x18u;
+constexpr u32 MF_GAME_FLOW_STATE_OFFSET = 0x1Cu;
+constexpr u32 IN_GAME_GUI_PREVIOUS_STATE_OFFSET = 0x1BCu;
+constexpr u32 IN_GAME_GUI_NEXT_STATE_OFFSET = 0x1C0u;
+constexpr u32 IN_GAME_GUI_STATE_MAP = 2u;
+constexpr u32 IN_GAME_GUI_STATE_PAUSE = 3u;
+constexpr u32 IN_GAME_GUI_STATE_LOGBOOK = 4u;
+constexpr u32 STATE_MANAGER_FLAGS_OFFSET = 0xF94u;
+constexpr u8 STATE_MANAGER_IN_MAP_SCREEN_MASK = 0x10u;
 constexpr u32 PLAYER_STATE_CURRENT_VISOR_OFFSET = 0x14u;
 constexpr u32 PLAYER_STATE_TRANSITION_VISOR_OFFSET = 0x18u;
 constexpr u32 PLAYER_STATE_MAX_VISOR = 3u;
@@ -446,7 +457,7 @@ u64 s_cinematic_no_cull_hold_until_frame = 0;
 u32 s_cinematic_screen_generation = 0;
 bool s_game_menu_screen_active = false;
 bool s_game_map_screen_active = false;
-u64 s_game_menu_screen_hold_until_frame = 0;
+u64 s_game_menu_screen_release_frame = 0;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -5254,7 +5265,8 @@ bool ElevatorWorldTransitionActive(const Core::CPUThreadGuard& guard)
 void UpdateCinematicFrustumCulling(const Core::CPUThreadGuard& guard,
                                    const RuntimeSettings& settings)
 {
-  if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard))
+  if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard) ||
+      s_game_menu_screen_active)
   {
     s_cinematic_no_cull_hold_until_frame =
         s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
@@ -5273,21 +5285,71 @@ void SetCinematicScreenActive(bool active)
   s_cinematic_screen_active = active;
 }
 
-void ClearCinematicScreenState(bool enabled)
+void ClearCinematicScreenState(bool cutscene_enabled)
 {
   SetCinematicScreenActive(false);
   s_game_menu_screen_active = false;
   s_game_map_screen_active = false;
-  s_game_menu_screen_hold_until_frame = 0;
+  s_game_menu_screen_release_frame = 0;
   s_cinematic_screen_hold_until_frame = 0;
 #ifdef ENABLE_VR
   Common::VR::PrimedGunVrOverlayState overlay =
       Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  overlay.cinematic_screen_enabled = enabled;
+  overlay.cinematic_screen_enabled = cutscene_enabled;
   overlay.cinematic_screen_active = false;
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
   Common::VR::OpenXRInputState::SetPrimedGunOverlay(overlay);
 #endif
+}
+
+bool IsDetachedGameMenuGuiState(u32 state)
+{
+  return state == IN_GAME_GUI_STATE_MAP || state == IN_GAME_GUI_STATE_PAUSE ||
+         state == IN_GAME_GUI_STATE_LOGBOOK;
+}
+
+bool ReadPersistentGameMenuState(const Core::CPUThreadGuard& guard, bool* menu_active,
+                                 bool* map_active)
+{
+  *menu_active = false;
+  *map_active = false;
+
+  u8 state_manager_flags = 0;
+  if (TryReadU8(guard, ADDRESS.state_manager + STATE_MANAGER_FLAGS_OFFSET, &state_manager_flags) &&
+      (state_manager_flags & STATE_MANAGER_IN_MAP_SCREEN_MASK) != 0)
+  {
+    *menu_active = true;
+    *map_active = true;
+    return true;
+  }
+
+  u32 mf_game = 0;
+  u32 flow_state = 0;
+  if (!TryReadU32(guard, GAMEFLOW_OWNER_SCRATCH, &mf_game) ||
+      !PrimeDataPointerLooksValid(mf_game, MF_GAME_FLOW_STATE_OFFSET + sizeof(u32)) ||
+      !TryReadU32(guard, mf_game + MF_GAME_FLOW_STATE_OFFSET, &flow_state) || flow_state > 3u)
+  {
+    return false;
+  }
+
+  u32 gui_manager_ref = 0;
+  u32 gui_manager = 0;
+  u32 previous_state = 0;
+  u32 next_state = 0;
+  if (!TryReadU32(guard, mf_game + MF_GAME_GUI_MANAGER_REF_OFFSET, &gui_manager_ref) ||
+      !PrimeDataPointerLooksValid(gui_manager_ref, sizeof(u32)) ||
+      !TryReadU32(guard, gui_manager_ref, &gui_manager) ||
+      !PrimeDataPointerLooksValid(gui_manager, IN_GAME_GUI_NEXT_STATE_OFFSET + sizeof(u32)) ||
+      !TryReadU32(guard, gui_manager + IN_GAME_GUI_PREVIOUS_STATE_OFFSET, &previous_state) ||
+      !TryReadU32(guard, gui_manager + IN_GAME_GUI_NEXT_STATE_OFFSET, &next_state))
+  {
+    return false;
+  }
+
+  *menu_active = IsDetachedGameMenuGuiState(previous_state) ||
+                 IsDetachedGameMenuGuiState(next_state);
+  *map_active = previous_state == IN_GAME_GUI_STATE_MAP || next_state == IN_GAME_GUI_STATE_MAP;
+  return true;
 }
 
 void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings)
@@ -5303,15 +5365,43 @@ void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const Runtime
   const bool game_menu_detected =
       settings.game_menu_screen_enabled && have_gameflow &&
       (gameflow == GAMEFLOW_LOGBOOK || gameflow == GAMEFLOW_PAUSE || gameflow == GAMEFLOW_MAP);
-  if (game_menu_detected)
+  bool persistent_menu_active = false;
+  bool persistent_map_active = false;
+  const bool have_persistent_menu_state =
+      settings.game_menu_screen_enabled &&
+      ReadPersistentGameMenuState(guard, &persistent_menu_active, &persistent_map_active);
+  bool requested_menu_active = s_game_menu_screen_active;
+  bool requested_map_active = s_game_map_screen_active;
+  bool have_requested_menu_state = false;
+  if (have_persistent_menu_state)
+  {
+    requested_menu_active = persistent_menu_active;
+    requested_map_active = persistent_map_active;
+    have_requested_menu_state = true;
+  }
+  else if (game_menu_detected)
+  {
+    requested_menu_active = true;
+    requested_map_active = gameflow == GAMEFLOW_MAP;
+    have_requested_menu_state = true;
+  }
+  else if (!settings.game_menu_screen_enabled || (have_gameflow && gameflow == GAMEFLOW_NONE))
+  {
+    requested_menu_active = false;
+    requested_map_active = false;
+    have_requested_menu_state = true;
+  }
+
+  if (have_requested_menu_state && requested_menu_active)
   {
     s_game_menu_screen_active = true;
-    s_game_map_screen_active = gameflow == GAMEFLOW_MAP;
-    s_game_menu_screen_hold_until_frame =
-        s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
+    s_game_map_screen_active = requested_map_active;
+    s_game_menu_screen_release_frame =
+        s_frame_counter + GAME_MENU_CINEMA_EXIT_GRACE_FRAMES;
   }
   else if (!settings.game_menu_screen_enabled ||
-           s_frame_counter >= s_game_menu_screen_hold_until_frame)
+           (have_requested_menu_state &&
+            s_frame_counter >= s_game_menu_screen_release_frame))
   {
     s_game_menu_screen_active = false;
     s_game_map_screen_active = false;
@@ -5768,8 +5858,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.height_prompt_enabled = settings.height_prompt_enabled;
   overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
-  overlay.cinematic_screen_enabled =
-      settings.cinematic_screen_enabled || settings.game_menu_screen_enabled;
+  overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
   overlay.cinematic_screen_active = s_cinematic_screen_active;
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
   overlay.game_menu_screen_enabled = settings.game_menu_screen_enabled;
@@ -6760,16 +6849,43 @@ bool ApplyGameFlowFlagPatch(const Core::CPUThreadGuard& guard, GameFlowFlagPatch
   patch.original = current;
   constexpr u32 menu_scratch_hi = (GAMEFLOW_MENU_SCRATCH >> 16) & 0xffffu;
   constexpr u32 menu_scratch_lo = GAMEFLOW_MENU_SCRATCH & 0xffffu;
+  constexpr u32 culling_scratch_hi = (HMD_FRUSTUM_DISABLE_CULLING_SCRATCH >> 16) & 0xffffu;
+  constexpr u32 culling_scratch_lo = HMD_FRUSTUM_DISABLE_CULLING_SCRATCH & 0xffffu;
   const u32 return_addr = patch.address + 4u;
 
-  patch.applied = InstallBranchAfterCaveWrite(
-      guard, patch.address, patch.cave,
-      {{0x00u, 0x3D800000u | menu_scratch_hi},
-       {0x04u, 0x618C0000u | menu_scratch_lo},
-       {0x08u, 0x39600000u | (patch.menu_flag & 0xffffu)},
-       {0x0Cu, 0x916C0000u},
-       {0x10u, patch.original},
-       {0x14u, PpcBranch(patch.cave + 0x14u, return_addr)}});
+  const bool detached_menu_entry = patch.menu_flag == GAMEFLOW_LOGBOOK ||
+                                   patch.menu_flag == GAMEFLOW_PAUSE ||
+                                   patch.menu_flag == GAMEFLOW_MAP;
+  if (detached_menu_entry)
+  {
+    // OnFrameEnd is too late for the first map/pause framebuffer capture, so disable culling at
+    // the gameflow transition before that framebuffer is rendered.
+    patch.applied = InstallBranchAfterCaveWrite(
+        guard, patch.address, patch.cave,
+        {{0x00u, 0x3D800000u | menu_scratch_hi},
+         {0x04u, 0x618C0000u | menu_scratch_lo},
+         {0x08u, 0x39600000u | (patch.menu_flag & 0xffffu)},
+         {0x0Cu, 0x916C0000u},
+         {0x10u, patch.original},
+         {0x14u, 0x906C0004u},
+         {0x18u, 0x3D800000u | culling_scratch_hi},
+         {0x1Cu, 0x618C0000u | culling_scratch_lo},
+         {0x20u, 0x39600001u},
+         {0x24u, 0x916C0000u},
+         {0x28u, PpcBranch(patch.cave + 0x28u, return_addr)}});
+  }
+  else
+  {
+    patch.applied = InstallBranchAfterCaveWrite(
+        guard, patch.address, patch.cave,
+        {{0x00u, 0x3D800000u | menu_scratch_hi},
+         {0x04u, 0x618C0000u | menu_scratch_lo},
+         {0x08u, 0x39600000u | (patch.menu_flag & 0xffffu)},
+         {0x0Cu, 0x916C0000u},
+         {0x10u, patch.original},
+         {0x14u, 0x906C0004u},
+         {0x18u, PpcBranch(patch.cave + 0x18u, return_addr)}});
+  }
   return patch.applied;
 }
 
@@ -7993,8 +8109,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     ClearHmdCameraFacingScratch(guard);
     TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
     s_cinematic_no_cull_hold_until_frame = 0;
-    ClearCinematicScreenState(settings.cinematic_screen_enabled ||
-                              settings.game_menu_screen_enabled);
+    ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -8011,8 +8126,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     ClearHmdCameraFacingScratch(guard);
     TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
     s_cinematic_no_cull_hold_until_frame = 0;
-    ClearCinematicScreenState(settings.cinematic_screen_enabled ||
-                              settings.game_menu_screen_enabled);
+    ClearCinematicScreenState(settings.cinematic_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -8059,6 +8173,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     s_patches_applied_this_boot = false;
     s_patch_reapply_until_frame = s_frame_counter + 180u;
     TryWriteU32(guard, GAMEFLOW_MENU_SCRATCH, 0);
+    TryWriteU32(guard, GAMEFLOW_OWNER_SCRATCH, 0);
   }
   UpdateMorphballCameraLevelHookEnabled(guard, have_player, player);
   UpdateSpringBallInput(guard, settings, player);
@@ -8222,7 +8337,7 @@ void ResetNativeRuntime()
   s_cinematic_screen_hold_until_frame = 0;
   s_game_menu_screen_active = false;
   s_game_map_screen_active = false;
-  s_game_menu_screen_hold_until_frame = 0;
+  s_game_menu_screen_release_frame = 0;
   s_cinematic_no_cull_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;
@@ -8407,8 +8522,7 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
   if (!s_settings.enabled ||
       (!s_settings.cinematic_screen_enabled && !s_settings.game_menu_screen_enabled))
   {
-    ClearCinematicScreenState(s_settings.cinematic_screen_enabled ||
-                              s_settings.game_menu_screen_enabled);
+    ClearCinematicScreenState(s_settings.cinematic_screen_enabled);
   }
 }
 

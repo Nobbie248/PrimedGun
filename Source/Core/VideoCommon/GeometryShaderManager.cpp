@@ -34,7 +34,7 @@ static constexpr int METROID_HUD_REFERENCE_CONTEXT_COMBAT = 1;
 static constexpr float METROID_COMBAT_HUD_REFERENCE_FAR_Z = -28.5f;
 static constexpr float METROID_COMBAT_HUD_REFERENCE_NEAR_Z = -18.0f;
 static constexpr float METROID_PERSPECTIVE_HUD_FALLBACK_REFERENCE_Z = -20.0f;
-static constexpr float PRIMEDGUN_MAP_CINEMA_SINGLE_LAYER = 0.30f;
+static constexpr float PRIMEDGUN_CINEMA_SINGLE_LAYER = 0.30f;
 
 struct PerspectiveHudTransform
 {
@@ -273,15 +273,17 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         vr_headlocked_projection_scale_y = 1.0f;
         vr_headlocked_projection_offset_x = 0.0f;
         vr_headlocked_projection_offset_y = 0.0f;
-        const float upm = std::max(
-            upm_override > 0.0f ? upm_override : g_ActiveConfig.vr_units_per_meter, 0.0001f);
         const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-        const bool primedgun_cinematic_screen = primedgun_overlay.cinematic_screen_enabled &&
-                                                primedgun_overlay.cinematic_screen_active;
+        const bool primedgun_cinematic_screen = primedgun_overlay.cinematic_screen_active;
         const bool primedgun_game_menu_screen = primedgun_overlay.game_menu_screen_enabled &&
                                                 primedgun_overlay.game_menu_screen_active;
-        const bool primedgun_game_map_screen = primedgun_game_menu_screen &&
-                                               primedgun_overlay.game_map_screen_active;
+        const bool suppress_hud_calibration =
+            primedgun_cinematic_screen && primedgun_game_menu_screen;
+        const float upm = std::max(
+            !suppress_hud_calibration && upm_override > 0.0f ?
+                upm_override :
+                g_ActiveConfig.vr_units_per_meter,
+            0.0001f);
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
@@ -388,12 +390,15 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           {
             auto& row0 = constants.head_projection[eye * 2 + 0];
             auto& row1 = constants.head_projection[eye * 2 + 1];
-            row0[0] *= headlocked_projection_scale_x;
-            row0[3] *= headlocked_projection_scale_x;
-            row0[2] -= headlocked_projection_offset_x;
-            row1[1] *= headlocked_projection_scale_y;
-            row1[3] *= headlocked_projection_scale_y;
-            row1[2] -= headlocked_projection_offset_y;
+            if (!suppress_hud_calibration)
+            {
+              row0[0] *= headlocked_projection_scale_x;
+              row0[3] *= headlocked_projection_scale_x;
+              row0[2] -= headlocked_projection_offset_x;
+              row1[1] *= headlocked_projection_scale_y;
+              row1[3] *= headlocked_projection_scale_y;
+              row1[2] -= headlocked_projection_offset_y;
+            }
           }
           constants.head_locked_params = {g_ActiveConfig.vr_head_locked_curvature, 0.0f, 0.0f,
                                           0.0f};
@@ -481,28 +486,32 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         // their HUD overrides otherwise retain per-eye offsets inside the detached cinema quad.
         if (primedgun_cinematic_screen && (primedgun_game_menu_screen || !had_override))
         {
-          constants.stereoparams[3] = primedgun_game_map_screen ?
-                                          PRIMEDGUN_MAP_CINEMA_SINGLE_LAYER :
-                                          0.25f;
+          constants.stereoparams[3] = PRIMEDGUN_CINEMA_SINGLE_LAYER;
         }
 
         const bool perspective_hud =
             perspective && VR::g_openxr && VR::g_openxr->IsSessionRunning() &&
             constants.stereoparams[3] < -2.5f;
         const float perspective_hud_distance =
-            perspective_hud_distance_override > 0.0f ? perspective_hud_distance_override :
-                                                       g_ActiveConfig.vr_screen_distance;
-        const float perspective_hud_size = perspective_hud_size_override > 0.0f ?
-                                               perspective_hud_size_override :
-                                               g_ActiveConfig.vr_screen_size;
+            !suppress_hud_calibration && perspective_hud_distance_override > 0.0f ?
+                perspective_hud_distance_override :
+                g_ActiveConfig.vr_screen_distance;
+        const float perspective_hud_size =
+            !suppress_hud_calibration && perspective_hud_size_override > 0.0f ?
+                perspective_hud_size_override :
+                g_ActiveConfig.vr_screen_size;
         const float perspective_hud_offset_x =
-            std::clamp(primedgun_overlay.metroid_hud_offset_right -
-                           primedgun_overlay.metroid_hud_offset_left,
-                       -1.0f, 1.0f);
+            suppress_hud_calibration ?
+                0.0f :
+                std::clamp(primedgun_overlay.metroid_hud_offset_right -
+                               primedgun_overlay.metroid_hud_offset_left,
+                           -1.0f, 1.0f);
         const float perspective_hud_offset_y =
-            std::clamp(primedgun_overlay.metroid_hud_offset_up -
-                           primedgun_overlay.metroid_hud_offset_down,
-                       -1.0f, 1.0f);
+            suppress_hud_calibration ?
+                0.0f :
+                std::clamp(primedgun_overlay.metroid_hud_offset_up -
+                               primedgun_overlay.metroid_hud_offset_down,
+                           -1.0f, 1.0f);
         if (perspective_hud)
         {
           const float reference_view_z = vertex_shader_manager.constants.posnormalmatrix[2][3];

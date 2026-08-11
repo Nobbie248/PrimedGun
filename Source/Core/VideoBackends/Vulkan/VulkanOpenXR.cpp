@@ -2078,8 +2078,7 @@ bool VulkanOpenXR::SubmitFrame()
 #endif
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  const bool cinematic_screen_active =
-      overlay.cinematic_screen_enabled && overlay.cinematic_screen_active;
+  const bool cinematic_screen_active = overlay.cinematic_screen_active;
 #if !defined(ANDROID)
   if (cinematic_screen_active &&
       BuildCinematicScreenLayer(m_eye_swapchains, overlay.cinematic_screen_generation,

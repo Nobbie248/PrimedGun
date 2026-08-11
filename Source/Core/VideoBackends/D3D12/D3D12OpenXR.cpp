@@ -743,8 +743,7 @@ bool D3D12OpenXR::SubmitFrame()
   ASSERT(VR::g_openxr != nullptr);
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  const bool cinematic_screen_active =
-      overlay.cinematic_screen_enabled && overlay.cinematic_screen_active;
+  const bool cinematic_screen_active = overlay.cinematic_screen_active;
   if (cinematic_screen_active &&
       BuildCinematicScreenLayer(m_eye_swapchains, overlay.cinematic_screen_generation,
                                 &m_cinematic_screen_layer))

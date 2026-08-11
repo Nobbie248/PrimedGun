@@ -1663,17 +1663,18 @@ void VertexManagerBase::Flush()
         const bool elements_has_overrides = elements.HasOverrides();
 #ifdef ENABLE_VR
         const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-        const bool primedgun_map_bulk_draw =
+        const bool primedgun_detached_menu_bulk_draw =
             g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
             primedgun_overlay.game_menu_screen_enabled &&
-            primedgun_overlay.game_map_screen_active && !hunter_enabled &&
+            primedgun_overlay.game_menu_screen_active && !hunter_enabled &&
             !hunter_debug_logging && !elements_popup_open && !static_cast<bool>(used_textures) &&
             std::abs(xfmem.viewport.wd) >= 300.0f && std::abs(xfmem.viewport.ht) >= 200.0f;
 #else
-        constexpr bool primedgun_map_bulk_draw = false;
+        constexpr bool primedgun_detached_menu_bulk_draw = false;
 #endif
         const bool elements_runtime_active =
-            elements_popup_open || (elements_has_overrides && !primedgun_map_bulk_draw);
+            elements_popup_open ||
+            (elements_has_overrides && !primedgun_detached_menu_bulk_draw);
         const bool texmgr_has_overrides = texmgr.HasOverrides();
         const bool hunter_needs_families = hunter.NeedsShaderFamilySignatures();
         const bool hunter_needs_textures = hunter.NeedsTextureHashes();
@@ -1694,7 +1695,7 @@ void VertexManagerBase::Flush()
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
           const bool needs_texture_hashes =
-              !primedgun_map_bulk_draw &&
+              !primedgun_detached_menu_bulk_draw &&
               (primedgun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
                elements_runtime_active || texmgr_has_overrides);
           const bool needs_texture_names =

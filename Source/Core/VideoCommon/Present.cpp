@@ -854,8 +854,7 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
   else if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
   {
     const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-    const bool cinematic_screen_active = primedgun_overlay.cinematic_screen_enabled &&
-                                         primedgun_overlay.cinematic_screen_active;
+    const bool cinematic_screen_active = primedgun_overlay.cinematic_screen_active;
     static bool s_first_openxr_render = true;
     if (s_first_openxr_render)
     {
@@ -964,8 +963,7 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
     return;
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  const bool cinematic_screen_active =
-      overlay.cinematic_screen_enabled && overlay.cinematic_screen_active;
+  const bool cinematic_screen_active = overlay.cinematic_screen_active;
   AbstractFramebuffer* const saved_framebuffer = g_gfx->GetCurrentFramebuffer();
   const MathUtil::Rectangle<int> eye_rect{
       0, 0, static_cast<int>(swapchain->GetEyeWidth()),
