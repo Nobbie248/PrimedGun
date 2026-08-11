@@ -1661,7 +1661,19 @@ void VertexManagerBase::Flush()
         const bool hunter_has_overrides = hunter.HasOverrides();
         const bool elements_popup_open = elements.IsPopupOpen();
         const bool elements_has_overrides = elements.HasOverrides();
-        const bool elements_runtime_active = elements_popup_open || elements_has_overrides;
+#ifdef ENABLE_VR
+        const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+        const bool primedgun_map_bulk_draw =
+            g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+            primedgun_overlay.game_menu_screen_enabled &&
+            primedgun_overlay.game_map_screen_active && !hunter_enabled &&
+            !hunter_debug_logging && !elements_popup_open && !static_cast<bool>(used_textures) &&
+            std::abs(xfmem.viewport.wd) >= 300.0f && std::abs(xfmem.viewport.ht) >= 200.0f;
+#else
+        constexpr bool primedgun_map_bulk_draw = false;
+#endif
+        const bool elements_runtime_active =
+            elements_popup_open || (elements_has_overrides && !primedgun_map_bulk_draw);
         const bool texmgr_has_overrides = texmgr.HasOverrides();
         const bool hunter_needs_families = hunter.NeedsShaderFamilySignatures();
         const bool hunter_needs_textures = hunter.NeedsTextureHashes();
@@ -1682,8 +1694,9 @@ void VertexManagerBase::Flush()
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
           const bool needs_texture_hashes =
-              primedgun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
-              elements_runtime_active || texmgr_has_overrides;
+              !primedgun_map_bulk_draw &&
+              (primedgun_cannon_probe_enabled || hunter_enabled || hunter_needs_textures ||
+               elements_runtime_active || texmgr_has_overrides);
           const bool needs_texture_names =
               primedgun_cannon_probe_enabled || hunter_enabled || elements_popup_open;
           if (needs_texture_hashes || needs_texture_names)
@@ -1835,7 +1848,7 @@ void VertexManagerBase::Flush()
           if (elements_runtime_active)
             elements.AdvanceOverrideDrawCounters(*element_draw);
 
-          if (!hunter_skip && !elements_skip && elements_has_overrides)
+          if (!hunter_skip && !elements_skip && elements_runtime_active && elements_has_overrides)
             elements_skip = elements.ShouldSkipByOverride(*element_draw);
 
           if (!hunter_skip && !elements_skip && element_draw)
@@ -1870,7 +1883,7 @@ void VertexManagerBase::Flush()
                                                           element_draw->profile_layer) :
                                MetroidHydraHudSettings{};
 
-            if (elements_has_overrides)
+            if (elements_runtime_active && elements_has_overrides)
               handling = elements.GetOverrideHandling(*element_draw);
             if (handling != ShaderHunter::HandlingType::Skip)
             {

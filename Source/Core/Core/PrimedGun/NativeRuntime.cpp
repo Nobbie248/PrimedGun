@@ -445,6 +445,7 @@ u64 s_cinematic_screen_hold_until_frame = 0;
 u64 s_cinematic_no_cull_hold_until_frame = 0;
 u32 s_cinematic_screen_generation = 0;
 bool s_game_menu_screen_active = false;
+bool s_game_map_screen_active = false;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -5275,6 +5276,7 @@ void ClearCinematicScreenState(bool enabled)
 {
   SetCinematicScreenActive(false);
   s_game_menu_screen_active = false;
+  s_game_map_screen_active = false;
   s_cinematic_screen_hold_until_frame = 0;
 #ifdef ENABLE_VR
   Common::VR::PrimedGunVrOverlayState overlay =
@@ -5300,6 +5302,7 @@ void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const Runtime
       TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow) &&
       (gameflow == GAMEFLOW_LOGBOOK || gameflow == GAMEFLOW_PAUSE || gameflow == GAMEFLOW_MAP);
   s_game_menu_screen_active = game_menu_active;
+  s_game_map_screen_active = game_menu_active && gameflow == GAMEFLOW_MAP;
   const bool cutscene_active =
       settings.cinematic_screen_enabled &&
       (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard));
@@ -5753,6 +5756,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
   overlay.game_menu_screen_enabled = settings.game_menu_screen_enabled;
   overlay.game_menu_screen_active = s_game_menu_screen_active;
+  overlay.game_map_screen_active = s_game_map_screen_active;
   overlay.frustum_culling_enabled = settings.frustum_culling_enabled;
   overlay.frustum_culling_degrees = settings.frustum_culling_degrees;
   overlay.metroid_hud_distance = settings.metroid_hud_distance;
@@ -8199,6 +8203,7 @@ void ResetNativeRuntime()
   s_cinematic_screen_active = false;
   s_cinematic_screen_hold_until_frame = 0;
   s_game_menu_screen_active = false;
+  s_game_map_screen_active = false;
   s_cinematic_no_cull_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;

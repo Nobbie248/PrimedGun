@@ -34,6 +34,7 @@ static constexpr int METROID_HUD_REFERENCE_CONTEXT_COMBAT = 1;
 static constexpr float METROID_COMBAT_HUD_REFERENCE_FAR_Z = -28.5f;
 static constexpr float METROID_COMBAT_HUD_REFERENCE_NEAR_Z = -18.0f;
 static constexpr float METROID_PERSPECTIVE_HUD_FALLBACK_REFERENCE_Z = -20.0f;
+static constexpr float PRIMEDGUN_MAP_CINEMA_SINGLE_LAYER = 0.30f;
 
 struct PerspectiveHudTransform
 {
@@ -279,6 +280,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
                                                 primedgun_overlay.cinematic_screen_active;
         const bool primedgun_game_menu_screen = primedgun_overlay.game_menu_screen_enabled &&
                                                 primedgun_overlay.game_menu_screen_active;
+        const bool primedgun_game_map_screen = primedgun_game_menu_screen &&
+                                               primedgun_overlay.game_map_screen_active;
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
@@ -477,7 +480,11 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         // remains correctly placed. Pause/map screens force the entire composition to mono because
         // their HUD overrides otherwise retain per-eye offsets inside the detached cinema quad.
         if (primedgun_cinematic_screen && (primedgun_game_menu_screen || !had_override))
-          constants.stereoparams[3] = 0.25f;
+        {
+          constants.stereoparams[3] = primedgun_game_map_screen ?
+                                          PRIMEDGUN_MAP_CINEMA_SINGLE_LAYER :
+                                          0.25f;
+        }
 
         const bool perspective_hud =
             perspective && VR::g_openxr && VR::g_openxr->IsSessionRunning() &&

@@ -26,7 +26,7 @@ constexpr Common::EnumMap<const char*, PrimitiveType::TriangleStrip> primitives_
 
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_in_map{1u, 2u, 3u, 3u};
 constexpr Common::EnumMap<u32, PrimitiveType::TriangleStrip> vertex_out_map{4u, 4u, 4u, 3u};
-constexpr u32 GEOMETRY_SHADER_CODE_VERSION = 41;
+constexpr u32 GEOMETRY_SHADER_CODE_VERSION = 42;
 
 bool geometry_shader_uid_data::IsPassthrough() const
 {
@@ -210,6 +210,18 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
       out.Write("\tint eye = InstanceID;\n");
     else
       out.Write("\tfor (int eye = 0; eye < 2; ++eye) {{\n");
+
+    if (host_config.vr_stereo)
+    {
+      // Detached automap cinema frames only submit EFB layer 0. Avoid generating layer 1 on
+      // backends where stereo expansion is explicit; Vulkan multiview remains unchanged.
+      out.Write("\tif (" I_STEREOPARAMS ".w > 0.29f && " I_STEREOPARAMS
+                ".w < 0.31f && eye != 0)\n");
+      if (host_config.backend_gs_instancing)
+        out.Write("\t\treturn;\n");
+      else
+        out.Write("\t\tbreak;\n");
+    }
   }
 
   if (wireframe)

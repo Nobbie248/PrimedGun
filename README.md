@@ -105,6 +105,7 @@ To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then ch
 
 - Created by Nobbie.
 - Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.
+- Development references include the Metroid Prime decompilation project, Metaforce, and PrimeHack. Codex was used to assist with debugging, system integration, and iterative development.
 - Huge thank you to iChris4 for Dolphin ReduX development, and to the Dolphin team.
 - Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, Samevi, Mochu, VideoGameEsoterica and VRified Games.
 - For further enhancements to your VR experience, join the Dolphin VR Discord: https://discord.gg/GdmffzCTrh
