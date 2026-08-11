@@ -335,6 +335,10 @@ constexpr u32 IN_GAME_GUI_NEXT_STATE_OFFSET = 0x1C0u;
 constexpr u32 IN_GAME_GUI_STATE_MAP = 2u;
 constexpr u32 IN_GAME_GUI_STATE_PAUSE = 3u;
 constexpr u32 IN_GAME_GUI_STATE_LOGBOOK = 4u;
+constexpr u32 STATE_MANAGER_DEFERRED_TRANSITION_OFFSET = 0xF90u;
+constexpr u32 STATE_MANAGER_TRANSITION_MAP_SCREEN = 1u;
+constexpr u32 STATE_MANAGER_TRANSITION_PAUSE_GAME = 2u;
+constexpr u32 STATE_MANAGER_TRANSITION_LOGBOOK = 3u;
 constexpr u32 STATE_MANAGER_FLAGS_OFFSET = 0xF94u;
 constexpr u8 STATE_MANAGER_IN_MAP_SCREEN_MASK = 0x10u;
 constexpr u32 PLAYER_STATE_CURRENT_VISOR_OFFSET = 0x14u;
@@ -5265,8 +5269,16 @@ bool ElevatorWorldTransitionActive(const Core::CPUThreadGuard& guard)
 void UpdateCinematicFrustumCulling(const Core::CPUThreadGuard& guard,
                                    const RuntimeSettings& settings)
 {
+  u32 deferred_transition = 0;
+  const bool menu_transition_pending =
+      TryReadU32(guard, ADDRESS.state_manager + STATE_MANAGER_DEFERRED_TRANSITION_OFFSET,
+                 &deferred_transition) &&
+      (deferred_transition == STATE_MANAGER_TRANSITION_MAP_SCREEN ||
+       deferred_transition == STATE_MANAGER_TRANSITION_PAUSE_GAME ||
+       deferred_transition == STATE_MANAGER_TRANSITION_LOGBOOK);
+
   if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard) ||
-      s_game_menu_screen_active)
+      menu_transition_pending || s_game_menu_screen_active)
   {
     s_cinematic_no_cull_hold_until_frame =
         s_frame_counter + CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES;
