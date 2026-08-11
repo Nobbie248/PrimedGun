@@ -411,6 +411,7 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
       rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
       rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
       rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});
+      rows.push_back({"DETACH VR MENU FROM HAND", s.vr_menu_floating ? "ON" : "OFF"});
       rows.push_back({"RESET CONTROLLER", ConfirmText(s, RESET_CONTROLLER_ACTION)});
     }
 

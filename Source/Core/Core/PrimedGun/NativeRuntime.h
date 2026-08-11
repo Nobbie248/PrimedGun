@@ -51,6 +51,7 @@ struct RuntimeSettings
   bool height_prompt_enabled = true;
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
+  bool vr_menu_floating = false;
   bool cinematic_screen_enabled = false;
   bool frustum_culling_enabled = true;
   float frustum_culling_degrees = 115.0f;

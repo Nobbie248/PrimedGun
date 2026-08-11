@@ -84,6 +84,7 @@ private:
   XrCompositionLayerQuad m_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_laser_hit_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 };
 }  // namespace DX12
 

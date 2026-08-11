@@ -270,8 +270,13 @@ constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
 constexpr u32 VR_MENU_CANNON_TAB = 4;
 constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 16;
+constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 17;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
+constexpr float VR_MENU_WRIST_WIDTH = 1.05f;
+constexpr float VR_MENU_WRIST_HEIGHT = 0.72f;
+constexpr float VR_MENU_FLOATING_WIDTH = 4.00f;
+constexpr float VR_MENU_FLOATING_HEIGHT = 2.00f;
+constexpr float VR_MENU_FLOATING_DISTANCE = 2.70f;
 constexpr std::array<int, 4> SNAP_TURN_DEGREES_CHOICES = {30, 45, 60, 90};
 constexpr float VR_MENU_ROW_TEXT_Y = 146.0f;
 constexpr float VR_MENU_ROW_STEP_Y = 22.0f;
@@ -428,6 +433,7 @@ bool s_last_vr_menu_stick_down = false;
 bool s_last_vr_menu_stick_left = false;
 bool s_last_vr_menu_stick_right = false;
 bool s_vr_menu_visible = false;
+Pose s_vr_menu_floating_pose{};
 bool s_cinematic_screen_active = false;
 u64 s_cinematic_screen_hold_until_frame = 0;
 u64 s_cinematic_no_cull_hold_until_frame = 0;
@@ -4990,7 +4996,7 @@ u32 VrMenuResetActionForSelection()
       VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
-      VrMenuControlActualIndex(s_vr_menu_selected_index) == 15)
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 16)
   {
     return VR_MENU_RESET_CONTROLLER_ACTION;
   }
@@ -5088,22 +5094,59 @@ Pose GripControllerPose(const Common::VR::OpenXRControllerState& controller)
   return pose;
 }
 
-bool VrMenuPointerHit(const Pose& left, const Pose& right, float* x_out, float* y_out)
+Pose VrMenuPanelPoseFromController(const Pose& controller)
 {
-  if (!left.valid || !right.valid)
-    return false;
+  if (!controller.valid)
+    return {};
 
-  Pose panel = left;
-  panel.qx = left.qx * 0.70710678f - left.qw * 0.70710678f;
-  panel.qy = left.qy * 0.70710678f - left.qz * 0.70710678f;
-  panel.qz = left.qz * 0.70710678f + left.qy * 0.70710678f;
-  panel.qw = left.qw * 0.70710678f + left.qx * 0.70710678f;
+  Pose panel = controller;
+  panel.qx = controller.qx * 0.70710678f - controller.qw * 0.70710678f;
+  panel.qy = controller.qy * 0.70710678f - controller.qz * 0.70710678f;
+  panel.qz = controller.qz * 0.70710678f + controller.qy * 0.70710678f;
+  panel.qw = controller.qw * 0.70710678f + controller.qx * 0.70710678f;
 
   float ox = 0.0f, oy = 0.0f, oz = 0.0f;
   RotatePoseVector(panel, 0.0f, 0.10f, -0.18f, &ox, &oy, &oz);
-  const float cx = left.px + ox;
-  const float cy = left.py + oy;
-  const float cz = left.pz + oz;
+  panel.px = controller.px + ox;
+  panel.py = controller.py + oy;
+  panel.pz = controller.pz + oz;
+  return panel;
+}
+
+Pose VrMenuFloatingPoseFromHead(const Pose& head)
+{
+  if (!head.valid)
+    return {};
+
+  Pose panel = head;
+  float forward_x = 0.0f, forward_y = 0.0f, forward_z = 0.0f;
+  RotatePoseVector(head, 0.0f, 0.0f, -1.0f, &forward_x, &forward_y, &forward_z);
+  const float horizontal_length =
+      std::sqrt(forward_x * forward_x + forward_z * forward_z);
+  if (horizontal_length < 0.0001f)
+    return {};
+
+  forward_x /= horizontal_length;
+  forward_z /= horizontal_length;
+  const float half_yaw = std::atan2(-forward_x, -forward_z) * 0.5f;
+  panel.qx = 0.0f;
+  panel.qy = std::sin(half_yaw);
+  panel.qz = 0.0f;
+  panel.qw = std::cos(half_yaw);
+
+  float ox = 0.0f, oy = 0.0f, oz = 0.0f;
+  RotatePoseVector(panel, 0.0f, 0.0f, -VR_MENU_FLOATING_DISTANCE, &ox, &oy, &oz);
+  panel.px = head.px + ox;
+  panel.py = head.py + oy;
+  panel.pz = head.pz + oz;
+  return panel;
+}
+
+bool VrMenuPointerHit(const Pose& panel, const Pose& pointer, float width, float height,
+                      float* x_out, float* y_out, float* distance_out)
+{
+  if (!panel.valid || !pointer.valid)
+    return false;
 
   float rx = 0.0f, ry = 0.0f, rz = 0.0f;
   float ux = 0.0f, uy = 0.0f, uz = 0.0f;
@@ -5112,24 +5155,25 @@ bool VrMenuPointerHit(const Pose& left, const Pose& right, float* x_out, float* 
   RotatePoseVector(panel, 1.0f, 0.0f, 0.0f, &rx, &ry, &rz);
   RotatePoseVector(panel, 0.0f, 1.0f, 0.0f, &ux, &uy, &uz);
   RotatePoseVector(panel, 0.0f, 0.0f, 1.0f, &nx, &ny, &nz);
-  RotatePoseVector(right, 0.0f, 0.0f, -1.0f, &dx, &dy, &dz);
+  RotatePoseVector(pointer, 0.0f, 0.0f, -1.0f, &dx, &dy, &dz);
 
   const float denom = dx * nx + dy * ny + dz * nz;
   if (std::fabs(denom) < 0.001f)
     return false;
 
-  const float vx = cx - right.px;
-  const float vy = cy - right.py;
-  const float vz = cz - right.pz;
+  const float vx = panel.px - pointer.px;
+  const float vy = panel.py - pointer.py;
+  const float vz = panel.pz - pointer.pz;
   const float t = (vx * nx + vy * ny + vz * nz) / denom;
-  if (t < 0.02f || t > 3.0f)
+  if (t < 0.02f || t > 8.0f)
     return false;
 
-  const float hx = right.px + dx * t - cx;
-  const float hy = right.py + dy * t - cy;
-  const float hz = right.pz + dz * t - cz;
-  *x_out = 0.5f + (hx * rx + hy * ry + hz * rz) / 1.05f;
-  *y_out = 0.5f - (hx * ux + hy * uy + hz * uz) / 0.72f;
+  const float hx = pointer.px + dx * t - panel.px;
+  const float hy = pointer.py + dy * t - panel.py;
+  const float hz = pointer.pz + dz * t - panel.pz;
+  *x_out = 0.5f + (hx * rx + hy * ry + hz * rz) / width;
+  *y_out = 0.5f - (hx * ux + hy * uy + hz * uz) / height;
+  *distance_out = t;
   return *x_out >= 0.0f && *x_out <= 1.0f && *y_out >= 0.0f && *y_out <= 1.0f;
 }
 
@@ -5147,6 +5191,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->combat_jump_use_primary_button = false;
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
+  settings->vr_menu_floating = false;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -5528,6 +5573,8 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 10 || actual_index == 11)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
     else if (actual_index == 15)
+      settings->vr_menu_floating = !settings->vr_menu_floating;
+    else if (actual_index == 16)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5647,6 +5694,15 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.weapon_selected_index = previous.weapon_selected_index;
   overlay.weapon_panel_position = previous.weapon_panel_position;
   overlay.weapon_panel_orientation = previous.weapon_panel_orientation;
+  overlay.floating_menu_pose_valid = s_vr_menu_floating_pose.valid;
+  overlay.floating_menu_position = {s_vr_menu_floating_pose.px, s_vr_menu_floating_pose.py,
+                                    s_vr_menu_floating_pose.pz};
+  overlay.floating_menu_orientation = {s_vr_menu_floating_pose.qx, s_vr_menu_floating_pose.qy,
+                                       s_vr_menu_floating_pose.qz, s_vr_menu_floating_pose.qw};
+  overlay.menu_size = settings.vr_menu_floating ?
+                          std::array<float, 2>{VR_MENU_FLOATING_WIDTH,
+                                               VR_MENU_FLOATING_HEIGHT} :
+                          std::array<float, 2>{VR_MENU_WRIST_WIDTH, VR_MENU_WRIST_HEIGHT};
   overlay.world_scale = settings.world_scale;
   overlay.use_right_hand = settings.use_right_hand;
   overlay.require_trigger = settings.require_trigger;
@@ -5660,6 +5716,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.combat_jump_use_primary_button = settings.combat_jump_use_primary_button;
   overlay.vr_menu_hold_left_stick = settings.vr_menu_hold_left_stick;
   overlay.vr_menu_requires_head_zone = settings.vr_menu_requires_head_zone;
+  overlay.vr_menu_floating = settings.vr_menu_floating;
   overlay.gun_targeting_enabled = settings.gun_targeting_enabled;
   overlay.gun_targeting_distance = settings.gun_targeting_distance;
   overlay.gun_targeting_radius = settings.gun_targeting_radius;
@@ -5708,6 +5765,7 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
                   bool prompt_visible)
 {
   ApplyPendingVrStateSlotFromUi();
+  const bool menu_was_visible = s_vr_menu_visible;
 
   if (!settings->vr_overlays_enabled)
   {
@@ -5803,14 +5861,33 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
   }
   s_last_vr_menu_thumbstick = menu_input;
 
+  if (!s_vr_menu_visible)
+  {
+    s_vr_menu_floating_pose = {};
+  }
+  else if (settings->vr_menu_floating &&
+           (!menu_was_visible || !s_vr_menu_floating_pose.valid))
+  {
+    s_vr_menu_floating_pose = VrMenuFloatingPoseFromHead(PoseFromOpenXR(snapshot.head_pose));
+  }
+
   float pointer_x = 0.5f;
   float pointer_y = 0.5f;
+  float pointer_distance = 0.0f;
   bool pointer_active = false;
   if (s_vr_menu_visible)
   {
-    const Pose panel_pose = GripControllerPose(panel_hand);
+    const bool use_floating_pose = settings->vr_menu_floating && s_vr_menu_floating_pose.valid;
+    const Pose panel_pose = use_floating_pose ?
+                                s_vr_menu_floating_pose :
+                                VrMenuPanelPoseFromController(GripControllerPose(panel_hand));
     const Pose pointer_pose = PoseFromOpenXR(pointer_hand.aim_pose);
-    pointer_active = VrMenuPointerHit(panel_pose, pointer_pose, &pointer_x, &pointer_y);
+    const float panel_width =
+        use_floating_pose ? VR_MENU_FLOATING_WIDTH : VR_MENU_WRIST_WIDTH;
+    const float panel_height =
+        use_floating_pose ? VR_MENU_FLOATING_HEIGHT : VR_MENU_WRIST_HEIGHT;
+    pointer_active = VrMenuPointerHit(panel_pose, pointer_pose, panel_width, panel_height,
+                                      &pointer_x, &pointer_y, &pointer_distance);
     if (pointer_active)
     {
       const u32 item_count = VrMenuItemCountForTab(s_vr_menu_tab);
@@ -5912,6 +5989,7 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
   overlay.menu_pointer_active = s_vr_menu_visible && pointer_active;
   overlay.pointer_x = pointer_x;
   overlay.pointer_y = pointer_y;
+  overlay.pointer_distance = pointer_distance;
   Common::VR::OpenXRInputState::SetPrimedGunOverlay(overlay);
 }
 
@@ -8112,6 +8190,7 @@ void ResetNativeRuntime()
   s_last_vr_menu_stick_left = false;
   s_last_vr_menu_stick_right = false;
   s_vr_menu_visible = false;
+  s_vr_menu_floating_pose = {};
   s_snap_turn_ready = true;
   s_snap_turn_cooldown_until_frame = 0;
   s_vr_menu_tab = 0;

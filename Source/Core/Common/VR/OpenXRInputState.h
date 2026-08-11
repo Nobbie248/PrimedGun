@@ -94,8 +94,13 @@ struct PrimedGunVrOverlayState
   uint32_t weapon_selected_index = 0;
   std::array<float, 3> weapon_panel_position{};
   std::array<float, 4> weapon_panel_orientation{0.0f, 0.0f, 0.0f, 1.0f};
+  bool floating_menu_pose_valid = false;
+  std::array<float, 3> floating_menu_position{};
+  std::array<float, 4> floating_menu_orientation{0.0f, 0.0f, 0.0f, 1.0f};
+  std::array<float, 2> menu_size{1.05f, 0.72f};
   float pointer_x = 0.5f;
   float pointer_y = 0.5f;
+  float pointer_distance = 0.0f;
   float world_scale = 1.5f;
   bool use_right_hand = true;
   bool require_trigger = false;
@@ -116,6 +121,7 @@ struct PrimedGunVrOverlayState
   bool xr_dpad_enabled = true;
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
+  bool vr_menu_floating = false;
   bool cinematic_screen_enabled = false;
   bool cinematic_screen_active = false;
   uint32_t cinematic_screen_generation = 0;

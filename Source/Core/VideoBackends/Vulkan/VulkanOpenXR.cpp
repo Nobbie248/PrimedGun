@@ -1287,8 +1287,8 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
   XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
   info.arraySize = 1;
   info.format = swapchain_format;
-  info.width = 16;
-  info.height = 10;
+  info.width = 32;
+  info.height = 30;
   info.mipCount = 1;
   info.faceCount = 1;
   info.sampleCount = 1;
@@ -1318,7 +1318,7 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
 
   const VkFormat vk_format = static_cast<VkFormat>(swapchain_format);
   const AbstractTextureFormat abstract_format = VkFormatToAbstractFormat(vk_format);
-  TextureConfig tex_config(16, 10, 1, 1, 1, abstract_format, 0, AbstractTextureType::Texture_2D);
+  TextureConfig tex_config(32, 30, 1, 1, 1, abstract_format, 0, AbstractTextureType::Texture_2D);
   laser.textures.resize(image_count);
   for (uint32_t i = 0; i < image_count; ++i)
   {
@@ -1332,10 +1332,19 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
     }
   }
 
-  std::array<uint32_t, 160> pixels{};
-  for (int y = 3; y < 7; ++y)
-    for (int x = 0; x < 16; ++x)
-      pixels[static_cast<size_t>(y * 16 + x)] = 0xE080D8FFu;
+  std::array<uint32_t, 960> pixels{};
+  for (int y = 0; y < 30; ++y)
+    pixels[static_cast<size_t>(y * 32)] = 0xE080D8FFu;
+  for (int y = 3; y < 27; ++y)
+  {
+    for (int x = 4; x < 28; ++x)
+    {
+      const float dx = static_cast<float>(x) - 15.5f;
+      const float dy = static_cast<float>(y) - 14.5f;
+      if (dx * dx + dy * dy <= 144.0f)
+        pixels[static_cast<size_t>(y * 32 + x)] = 0xE080D8FFu;
+    }
+  }
   const std::vector<uint32_t> upload_pixels =
       ConvertPrimedGunOverlayPixelsForVkFormat(pixels.data(), pixels.size(), vk_format);
 
@@ -1360,7 +1369,7 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
     if (XR_SUCCEEDED(result) && acquired < laser.textures.size())
     {
       laser.textures[acquired]->OverrideImageLayout(VK_IMAGE_LAYOUT_UNDEFINED);
-      laser.textures[acquired]->Load(0, 16, 10, 16,
+      laser.textures[acquired]->Load(0, 32, 30, 32,
                                      reinterpret_cast<const u8*>(upload_pixels.data()),
                                      upload_pixels.size() * sizeof(uint32_t), 0);
       g_command_buffer_mgr->SubmitCommandBuffer(false, true);
@@ -1601,7 +1610,19 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   const PGO::HybridControllerPose& laser_pose =
       overlay.use_right_hand ? right_aim_pose : left_aim_pose;
 
-  if (menu && panel_pose.valid)
+  if (menu && overlay.vr_menu_floating && overlay.floating_menu_pose_valid)
+  {
+    m_primedgun_overlay_layer.pose.orientation = {overlay.floating_menu_orientation[0],
+                                                  overlay.floating_menu_orientation[1],
+                                                  overlay.floating_menu_orientation[2],
+                                                  overlay.floating_menu_orientation[3]};
+    m_primedgun_overlay_layer.pose.position = {
+        overlay.floating_menu_position[0] + snapshot.tracking_origin_position[0],
+        overlay.floating_menu_position[1] + snapshot.tracking_origin_position[1],
+        overlay.floating_menu_position[2] + snapshot.tracking_origin_position[2]};
+    m_primedgun_overlay_layer.size = {overlay.menu_size[0], overlay.menu_size[1]};
+  }
+  else if (menu && panel_pose.valid)
   {
     const XrQuaternionf q = panel_pose.orientation;
     m_primedgun_overlay_layer.pose.orientation = PGO::MulQuat(
@@ -1659,14 +1680,41 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
     m_primedgun_laser_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     m_primedgun_laser_layer.subImage.swapchain = m_primedgun_laser_swapchain.swapchain;
     m_primedgun_laser_layer.subImage.imageRect.offset = {0, 0};
-    m_primedgun_laser_layer.subImage.imageRect.extent = {16, 10};
+    m_primedgun_laser_layer.subImage.imageRect.extent = {1, 30};
     m_primedgun_laser_layer.pose.orientation =
         PGO::MulQuat(q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
-    m_primedgun_laser_layer.pose.position = {laser_pose.position.x + forward.x * 0.40f,
-                                            laser_pose.position.y + forward.y * 0.40f,
-                                            laser_pose.position.z + forward.z * 0.40f};
-    m_primedgun_laser_layer.size = {0.008f, 0.80f};
+    const float laser_length = overlay.menu_pointer_active && overlay.pointer_distance > 0.02f ?
+                                   overlay.pointer_distance :
+                                   8.0f;
+    m_primedgun_laser_layer.pose.position = {
+        laser_pose.position.x + forward.x * laser_length * 0.5f,
+        laser_pose.position.y + forward.y * laser_length * 0.5f,
+        laser_pose.position.z + forward.z * laser_length * 0.5f};
+    m_primedgun_laser_layer.size = {0.008f, laser_length};
     layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_laser_layer));
+
+    if (overlay.menu_pointer_active && overlay.pointer_distance > 0.02f)
+    {
+      const XrVector3f panel_normal =
+          PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.0f, 1.0f});
+      m_primedgun_laser_hit_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+      m_primedgun_laser_hit_layer.layerFlags =
+          XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+          XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+      m_primedgun_laser_hit_layer.space = VR::g_openxr->GetReferenceSpace();
+      m_primedgun_laser_hit_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+      m_primedgun_laser_hit_layer.subImage.swapchain = m_primedgun_laser_swapchain.swapchain;
+      m_primedgun_laser_hit_layer.subImage.imageRect.offset = {4, 3};
+      m_primedgun_laser_hit_layer.subImage.imageRect.extent = {24, 24};
+      m_primedgun_laser_hit_layer.pose.orientation = m_primedgun_overlay_layer.pose.orientation;
+      m_primedgun_laser_hit_layer.pose.position = {
+          laser_pose.position.x + forward.x * overlay.pointer_distance + panel_normal.x * 0.002f,
+          laser_pose.position.y + forward.y * overlay.pointer_distance + panel_normal.y * 0.002f,
+          laser_pose.position.z + forward.z * overlay.pointer_distance + panel_normal.z * 0.002f};
+      m_primedgun_laser_hit_layer.size = {0.02f, 0.02f};
+      layers->push_back(
+          reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_laser_hit_layer));
+    }
   }
 
   return appended_layer;

@@ -82,8 +82,8 @@ bool D3DPrimedGunOverlay::EnsureLaserSwapchain()
   XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
   info.arraySize = 1;
   info.format = swapchain_format;
-  info.width = 16;
-  info.height = 10;
+  info.width = 32;
+  info.height = 30;
   info.mipCount = 1;
   info.faceCount = 1;
   info.sampleCount = 1;
@@ -111,10 +111,19 @@ bool D3DPrimedGunOverlay::EnsureLaserSwapchain()
     return false;
   }
 
-  std::array<uint32_t, 160> pixels{};
-  for (int y = 3; y < 7; ++y)
-    for (int x = 0; x < 16; ++x)
-      pixels[static_cast<size_t>(y * 16 + x)] = 0xE080D8FFu;
+  std::array<uint32_t, 960> pixels{};
+  for (int y = 0; y < 30; ++y)
+    pixels[static_cast<size_t>(y * 32)] = 0xE080D8FFu;
+  for (int y = 3; y < 27; ++y)
+  {
+    for (int x = 4; x < 28; ++x)
+    {
+      const float dx = static_cast<float>(x) - 15.5f;
+      const float dy = static_cast<float>(y) - 14.5f;
+      if (dx * dx + dy * dy <= 144.0f)
+        pixels[static_cast<size_t>(y * 32 + x)] = 0xE080D8FFu;
+    }
+  }
 
   for (uint32_t i = 0; i < image_count; ++i)
   {
@@ -133,7 +142,7 @@ bool D3DPrimedGunOverlay::EnsureLaserSwapchain()
     if (XR_SUCCEEDED(result) && acquired < laser.images.size() && laser.images[acquired].texture)
     {
       D3D::context->UpdateSubresource(laser.images[acquired].texture, 0, nullptr, pixels.data(),
-                                      16 * sizeof(uint32_t), 0);
+                                      32 * sizeof(uint32_t), 0);
       D3D::context->Flush();
     }
 
@@ -332,7 +341,19 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
   const PGO::HybridControllerPose& laser_pose =
       overlay.use_right_hand ? right_aim_pose : left_aim_pose;
 
-  if (menu && panel_pose.valid)
+  if (menu && overlay.vr_menu_floating && overlay.floating_menu_pose_valid)
+  {
+    m_overlay_layer.pose.orientation = {overlay.floating_menu_orientation[0],
+                                        overlay.floating_menu_orientation[1],
+                                        overlay.floating_menu_orientation[2],
+                                        overlay.floating_menu_orientation[3]};
+    m_overlay_layer.pose.position = {
+        overlay.floating_menu_position[0] + snapshot.tracking_origin_position[0],
+        overlay.floating_menu_position[1] + snapshot.tracking_origin_position[1],
+        overlay.floating_menu_position[2] + snapshot.tracking_origin_position[2]};
+    m_overlay_layer.size = {overlay.menu_size[0], overlay.menu_size[1]};
+  }
+  else if (menu && panel_pose.valid)
   {
     const XrQuaternionf q = panel_pose.orientation;
     m_overlay_layer.pose.orientation =
@@ -390,14 +411,38 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
     m_laser_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     m_laser_layer.subImage.swapchain = m_laser_swapchain.swapchain;
     m_laser_layer.subImage.imageRect.offset = {0, 0};
-    m_laser_layer.subImage.imageRect.extent = {16, 10};
+    m_laser_layer.subImage.imageRect.extent = {1, 30};
     m_laser_layer.pose.orientation =
         PGO::MulQuat(q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
-    m_laser_layer.pose.position = {laser_pose.position.x + forward.x * 0.40f,
-                                   laser_pose.position.y + forward.y * 0.40f,
-                                   laser_pose.position.z + forward.z * 0.40f};
-    m_laser_layer.size = {0.008f, 0.80f};
+    const float laser_length = overlay.menu_pointer_active && overlay.pointer_distance > 0.02f ?
+                                   overlay.pointer_distance :
+                                   8.0f;
+    m_laser_layer.pose.position = {laser_pose.position.x + forward.x * laser_length * 0.5f,
+                                   laser_pose.position.y + forward.y * laser_length * 0.5f,
+                                   laser_pose.position.z + forward.z * laser_length * 0.5f};
+    m_laser_layer.size = {0.008f, laser_length};
     layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_laser_layer));
+
+    if (overlay.menu_pointer_active && overlay.pointer_distance > 0.02f)
+    {
+      const XrVector3f panel_normal =
+          PGO::RotateVector(m_overlay_layer.pose.orientation, {0.0f, 0.0f, 1.0f});
+      m_laser_hit_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+      m_laser_hit_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                                     XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+      m_laser_hit_layer.space = VR::g_openxr->GetReferenceSpace();
+      m_laser_hit_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+      m_laser_hit_layer.subImage.swapchain = m_laser_swapchain.swapchain;
+      m_laser_hit_layer.subImage.imageRect.offset = {4, 3};
+      m_laser_hit_layer.subImage.imageRect.extent = {24, 24};
+      m_laser_hit_layer.pose.orientation = m_overlay_layer.pose.orientation;
+      m_laser_hit_layer.pose.position = {
+          laser_pose.position.x + forward.x * overlay.pointer_distance + panel_normal.x * 0.002f,
+          laser_pose.position.y + forward.y * overlay.pointer_distance + panel_normal.y * 0.002f,
+          laser_pose.position.z + forward.z * overlay.pointer_distance + panel_normal.z * 0.002f};
+      m_laser_hit_layer.size = {0.02f, 0.02f};
+      layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_laser_hit_layer));
+    }
   }
 
   return appended_layer;

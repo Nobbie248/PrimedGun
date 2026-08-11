@@ -227,6 +227,7 @@ private:
   XrCompositionLayerQuad m_primedgun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_primedgun_laser_hit_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 
   std::atomic<bool> m_async_frame_finalization_in_flight{false};
   std::atomic<bool> m_async_frame_finalization_failed{false};
