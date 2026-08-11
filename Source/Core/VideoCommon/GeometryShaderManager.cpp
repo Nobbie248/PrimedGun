@@ -277,6 +277,8 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         const auto primedgun_overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
         const bool primedgun_cinematic_screen = primedgun_overlay.cinematic_screen_enabled &&
                                                 primedgun_overlay.cinematic_screen_active;
+        const bool primedgun_game_menu_screen = primedgun_overlay.game_menu_screen_enabled &&
+                                                primedgun_overlay.game_menu_screen_active;
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
@@ -471,9 +473,10 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
 
         // PrimedGun cinema mode renders unmatched game draws unchanged and duplicates them
         // to both EFB layers; SubmitFrame then presents layer 0 as an OpenXR quad screen.
-        // Keep explicit element overrides, otherwise loading/menu text that is deliberately
-        // matched as "screen" gets flattened when a transition camera trips cinema mode.
-        if (primedgun_cinematic_screen && !had_override)
+        // Keep explicit element overrides during cutscenes so deliberately matched loading text
+        // remains correctly placed. Pause/map screens force the entire composition to mono because
+        // their HUD overrides otherwise retain per-eye offsets inside the detached cinema quad.
+        if (primedgun_cinematic_screen && (primedgun_game_menu_screen || !had_override))
           constants.stereoparams[3] = 0.25f;
 
         const bool perspective_hud =

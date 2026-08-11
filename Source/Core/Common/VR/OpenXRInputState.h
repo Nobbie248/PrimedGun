@@ -125,6 +125,8 @@ struct PrimedGunVrOverlayState
   bool cinematic_screen_enabled = false;
   bool cinematic_screen_active = false;
   uint32_t cinematic_screen_generation = 0;
+  bool game_menu_screen_enabled = true;
+  bool game_menu_screen_active = false;
   bool frustum_culling_enabled = true;
   float frustum_culling_degrees = 115.0f;
   float metroid_hud_distance = 0.5f;

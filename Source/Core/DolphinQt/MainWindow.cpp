@@ -2335,6 +2335,10 @@ void MainWindow::ConnectStack()
         settings.value(QStringLiteral("primedgun/cinematic_screen_enabled"),
                        runtime.cinematic_screen_enabled)
             .toBool();
+    runtime.game_menu_screen_enabled =
+        settings.value(QStringLiteral("primedgun/game_menu_screen_enabled"),
+                       runtime.game_menu_screen_enabled)
+            .toBool();
     runtime.frustum_culling_enabled =
         settings.value(QStringLiteral("primedgun/frustum_culling_enabled"),
                        runtime.frustum_culling_enabled)
@@ -2495,6 +2499,8 @@ void MainWindow::ConnectStack()
     settings.setValue(QStringLiteral("primedgun/vr_menu_floating"), runtime.vr_menu_floating);
     settings.setValue(QStringLiteral("primedgun/cinematic_screen_enabled"),
                       runtime.cinematic_screen_enabled);
+    settings.setValue(QStringLiteral("primedgun/game_menu_screen_enabled"),
+                      runtime.game_menu_screen_enabled);
     settings.setValue(QStringLiteral("primedgun/frustum_culling_enabled"),
                       runtime.frustum_culling_enabled);
     settings.setValue(QStringLiteral("primedgun/frustum_culling_degrees"),
@@ -2969,6 +2975,10 @@ void MainWindow::ConnectStack()
   auto* vr_menu_floating = new QCheckBox(tr("Detach VR menu from hand"), game_tab);
   vr_menu_floating->setChecked(runtime->vr_menu_floating);
   controller_layout->addWidget(vr_menu_floating);
+  auto* game_menu_screen_enabled =
+      new QCheckBox(tr("Detach game menu and map from view"), game_tab);
+  game_menu_screen_enabled->setChecked(runtime->game_menu_screen_enabled);
+  controller_layout->addWidget(game_menu_screen_enabled);
   auto* cinematic_screen_enabled = new QCheckBox(tr("Show cutscenes on cinema screen"), game_tab);
   cinematic_screen_enabled->setChecked(runtime->cinematic_screen_enabled);
   auto* combat_jump_use_primary_button = new QCheckBox(tr("Use A button for jump"), game_tab);
@@ -3703,6 +3713,7 @@ void MainWindow::ConnectStack()
     const QSignalBlocker vr_menu_requires_head_zone_blocker{vr_menu_requires_head_zone};
     const QSignalBlocker vr_menu_floating_blocker{vr_menu_floating};
     const QSignalBlocker cinematic_screen_enabled_blocker{cinematic_screen_enabled};
+    const QSignalBlocker game_menu_screen_enabled_blocker{game_menu_screen_enabled};
     const QSignalBlocker frustum_culling_enabled_blocker{frustum_culling_enabled};
     const QSignalBlocker rumble_enabled_blocker{rumble_enabled};
     const QSignalBlocker rumble_hand_mode_blocker{rumble_hand_mode};
@@ -3749,6 +3760,7 @@ void MainWindow::ConnectStack()
     vr_menu_requires_head_zone->setChecked(runtime->vr_menu_requires_head_zone);
     vr_menu_floating->setChecked(runtime->vr_menu_floating);
     cinematic_screen_enabled->setChecked(runtime->cinematic_screen_enabled);
+    game_menu_screen_enabled->setChecked(runtime->game_menu_screen_enabled);
     frustum_culling_enabled->setChecked(runtime->frustum_culling_enabled);
     rumble_enabled->setChecked(runtime->rumble_enabled);
     rumble_hand_mode->setCurrentIndex(std::clamp(runtime->rumble_hand_mode, 0, 2));
@@ -3810,6 +3822,7 @@ void MainWindow::ConnectStack()
     runtime->vr_menu_requires_head_zone = false;
     runtime->vr_menu_floating = false;
     runtime->cinematic_screen_enabled = false;
+    runtime->game_menu_screen_enabled = true;
     runtime->rumble_enabled = true;
     runtime->rumble_intensity = 0.35f;
     runtime->rumble_hand_mode = 2;
@@ -3880,6 +3893,11 @@ void MainWindow::ConnectStack()
   connect(cinematic_screen_enabled, &QCheckBox::toggled, this,
           [runtime, apply_runtime](bool checked) {
     runtime->cinematic_screen_enabled = checked;
+    apply_runtime();
+  });
+  connect(game_menu_screen_enabled, &QCheckBox::toggled, this,
+          [runtime, apply_runtime](bool checked) {
+    runtime->game_menu_screen_enabled = checked;
     apply_runtime();
   });
   connect(frustum_culling_enabled, &QCheckBox::toggled, this,

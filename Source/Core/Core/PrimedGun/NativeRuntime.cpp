@@ -270,7 +270,7 @@ constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
 constexpr u32 VR_MENU_CANNON_TAB = 4;
 constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 17;
+constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 18;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
 constexpr float VR_MENU_WRIST_WIDTH = 1.05f;
 constexpr float VR_MENU_WRIST_HEIGHT = 0.72f;
@@ -320,6 +320,12 @@ constexpr u32 RSTL_REF_DATA_OBJECT_OFFSET = 0x00u;
 constexpr u32 WORLD_TRANS_MANAGER_TYPE_OFFSET = 0x30u;
 constexpr u32 WORLD_TRANS_MANAGER_TYPE_ELEVATOR = 1u;
 constexpr u64 CINEMATIC_SCREEN_SIGNAL_LOSS_GRACE_FRAMES = 10u;
+constexpr u32 GAMEFLOW_NONE = 0u;
+constexpr u32 GAMEFLOW_MESSAGE = 1u;
+constexpr u32 GAMEFLOW_SAVE = 2u;
+constexpr u32 GAMEFLOW_LOGBOOK = 3u;
+constexpr u32 GAMEFLOW_PAUSE = 4u;
+constexpr u32 GAMEFLOW_MAP = 5u;
 constexpr u32 PLAYER_STATE_CURRENT_VISOR_OFFSET = 0x14u;
 constexpr u32 PLAYER_STATE_TRANSITION_VISOR_OFFSET = 0x18u;
 constexpr u32 PLAYER_STATE_MAX_VISOR = 3u;
@@ -438,6 +444,7 @@ bool s_cinematic_screen_active = false;
 u64 s_cinematic_screen_hold_until_frame = 0;
 u64 s_cinematic_no_cull_hold_until_frame = 0;
 u32 s_cinematic_screen_generation = 0;
+bool s_game_menu_screen_active = false;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -626,12 +633,12 @@ ProjectileTransformPatch s_projectile_transform_patches[] = {
 };
 
 GameFlowFlagPatch s_game_flow_flag_patches[] = {
-    {0x800243CCu, 0, GAMEFLOW_UNPAUSE_CAVE, 0, false},
-    {0x80024414u, 0, GAMEFLOW_MESSAGE_CAVE, 1, false},
-    {0x80024450u, 0, GAMEFLOW_SAVE_CAVE, 1, false},
-    {0x8002448Cu, 0, GAMEFLOW_LOGBOOK_CAVE, 1, false},
-    {0x800244C8u, 0, GAMEFLOW_PAUSE_CAVE, 1, false},
-    {0x80024504u, 0, GAMEFLOW_MAP_CAVE, 1, false},
+    {0x800243CCu, 0, GAMEFLOW_UNPAUSE_CAVE, GAMEFLOW_NONE, false},
+    {0x80024414u, 0, GAMEFLOW_MESSAGE_CAVE, GAMEFLOW_MESSAGE, false},
+    {0x80024450u, 0, GAMEFLOW_SAVE_CAVE, GAMEFLOW_SAVE, false},
+    {0x8002448Cu, 0, GAMEFLOW_LOGBOOK_CAVE, GAMEFLOW_LOGBOOK, false},
+    {0x800244C8u, 0, GAMEFLOW_PAUSE_CAVE, GAMEFLOW_PAUSE, false},
+    {0x80024504u, 0, GAMEFLOW_MAP_CAVE, GAMEFLOW_MAP, false},
 };
 
 enum DpadDir
@@ -1253,7 +1260,8 @@ bool ReadCurrentPlayerVisor(const Core::CPUThreadGuard& guard, u32* visor)
 bool PlayerIsInMenuMapOrMorphball(const Core::CPUThreadGuard& guard, u32 player)
 {
   u32 gameflow_menu = 0;
-  if (TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow_menu) && gameflow_menu == 1)
+  if (TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow_menu) &&
+      gameflow_menu != GAMEFLOW_NONE)
     return true;
 
   u32 morph_state = 0xffffffffu;
@@ -4996,7 +5004,7 @@ u32 VrMenuResetActionForSelection()
       VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
-      VrMenuControlActualIndex(s_vr_menu_selected_index) == 16)
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 17)
   {
     return VR_MENU_RESET_CONTROLLER_ACTION;
   }
@@ -5192,6 +5200,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
   settings->vr_menu_floating = false;
+  settings->game_menu_screen_enabled = true;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
@@ -5265,6 +5274,7 @@ void SetCinematicScreenActive(bool active)
 void ClearCinematicScreenState(bool enabled)
 {
   SetCinematicScreenActive(false);
+  s_game_menu_screen_active = false;
   s_cinematic_screen_hold_until_frame = 0;
 #ifdef ENABLE_VR
   Common::VR::PrimedGunVrOverlayState overlay =
@@ -5278,13 +5288,23 @@ void ClearCinematicScreenState(bool enabled)
 
 void UpdateCinematicScreenState(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings)
 {
-  if (!settings.cinematic_screen_enabled)
+  if (!settings.cinematic_screen_enabled && !settings.game_menu_screen_enabled)
   {
     ClearCinematicScreenState(false);
     return;
   }
 
-  if (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard))
+  u32 gameflow = GAMEFLOW_NONE;
+  const bool game_menu_active =
+      settings.game_menu_screen_enabled &&
+      TryReadU32(guard, GAMEFLOW_MENU_SCRATCH, &gameflow) &&
+      (gameflow == GAMEFLOW_LOGBOOK || gameflow == GAMEFLOW_PAUSE || gameflow == GAMEFLOW_MAP);
+  s_game_menu_screen_active = game_menu_active;
+  const bool cutscene_active =
+      settings.cinematic_screen_enabled &&
+      (CinematicCameraActive(guard) || ElevatorWorldTransitionActive(guard));
+
+  if (cutscene_active || game_menu_active)
   {
     SetCinematicScreenActive(true);
     s_cinematic_screen_hold_until_frame =
@@ -5575,6 +5595,8 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 15)
       settings->vr_menu_floating = !settings->vr_menu_floating;
     else if (actual_index == 16)
+      settings->game_menu_screen_enabled = !settings->game_menu_screen_enabled;
+    else if (actual_index == 17)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
@@ -5725,9 +5747,12 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.height_prompt_enabled = settings.height_prompt_enabled;
   overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
-  overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
-  overlay.cinematic_screen_active = settings.cinematic_screen_enabled && s_cinematic_screen_active;
+  overlay.cinematic_screen_enabled =
+      settings.cinematic_screen_enabled || settings.game_menu_screen_enabled;
+  overlay.cinematic_screen_active = s_cinematic_screen_active;
   overlay.cinematic_screen_generation = s_cinematic_screen_generation;
+  overlay.game_menu_screen_enabled = settings.game_menu_screen_enabled;
+  overlay.game_menu_screen_active = s_game_menu_screen_active;
   overlay.frustum_culling_enabled = settings.frustum_culling_enabled;
   overlay.frustum_culling_degrees = settings.frustum_culling_degrees;
   overlay.metroid_hud_distance = settings.metroid_hud_distance;
@@ -7946,7 +7971,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     ClearHmdCameraFacingScratch(guard);
     TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
     s_cinematic_no_cull_hold_until_frame = 0;
-    ClearCinematicScreenState(settings.cinematic_screen_enabled);
+    ClearCinematicScreenState(settings.cinematic_screen_enabled ||
+                              settings.game_menu_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -7963,7 +7989,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     ClearHmdCameraFacingScratch(guard);
     TryWriteU32(guard, HMD_FRUSTUM_DISABLE_CULLING_SCRATCH, 0);
     s_cinematic_no_cull_hold_until_frame = 0;
-    ClearCinematicScreenState(settings.cinematic_screen_enabled);
+    ClearCinematicScreenState(settings.cinematic_screen_enabled ||
+                              settings.game_menu_screen_enabled);
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
@@ -8171,6 +8198,7 @@ void ResetNativeRuntime()
   s_cinematic_screen_generation = 0;
   s_cinematic_screen_active = false;
   s_cinematic_screen_hold_until_frame = 0;
+  s_game_menu_screen_active = false;
   s_cinematic_no_cull_hold_until_frame = 0;
   s_last_scan_reticle_watchdog_frame = 0;
   s_scan_reticle_bad_samples = 0;
@@ -8352,8 +8380,12 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
                                                 s_settings.rumble_intensity,
                                                 s_settings.rumble_hand_mode);
 #endif
-  if (!s_settings.enabled || !s_settings.cinematic_screen_enabled)
-    ClearCinematicScreenState(s_settings.cinematic_screen_enabled);
+  if (!s_settings.enabled ||
+      (!s_settings.cinematic_screen_enabled && !s_settings.game_menu_screen_enabled))
+  {
+    ClearCinematicScreenState(s_settings.cinematic_screen_enabled ||
+                              s_settings.game_menu_screen_enabled);
+  }
 }
 
 void ResetCalibrationOffsets()
