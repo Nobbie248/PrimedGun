@@ -5217,7 +5217,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
   settings->vr_menu_floating = false;
-  settings->game_menu_screen_enabled = true;
+  settings->game_menu_screen_enabled = false;
   settings->xr_dpad_enabled = true;
   settings->xr_dpad_head_radius = 0.28f;
   settings->xr_dpad_head_y_below = 0.02f;
