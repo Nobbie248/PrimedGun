@@ -7352,9 +7352,9 @@ bool ApplyHmdRendererViewPlanePatch(const Core::CPUThreadGuard& guard)
       {0x0Cu, 0x2C000000u},               // cmpwi r0, 0
       {0x10u, PpcBeq(HMD_RENDERER_VIEW_PLANE_CAVE + 0x10u, fallback_label)},
 
-      {0x14u, 0xC06C0014u},  // lfs f3, hmd_forward.x(r12)
+      {0x14u, 0xC06C0008u},  // lfs f3, hmd_forward.x(r12)
       {0x18u, 0xC08C0018u},  // lfs f4, hmd_forward.y(r12)
-      {0x1Cu, 0xC0AC001Cu},  // lfs f5, hmd_forward.z(r12)
+      {0x1Cu, 0xC0AC0028u},  // lfs f5, hmd_forward.z(r12)
       {0x20u, PpcBranch(HMD_RENDERER_VIEW_PLANE_CAVE + 0x20u, build_plane_label)},
 
       {0x24u, 0xC07F0004u},  // lfs f3, camera_forward.x(r31)
