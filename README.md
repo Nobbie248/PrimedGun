@@ -56,6 +56,7 @@ For macOS, see the [PrimedGun-Mac fork](https://github.com/gperkins345/PrimedGun
 ## Setup Notes
 
 - The game runs at 60 fps, set your hmd to 120hz to correct frame pacing.
+- If your HMD does not support 120 Hz, use the D3D12 backend and disable asynchronous spacewarp or motion smoothing in your VR software.
 - Meta's own OpenXR environment is not recommended; try SteamVR or Virtual Desktop instead.
 - Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.
 - Check the Layout tab for controller bindings.
