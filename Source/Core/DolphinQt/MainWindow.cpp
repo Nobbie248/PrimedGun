@@ -2916,6 +2916,7 @@ void MainWindow::ConnectStack()
     auto* notes = new QLabel(
         tr(R"(<ul style="margin: 0; padding-left: 22px;">
 <li>The game runs at 60 fps, set your HMD to 120 Hz to correct frame pacing.</li>
+<li>If your HMD does not support 120 Hz, use the D3D12 backend and disable asynchronous spacewarp or motion smoothing in your VR software.</li>
 <li>Meta's own OpenXR environment is not recommended; try SteamVR or Virtual Desktop instead.</li>
 <li>Run the app and select your Metroid Prime NTSC Revision 0 (1.0) game file.</li>
 <li>Check the Layout tab for controller bindings.</li>
@@ -2974,11 +2975,9 @@ void MainWindow::ConnectStack()
   controller_layout->addWidget(vr_menu_requires_head_zone);
   auto* vr_menu_floating = new QCheckBox(tr("Detach VR menu from hand"), game_tab);
   vr_menu_floating->setChecked(runtime->vr_menu_floating);
-  controller_layout->addWidget(vr_menu_floating);
   auto* game_menu_screen_enabled =
       new QCheckBox(tr("Detach game menu and map from view"), game_tab);
   game_menu_screen_enabled->setChecked(runtime->game_menu_screen_enabled);
-  controller_layout->addWidget(game_menu_screen_enabled);
   auto* cinematic_screen_enabled = new QCheckBox(tr("Show cutscenes on cinema screen"), game_tab);
   cinematic_screen_enabled->setChecked(runtime->cinematic_screen_enabled);
   auto* combat_jump_use_primary_button = new QCheckBox(tr("Use A button for jump"), game_tab);
@@ -3172,6 +3171,8 @@ void MainWindow::ConnectStack()
   height_prompt_enabled->setChecked(runtime->height_prompt_enabled);
   calibration_layout->addWidget(height_prompt_enabled);
   calibration_layout->addWidget(cinematic_screen_enabled);
+  calibration_layout->addWidget(vr_menu_floating);
+  calibration_layout->addWidget(game_menu_screen_enabled);
   auto* visor_helmet_enabled = new QCheckBox(tr("Enable visor helmet"), game_tab);
   visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
   auto* visor_helmet_row = new QHBoxLayout;

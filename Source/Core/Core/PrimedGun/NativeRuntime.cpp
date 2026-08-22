@@ -264,14 +264,14 @@ constexpr u32 VR_MENU_CALIBRATION_TAB = 1;
 constexpr float VR_MENU_TEXTURE_WIDTH = 1024.0f;
 constexpr float VR_MENU_TEXTURE_HEIGHT = 512.0f;
 constexpr u32 VR_MENU_CALIBRATION_FIRST_PAGE_ITEMS = 12;
-constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 22;
+constexpr u32 VR_MENU_CALIBRATION_TOTAL_ITEMS = 24;
 constexpr u32 VR_MENU_CALIBRATION_PAGE_COUNT = 2;
 constexpr u32 VR_MENU_CONTROL_TAB = 2;
 constexpr u32 VR_MENU_MOVEMENT_TAB = 3;
 constexpr u32 VR_MENU_CANNON_TAB = 4;
 constexpr u32 VR_MENU_STATE_TAB = 5;
 constexpr u32 VR_MENU_CONTROL_FIRST_PAGE_ITEMS = 8;
-constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 18;
+constexpr u32 VR_MENU_CONTROL_TOTAL_ITEMS = 16;
 constexpr u32 VR_MENU_CONTROL_PAGE_COUNT = 2;
 constexpr float VR_MENU_WRIST_WIDTH = 1.05f;
 constexpr float VR_MENU_WRIST_HEIGHT = 0.72f;
@@ -5021,7 +5021,7 @@ u32 VrMenuResetActionForSelection()
       VrMenuCalibrationActualIndex(s_vr_menu_selected_index) == 19)
     return VR_MENU_RESET_CALIBRATION_ACTION;
   if (s_vr_menu_tab == VR_MENU_CONTROL_TAB &&
-      VrMenuControlActualIndex(s_vr_menu_selected_index) == 17)
+      VrMenuControlActualIndex(s_vr_menu_selected_index) == 15)
   {
     return VR_MENU_RESET_CONTROLLER_ACTION;
   }
@@ -5685,6 +5685,10 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->rot_offset_y = 20.0f;
       settings->rot_offset_z = -90.0f;
     }
+    else if (actual_index == 22)
+      settings->vr_menu_floating = !settings->vr_menu_floating;
+    else if (actual_index == 23)
+      settings->game_menu_screen_enabled = !settings->game_menu_screen_enabled;
     return;
   }
 
@@ -5716,10 +5720,6 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
     else if (actual_index == 10 || actual_index == 11)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
     else if (actual_index == 15)
-      settings->vr_menu_floating = !settings->vr_menu_floating;
-    else if (actual_index == 16)
-      settings->game_menu_screen_enabled = !settings->game_menu_screen_enabled;
-    else if (actual_index == 17)
     {
       if (!ConfirmVrResetAction(reset_action))
         return;
