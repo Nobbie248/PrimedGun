@@ -21,6 +21,7 @@
 
 #include "DolphinQt/Config/ConfigControls/ConfigBool.h"
 #include "DolphinQt/Config/ConfigControls/ConfigChoice.h"
+#include "DolphinQt/Config/ConfigControls/ConfigFloatSlider.h"
 #include "DolphinQt/Config/ConfigControls/ConfigInteger.h"
 #include "DolphinQt/Config/ConfigControls/ConfigRadio.h"
 #include "DolphinQt/Config/GameConfigWidget.h"
@@ -111,14 +112,53 @@ void GeneralWidget::CreateWidgets()
   auto* m_options_layout = new QGridLayout();
 
   m_autoadjust_window_size = new ConfigBool(tr("Auto-Adjust Window Size"),
-                                            Config::MAIN_RENDER_WINDOW_AUTOSIZE, m_game_layer);
+                                             Config::MAIN_RENDER_WINDOW_AUTOSIZE, m_game_layer);
   m_render_main_window =
       new ConfigBool(tr("Render to Main Window"), Config::MAIN_RENDER_TO_MAIN, m_game_layer);
+  m_desktop_mirror_mode = new ConfigChoiceMap<OpenXRMirrorView>(
+      {{tr("Both Eyes (Side-by-Side)"), OpenXRMirrorView::BothEyes},
+       {tr("Both Eyes - Left Dominant"), OpenXRMirrorView::JoinedEyesLeftDominant},
+       {tr("Both Eyes - Right Dominant"), OpenXRMirrorView::JoinedEyesRightDominant},
+       {tr("Left Eye Only"), OpenXRMirrorView::LeftEye},
+       {tr("Right Eye Only"), OpenXRMirrorView::RightEye},
+       {tr("None"), OpenXRMirrorView::None}},
+      Config::GFX_VR_MIRROR_VIEW, m_game_layer);
+  m_desktop_mirror_join_separation = new ConfigFloatSlider(
+      Config::GFX_VR_MIRROR_JOIN_SEPARATION_MIN, Config::GFX_VR_MIRROR_JOIN_SEPARATION_MAX,
+      Config::GFX_VR_MIRROR_JOIN_SEPARATION, Config::GFX_VR_MIRROR_JOIN_SEPARATION_STEP,
+      m_game_layer);
+  m_desktop_mirror_join_separation_value = new QLabel;
+  m_desktop_mirror_join_left_eye_offset = new ConfigFloatSlider(
+      Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN, Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX,
+      Config::GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET, Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_STEP,
+      m_game_layer);
+  m_desktop_mirror_join_left_eye_offset_value = new QLabel;
+  m_desktop_mirror_join_right_eye_offset = new ConfigFloatSlider(
+      Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN, Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX,
+      Config::GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET, Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_STEP,
+      m_game_layer);
+  m_desktop_mirror_join_right_eye_offset_value = new QLabel;
 
   m_options_box->setLayout(m_options_layout);
 
   m_options_layout->addWidget(m_render_main_window, 0, 0);
   m_options_layout->addWidget(m_autoadjust_window_size, 0, 1);
+  m_options_layout->addWidget(new QLabel(tr("Desktop Mirror View:")), 1, 0);
+  m_options_layout->addWidget(m_desktop_mirror_mode, 1, 1);
+  m_options_layout->addWidget(
+      new ConfigFloatLabel(tr("Join Eye Separation:"), m_desktop_mirror_join_separation), 2, 0);
+  m_options_layout->addWidget(m_desktop_mirror_join_separation, 2, 1);
+  m_options_layout->addWidget(m_desktop_mirror_join_separation_value, 2, 2);
+  m_options_layout->addWidget(
+      new ConfigFloatLabel(tr("Left Eye View Offset:"), m_desktop_mirror_join_left_eye_offset), 3,
+      0);
+  m_options_layout->addWidget(m_desktop_mirror_join_left_eye_offset, 3, 1);
+  m_options_layout->addWidget(m_desktop_mirror_join_left_eye_offset_value, 3, 2);
+  m_options_layout->addWidget(
+      new ConfigFloatLabel(tr("Right Eye View Offset:"), m_desktop_mirror_join_right_eye_offset),
+      4, 0);
+  m_options_layout->addWidget(m_desktop_mirror_join_right_eye_offset, 4, 1);
+  m_options_layout->addWidget(m_desktop_mirror_join_right_eye_offset_value, 4, 2);
 
   // Other
   auto* shader_compilation_box = new QGroupBox(tr("Shader Compilation"));
@@ -160,6 +200,32 @@ void GeneralWidget::ConnectWidgets()
   });
   connect(m_aspect_combo, &QComboBox::currentIndexChanged, this,
           &GeneralWidget::ToggleCustomAspectRatio);
+  const auto update_join_separation = [this] {
+    m_desktop_mirror_join_separation_value->setText(
+        QString::asprintf("%+.2f%%", m_desktop_mirror_join_separation->GetValue() * 100.0f));
+    const bool joined_mode = m_desktop_mirror_mode->currentIndex() == 1 ||
+                             m_desktop_mirror_mode->currentIndex() == 2;
+    m_desktop_mirror_join_separation->setEnabled(joined_mode);
+    m_desktop_mirror_join_separation_value->setEnabled(
+        joined_mode);
+    m_desktop_mirror_join_left_eye_offset_value->setText(QString::asprintf(
+        "%+.2f%%", m_desktop_mirror_join_left_eye_offset->GetValue() * 100.0f));
+    m_desktop_mirror_join_right_eye_offset_value->setText(QString::asprintf(
+        "%+.2f%%", m_desktop_mirror_join_right_eye_offset->GetValue() * 100.0f));
+    m_desktop_mirror_join_left_eye_offset->setEnabled(joined_mode);
+    m_desktop_mirror_join_left_eye_offset_value->setEnabled(joined_mode);
+    m_desktop_mirror_join_right_eye_offset->setEnabled(joined_mode);
+    m_desktop_mirror_join_right_eye_offset_value->setEnabled(joined_mode);
+  };
+  update_join_separation();
+  connect(m_desktop_mirror_mode, &QComboBox::currentIndexChanged, this,
+          update_join_separation);
+  connect(m_desktop_mirror_join_separation, &ConfigFloatSlider::valueChanged, this,
+          update_join_separation);
+  connect(m_desktop_mirror_join_left_eye_offset, &ConfigFloatSlider::valueChanged, this,
+          update_join_separation);
+  connect(m_desktop_mirror_join_right_eye_offset, &ConfigFloatSlider::valueChanged, this,
+          update_join_separation);
 }
 
 void GeneralWidget::ToggleCustomAspectRatio(int index)

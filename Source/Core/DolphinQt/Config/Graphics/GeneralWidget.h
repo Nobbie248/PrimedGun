@@ -9,12 +9,16 @@
 
 class ConfigBool;
 class ConfigChoice;
+class ConfigFloatSlider;
 class ConfigInteger;
 class ConfigRadioInt;
 class ConfigStringChoice;
 class GraphicsPane;
 class QLabel;
 class ToolTipComboBox;
+template <typename T>
+class ConfigChoiceMap;
+enum class OpenXRMirrorView : int;
 
 namespace Config
 {
@@ -55,6 +59,13 @@ private:
   // Options
   ConfigBool* m_autoadjust_window_size;
   ConfigBool* m_render_main_window;
+  ConfigChoiceMap<OpenXRMirrorView>* m_desktop_mirror_mode;
+  ConfigFloatSlider* m_desktop_mirror_join_separation;
+  QLabel* m_desktop_mirror_join_separation_value;
+  ConfigFloatSlider* m_desktop_mirror_join_left_eye_offset;
+  QLabel* m_desktop_mirror_join_left_eye_offset_value;
+  ConfigFloatSlider* m_desktop_mirror_join_right_eye_offset;
+  QLabel* m_desktop_mirror_join_right_eye_offset_value;
 
   std::array<ConfigRadioInt*, 4> m_shader_compilation_mode{};
   ConfigBool* m_wait_for_shaders;

@@ -5,6 +5,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -96,6 +97,13 @@ private:
 class PostProcessing
 {
 public:
+  struct HorizontalBlend
+  {
+    float start;
+    float end;
+    bool invert;
+  };
+
   PostProcessing();
   virtual ~PostProcessing();
 
@@ -111,7 +119,8 @@ public:
   void RecompilePipeline();
 
   void BlitFromTexture(const MathUtil::Rectangle<int>& dst, const MathUtil::Rectangle<int>& src,
-                       const AbstractTexture* src_tex, int src_layer = -1);
+                       const AbstractTexture* src_tex, int src_layer = -1,
+                       std::optional<HorizontalBlend> horizontal_blend = std::nullopt);
   // Single-pass blit of a 2-layer source into a 2-layer framebuffer. Vulkan uses
   // multiview; D3D uses its passthrough geometry shader.
   bool CanBlitFromTextureLayered() const;
@@ -139,6 +148,8 @@ protected:
   {
     std::unique_ptr<AbstractPipeline> default_pipeline;
     std::unique_ptr<AbstractPipeline> pipeline;
+    std::unique_ptr<AbstractPipeline> default_blend_pipeline;
+    std::unique_ptr<AbstractPipeline> blend_pipeline;
     // Single-pass layered blit pipelines for OpenXR swapchains.
     std::unique_ptr<AbstractPipeline> default_multiview_pipeline;
     std::unique_ptr<AbstractPipeline> multiview_pipeline;
@@ -150,7 +161,8 @@ protected:
   void FillUniformBuffer(const MathUtil::Rectangle<int>& src, const AbstractTexture* src_tex,
                          int src_layer, const MathUtil::Rectangle<int>& dst,
                          const MathUtil::Rectangle<int>& wnd, u8* buffer, bool user_post_process,
-                         bool intermediary_buffer);
+                         bool intermediary_buffer,
+                         std::optional<HorizontalBlend> horizontal_blend = std::nullopt);
 
   // Timer for determining our time value
   Common::Timer m_timer;
@@ -175,6 +187,8 @@ protected:
   std::map<AbstractTextureFormat, FormatPipelines> m_pipelines_per_format;
   const AbstractPipeline* m_default_pipeline = nullptr;
   const AbstractPipeline* m_pipeline = nullptr;
+  const AbstractPipeline* m_default_blend_pipeline = nullptr;
+  const AbstractPipeline* m_blend_pipeline = nullptr;
   const AbstractPipeline* m_default_multiview_pipeline = nullptr;
   const AbstractPipeline* m_multiview_pipeline = nullptr;
 

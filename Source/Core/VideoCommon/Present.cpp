@@ -3,6 +3,8 @@
 
 #include "VideoCommon/Present.h"
 
+#include <optional>
+
 #include "Common/ChunkFile.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
@@ -34,6 +36,119 @@ std::unique_ptr<VideoCommon::Presenter> g_presenter;
 
 namespace VideoCommon
 {
+#ifdef ENABLE_VR
+namespace
+{
+struct MirrorFov
+{
+  float left;
+  float right;
+  float down;
+  float up;
+};
+
+static std::optional<MirrorFov> GetMirrorFov(const VR::XREyeView& view)
+{
+  const MirrorFov fov{std::tan(view.fov.angleLeft), std::tan(view.fov.angleRight),
+                      std::tan(view.fov.angleDown), std::tan(view.fov.angleUp)};
+  if (!std::isfinite(fov.left) || !std::isfinite(fov.right) || !std::isfinite(fov.down) ||
+      !std::isfinite(fov.up) || fov.right <= fov.left || fov.up <= fov.down)
+  {
+    return std::nullopt;
+  }
+  return fov;
+}
+
+static std::pair<float, float> CenteredRange(float minimum, float maximum, float size)
+{
+  size = std::min(size, maximum - minimum);
+  float range_min = -size * 0.5f;
+  float range_max = size * 0.5f;
+  if (range_min < minimum)
+  {
+    range_max += minimum - range_min;
+    range_min = minimum;
+  }
+  if (range_max > maximum)
+  {
+    range_min -= range_max - maximum;
+    range_max = maximum;
+  }
+  return {range_min, range_max};
+}
+
+static MathUtil::Rectangle<int> MakeMirrorSourceRectangle(
+    const MathUtil::Rectangle<int>& source, const MirrorFov& fov, float left, float right,
+    float down, float up)
+{
+  const float horizontal_range = fov.right - fov.left;
+  const float vertical_range = fov.up - fov.down;
+  const float u0 = (left - fov.left) / horizontal_range;
+  const float u1 = (right - fov.left) / horizontal_range;
+  const float v0 = (fov.up - up) / vertical_range;
+  const float v1 = (fov.up - down) / vertical_range;
+  const auto interpolate = [](int start, int end, float amount) {
+    return static_cast<int>(std::lround(start + (end - start) * amount));
+  };
+  return {interpolate(source.left, source.right, u0), interpolate(source.top, source.bottom, v0),
+          interpolate(source.left, source.right, u1), interpolate(source.top, source.bottom, v1)};
+}
+
+static MathUtil::Rectangle<int> FitMirrorRectangle(const MathUtil::Rectangle<int>& target,
+                                                   float aspect)
+{
+  const int target_width = target.GetWidth();
+  const int target_height = target.GetHeight();
+  if (target_width <= 0 || target_height <= 0 || !std::isfinite(aspect) || aspect <= 0.0f)
+    return target;
+
+  int width = target_width;
+  int height = static_cast<int>(std::lround(width / aspect));
+  if (height > target_height)
+  {
+    height = target_height;
+    width = static_cast<int>(std::lround(height * aspect));
+  }
+  const int left = target.left + (target_width - width) / 2;
+  const int top = target.top + (target_height - height) / 2;
+  return {left, top, left + width, top + height};
+}
+
+static void BlitSingleEyeMirror(PostProcessing* post_processor,
+                                const MathUtil::Rectangle<int>& target,
+                                const MathUtil::Rectangle<int>& source,
+                                const AbstractTexture* texture, int layer,
+                                const std::optional<MirrorFov>& optional_fov)
+{
+  if (!optional_fov)
+  {
+    const float source_aspect = static_cast<float>(std::abs(source.GetWidth())) /
+                                std::max(std::abs(source.GetHeight()), 1);
+    post_processor->BlitFromTexture(FitMirrorRectangle(target, source_aspect), source, texture,
+                                    layer);
+    return;
+  }
+
+  const MirrorFov& fov = *optional_fov;
+  const float target_aspect = static_cast<float>(target.GetWidth()) / target.GetHeight();
+  const float horizontal_range = fov.right - fov.left;
+  const float vertical_range = fov.up - fov.down;
+  float left = fov.left;
+  float right = fov.right;
+  float down = fov.down;
+  float up = fov.up;
+
+  if (horizontal_range / vertical_range < target_aspect)
+    std::tie(down, up) = CenteredRange(fov.down, fov.up, horizontal_range / target_aspect);
+  else
+    std::tie(left, right) = CenteredRange(fov.left, fov.right, vertical_range * target_aspect);
+
+  post_processor->BlitFromTexture(
+      target, MakeMirrorSourceRectangle(source, fov, left, right, down, up), texture, layer);
+}
+}  // namespace
+#endif
+
 // Stretches the native/internal analog resolution aspect ratio from ~4:3 to ~16:9
 static float SourceAspectRatioToWidescreen(float source_aspect)
 {
@@ -865,17 +980,101 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
                    VR::g_openxr && VR::g_openxr->ShouldRender());
       s_first_openxr_render = false;
     }
-    // Mirror view on the desktop window (side-by-side, left eye | right eye).
-    // This is purely for debugging/monitoring — the HMD receives full-resolution images below.
-    if (cinematic_screen_active)
+    // Mirror view on the desktop window. The HMD receives full-resolution images below.
+    const auto& eye_views = VR::g_openxr->GetPresentEyeViews();
+    const std::optional<MirrorFov> left_fov = GetMirrorFov(eye_views[0]);
+    const std::optional<MirrorFov> right_fov = GetMirrorFov(eye_views[1]);
+    if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::None)
+    {
+    }
+    else if (cinematic_screen_active)
     {
       m_post_processor->BlitFromTexture(target_rc, source_rc, source_texture, 0);
     }
-    else
+    else if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::LeftEye)
+    {
+      BlitSingleEyeMirror(m_post_processor.get(), target_rc, source_rc, source_texture, 0,
+                          left_fov);
+    }
+    else if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::RightEye)
+    {
+      BlitSingleEyeMirror(m_post_processor.get(), target_rc, source_rc, source_texture, 1,
+                          right_fov);
+    }
+    else if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::BothEyes)
     {
       const auto [left_rc, right_rc] = ConvertStereoRectangle(target_rc);
       m_post_processor->BlitFromTexture(left_rc, source_rc, source_texture, 0);
       m_post_processor->BlitFromTexture(right_rc, source_rc, source_texture, 1);
+    }
+    else
+    {
+      if (!left_fov || !right_fov)
+      {
+        BlitSingleEyeMirror(m_post_processor.get(), target_rc, source_rc, source_texture, 0,
+                            left_fov);
+      }
+      else
+      {
+        // Match SteamVR's dominant-eye mirror: place both projections in the same angular space,
+        // then feather the dominant eye over the binocular overlap.
+        const float union_left = left_fov->left;
+        const float union_right = std::max(left_fov->right, right_fov->right);
+        const float union_width = union_right - union_left;
+        const float common_down = std::max(left_fov->down, right_fov->down);
+        const float common_up = std::min(left_fov->up, right_fov->up);
+        const float target_aspect = static_cast<float>(target_rc.GetWidth()) / target_rc.GetHeight();
+        const float wanted_height = union_width / target_aspect;
+        float down = common_down;
+        float up = common_up;
+        MathUtil::Rectangle<int> joined_target = target_rc;
+
+        if (wanted_height < common_up - common_down)
+          std::tie(down, up) = CenteredRange(common_down, common_up, wanted_height);
+        else
+          joined_target = FitMirrorRectangle(target_rc, union_width / (common_up - common_down));
+
+        const auto tangent_to_x = [&](float tangent) {
+          return joined_target.left + static_cast<int>(std::lround(
+                                          joined_target.GetWidth() *
+                                          ((tangent - union_left) / union_width)));
+        };
+        const int separation_pixels = static_cast<int>(std::lround(
+            joined_target.GetWidth() * g_ActiveConfig.vr_mirror_join_separation));
+        const int left_shift = static_cast<int>(std::lround(
+                                   joined_target.GetWidth() *
+                                   g_ActiveConfig.vr_mirror_join_left_eye_offset)) -
+                               separation_pixels / 2;
+        const int right_shift = static_cast<int>(std::lround(
+                                    joined_target.GetWidth() *
+                                    g_ActiveConfig.vr_mirror_join_right_eye_offset)) +
+                                separation_pixels / 2;
+        const MathUtil::Rectangle<int> left_target{
+            tangent_to_x(left_fov->left) + left_shift, joined_target.top,
+            tangent_to_x(left_fov->right) + left_shift, joined_target.bottom};
+        const MathUtil::Rectangle<int> right_target{
+            tangent_to_x(right_fov->left) + right_shift, joined_target.top,
+            tangent_to_x(right_fov->right) + right_shift, joined_target.bottom};
+        const MathUtil::Rectangle<int> left_source = MakeMirrorSourceRectangle(
+            source_rc, *left_fov, left_fov->left, left_fov->right, down, up);
+        const MathUtil::Rectangle<int> right_source = MakeMirrorSourceRectangle(
+            source_rc, *right_fov, right_fov->left, right_fov->right, down, up);
+        constexpr float blend_width = 0.18f;
+        if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::JoinedEyesRightDominant)
+        {
+          m_post_processor->BlitFromTexture(left_target, left_source, source_texture, 0);
+          m_post_processor->BlitFromTexture(
+              right_target, right_source, source_texture, 1,
+              PostProcessing::HorizontalBlend{0.0f, blend_width, false});
+        }
+        else
+        {
+          m_post_processor->BlitFromTexture(right_target, right_source, source_texture, 1);
+          m_post_processor->BlitFromTexture(
+              left_target, left_source, source_texture, 0,
+              PostProcessing::HorizontalBlend{1.0f - blend_width, 1.0f, true});
+        }
+      }
     }
 
     // Backends that use Dolphin's original inline OpenXR lifecycle must populate

@@ -127,6 +127,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
 
   m_mirror_view = new ConfigChoiceMap<OpenXRMirrorView>(
       {{tr("Both Eyes"), OpenXRMirrorView::BothEyes},
+       {tr("Both Eyes - Left Dominant"), OpenXRMirrorView::JoinedEyesLeftDominant},
+       {tr("Both Eyes - Right Dominant"), OpenXRMirrorView::JoinedEyesRightDominant},
        {tr("Left Eye"), OpenXRMirrorView::LeftEye},
        {tr("Right Eye"), OpenXRMirrorView::RightEye},
        {tr("None"), OpenXRMirrorView::None}},
@@ -640,7 +642,9 @@ void VRPane::AddDescriptions()
       "<br><br><dolphin_emphasis>If unsure, use Auto.</dolphin_emphasis>");
   static constexpr char TR_MIRROR_VIEW_DESCRIPTION[] = QT_TR_NOOP(
       "Selects what the desktop render window shows while OpenXR is active."
-      "<br><br>Both Eyes shows the current side-by-side mirror. Left Eye and Right Eye fill the "
+      "<br><br>Both Eyes shows the original side-by-side mirror. The dominant modes create a "
+      "single streaming view by blending the non-dominant eye into the periphery. Left Eye and "
+      "Right Eye fill the "
       "window with a single eye. None leaves the desktop window blank while continuing to render "
       "normally to the headset."
       "<br><br>This only affects the desktop mirror view; it does not affect the OpenXR headset "

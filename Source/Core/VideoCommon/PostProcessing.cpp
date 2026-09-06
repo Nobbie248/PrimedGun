@@ -24,6 +24,7 @@
 #include "VideoCommon/AbstractPipeline.h"
 #include "VideoCommon/AbstractShader.h"
 #include "VideoCommon/AbstractTexture.h"
+#include "VideoCommon/BPMemory.h"
 #include "VideoCommon/Present.h"
 #include "VideoCommon/ShaderCache.h"
 #include "VideoCommon/ShaderCompileUtils.h"
@@ -432,6 +433,8 @@ void PostProcessing::SetActivePipelines(const FormatPipelines& pipelines)
 {
   m_default_pipeline = pipelines.default_pipeline.get();
   m_pipeline = pipelines.pipeline.get();
+  m_default_blend_pipeline = pipelines.default_blend_pipeline.get();
+  m_blend_pipeline = pipelines.blend_pipeline.get();
   m_default_multiview_pipeline = pipelines.default_multiview_pipeline.get();
   m_multiview_pipeline = pipelines.multiview_pipeline.get();
 }
@@ -440,6 +443,8 @@ void PostProcessing::ClearPipelineCache()
 {
   m_default_pipeline = nullptr;
   m_pipeline = nullptr;
+  m_default_blend_pipeline = nullptr;
+  m_blend_pipeline = nullptr;
   m_default_multiview_pipeline = nullptr;
   m_multiview_pipeline = nullptr;
   m_pipelines_per_format.clear();
@@ -505,7 +510,8 @@ bool PostProcessing::CanBlitFromTextureLayered() const
 
 void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
                                      const MathUtil::Rectangle<int>& src,
-                                     const AbstractTexture* src_tex, int src_layer)
+                                     const AbstractTexture* src_tex, int src_layer,
+                                     std::optional<HorizontalBlend> horizontal_blend)
 {
   if (g_gfx->GetCurrentFramebuffer()->GetColorFormat() != m_framebuffer_format)
   {
@@ -538,7 +544,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
       g_ActiveConfig.output_resampling_mode > OutputResamplingMode::Default;
   const bool needs_intermediary_buffer = NeedsIntermediaryBuffer();
   const bool needs_default_pipeline = needs_color_correction || needs_resampling;
-  const AbstractPipeline* final_pipeline = m_pipeline;
+  const AbstractPipeline* final_pipeline = horizontal_blend ? m_blend_pipeline : m_pipeline;
   std::vector<u8>* uniform_staging_buffer = &m_default_uniform_staging_buffer;
   bool default_uniform_staging_buffer = true;
   const MathUtil::Rectangle<int> present_rect = g_presenter->GetTargetRectangle();
@@ -613,7 +619,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
     // doing two passes, with the second one doing nothing useful.
     if (m_default_pipeline && needs_default_pipeline)
     {
-      final_pipeline = m_default_pipeline;
+      final_pipeline = horizontal_blend ? m_default_blend_pipeline : m_default_pipeline;
     }
     else
     {
@@ -635,7 +641,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
   {
     FillUniformBuffer(src_rect, src_tex, src_layer, g_gfx->GetCurrentFramebuffer()->GetRect(),
                       present_rect, uniform_staging_buffer->data(), !default_uniform_staging_buffer,
-                      false);
+                      false, horizontal_blend);
     g_vertex_manager->UploadUtilityUniforms(uniform_staging_buffer->data(),
                                             static_cast<u32>(uniform_staging_buffer->size()));
 
@@ -736,6 +742,10 @@ std::string PostProcessing::GetUniformBufferHeader(bool user_post_process) const
   ss << "  int hdr_output;\n";
   ss << "  float hdr_paper_white_nits;\n";
   ss << "  float hdr_sdr_white_nits;\n";
+  ss << "  int mirror_blend;\n";
+  ss << "  float mirror_blend_start;\n";
+  ss << "  float mirror_blend_end;\n";
+  ss << "  int mirror_blend_invert;\n";
 
   if (user_post_process)
   {
@@ -853,6 +863,14 @@ uint GetTime()
 
 void SetOutput(float4 color)
 {
+  if (mirror_blend != 0)
+  {
+    float local_x = (v_tex0.x - src_rect.x) / src_rect.z;
+    float blend_alpha = smoothstep(mirror_blend_start, mirror_blend_end, local_x);
+    if (mirror_blend_invert != 0)
+      blend_alpha = 1.0 - blend_alpha;
+    color.a *= blend_alpha;
+  }
   ocol0 = color;
 }
 
@@ -1008,6 +1026,10 @@ struct BuiltinUniforms
   s32 hdr_output;
   float hdr_paper_white_nits;
   float hdr_sdr_white_nits;
+  s32 mirror_blend;
+  float mirror_blend_start;
+  float mirror_blend_end;
+  s32 mirror_blend_invert;
 };
 
 size_t PostProcessing::CalculateUniformsSize(bool user_post_process) const
@@ -1021,7 +1043,8 @@ void PostProcessing::FillUniformBuffer(const MathUtil::Rectangle<int>& src,
                                        const AbstractTexture* src_tex, int src_layer,
                                        const MathUtil::Rectangle<int>& dst,
                                        const MathUtil::Rectangle<int>& wnd, u8* buffer,
-                                       bool user_post_process, bool intermediary_buffer)
+                                       bool user_post_process, bool intermediary_buffer,
+                                       std::optional<HorizontalBlend> horizontal_blend)
 {
   const float rcp_src_width = 1.0f / src_tex->GetWidth();
   const float rcp_src_height = 1.0f / src_tex->GetHeight();
@@ -1064,6 +1087,10 @@ void PostProcessing::FillUniformBuffer(const MathUtil::Rectangle<int>& src,
   builtin_uniforms.hdr_paper_white_nits = g_ActiveConfig.color_correction.fHDRPaperWhiteNits;
   // A value of 1 1 1 usually matches 80 nits in HDR
   builtin_uniforms.hdr_sdr_white_nits = 80.f;
+  builtin_uniforms.mirror_blend = horizontal_blend.has_value();
+  builtin_uniforms.mirror_blend_start = horizontal_blend ? horizontal_blend->start : 0.0f;
+  builtin_uniforms.mirror_blend_end = horizontal_blend ? horizontal_blend->end : 1.0f;
+  builtin_uniforms.mirror_blend_invert = horizontal_blend && horizontal_blend->invert;
 
   std::memcpy(buffer, &builtin_uniforms, sizeof(builtin_uniforms));
   buffer += sizeof(builtin_uniforms);
@@ -1219,6 +1246,19 @@ bool PostProcessing::CompilePipeline()
     SetActivePipelines(format_pipelines);
     return false;
   }
+
+  BlendingState blend_state = RenderState::GetNoBlendingBlendState();
+  blend_state.blend_enable = true;
+  blend_state.src_factor = SrcBlendFactor::SrcAlpha;
+  blend_state.dst_factor = DstBlendFactor::InvSrcAlpha;
+  config.blending_state = blend_state;
+  config.vertex_shader = m_default_vertex_shader.get();
+  config.pixel_shader = m_default_pixel_shader.get();
+  if (config.pixel_shader)
+    format_pipelines.default_blend_pipeline = g_gfx->CreatePipeline(config);
+  config.vertex_shader = m_vertex_shader.get();
+  config.pixel_shader = m_pixel_shader.get();
+  format_pipelines.blend_pipeline = g_gfx->CreatePipeline(config);
 
   const bool vulkan_multiview_blit = g_backend_info.api_type == APIType::Vulkan &&
                                      g_backend_info.bSupportsMultiview &&

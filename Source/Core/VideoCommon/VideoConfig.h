@@ -56,6 +56,8 @@ enum class OpenXRMirrorView : int
   LeftEye = 1,
   RightEye = 2,
   None = 3,
+  JoinedEyesRightDominant = 4,
+  JoinedEyesLeftDominant = 5,
 };
 
 enum class OpenXRReferenceSpaceMode : int
@@ -364,6 +366,9 @@ struct VideoConfig final
   bool vr_disable_cpu_cull = false;
   OpenXROpcodeReplayMode vr_opcode_replay_mode = OpenXROpcodeReplayMode::Off;
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
+  float vr_mirror_join_separation = 0.005f;
+  float vr_mirror_join_left_eye_offset = 0.0f;
+  float vr_mirror_join_right_eye_offset = 0.0f;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;
   int vr_opcode_replay_target_refresh_rate = -1;

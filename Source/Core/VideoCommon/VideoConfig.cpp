@@ -211,6 +211,18 @@ void VideoConfig::Refresh()
   vr_disable_cpu_cull = Config::Get(Config::GFX_VR_DISABLE_CPU_CULL);
   vr_opcode_replay_mode = Config::Get(Config::GFX_VR_OPCODE_REPLAY);
   vr_mirror_view = Config::Get(Config::GFX_VR_MIRROR_VIEW);
+  vr_mirror_join_separation =
+      std::clamp(Config::Get(Config::GFX_VR_MIRROR_JOIN_SEPARATION),
+                 Config::GFX_VR_MIRROR_JOIN_SEPARATION_MIN,
+                 Config::GFX_VR_MIRROR_JOIN_SEPARATION_MAX);
+  vr_mirror_join_left_eye_offset =
+      std::clamp(Config::Get(Config::GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET),
+                 Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN,
+                 Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX);
+  vr_mirror_join_right_eye_offset =
+      std::clamp(Config::Get(Config::GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET),
+                 Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN,
+                 Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX);
   vr_reference_space_mode = Config::Get(Config::GFX_VR_REFERENCE_SPACE_MODE);
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);
   vr_use_xr_pacing_thread = Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD);
