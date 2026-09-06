@@ -366,7 +366,7 @@ struct VideoConfig final
   bool vr_disable_cpu_cull = false;
   OpenXROpcodeReplayMode vr_opcode_replay_mode = OpenXROpcodeReplayMode::Off;
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
-  float vr_mirror_join_separation = 0.005f;
+  float vr_mirror_join_separation = 0.0f;
   float vr_mirror_join_left_eye_offset = 0.0f;
   float vr_mirror_join_right_eye_offset = 0.0f;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;

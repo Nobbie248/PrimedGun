@@ -209,7 +209,7 @@ const Info<OpenXROpcodeReplayMode> GFX_VR_OPCODE_REPLAY{
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
 const Info<float> GFX_VR_MIRROR_JOIN_SEPARATION{{System::GFX, "VR", "MirrorJoinSeparation"},
-                                                0.005f};
+                                                0.0f};
 const Info<float> GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET{
     {System::GFX, "VR", "MirrorJoinLeftEyeOffset"}, 0.0f};
 const Info<float> GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET{
