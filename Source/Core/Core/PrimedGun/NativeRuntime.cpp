@@ -25,6 +25,7 @@
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/MsgHandler.h"
 #ifdef ENABLE_VR
 #include "Common/VR/OpenXRInputState.h"
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -32,6 +33,8 @@
 
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Core.h"
+#include "Core/HW/CPU.h"
+#include "Core/PrimedGun/FrameCompletionWatchdog.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/System.h"
@@ -39,6 +42,8 @@
 #include "Core/PrimedGun/PrimedGunBuiltinPatches.inc"
 
 #include "VideoCommon/AsyncRequests.h"
+#include "VideoCommon/CommandProcessor.h"
+#include "VideoCommon/Fifo.h"
 #include "VideoCommon/HiresTextures.h"
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureCacheBase.h"
@@ -350,8 +355,12 @@ constexpr u32 PLAYER_STATE_THERMAL_VISOR = 3u;
 constexpr u32 FINAL_INPUT_DPAD_PRESSED_0 = FINAL_INPUT_OFFSET + 0x2Eu;
 constexpr u32 PLAYER_DISABLE_INPUT_FLAGS_OFFSET = 0x9C6u;
 constexpr u8 PLAYER_DISABLE_INPUT_MASK = 0x04u;
+constexpr u32 PLAYER_MASS_OFFSET = 0xE8u;
+constexpr u32 PLAYER_CONSTANT_FORCE_OFFSET = 0xFCu;
 constexpr u32 PLAYER_VELOCITY_OFFSET = 0x138u;
 constexpr u32 PLAYER_MOVEMENT_STATE_OFFSET = 0x258u;
+constexpr u32 PLAYER_FROZEN_TIMEOUT_OFFSET = 0x750u;
+constexpr u32 PLAYER_CONTROLS_FROZEN_OFFSET = 0x760u;
 constexpr u32 PLAYER_ORBIT_STATE_OFFSET = 0x304u;
 constexpr u32 PLAYER_ORBIT_TARGET_ID_OFFSET = 0x310u;
 constexpr u32 PLAYER_ORBIT_LOCK_ID_OFFSET = 0x33Cu;
@@ -465,6 +474,8 @@ u64 s_game_menu_screen_release_frame = 0;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
+FrameCompletionWatchdog s_frame_completion_watchdog;
+bool s_frame_stall_reported = false;
 u32 s_vr_menu_selected_index = 0;
 u32 s_vr_menu_calibration_page = 0;
 u32 s_vr_menu_control_page = 0;
@@ -4667,14 +4678,30 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
     return;
   }
 
+  // CPlayer::ProcessInput skips normal movement during these control freezes.
+  float frozen_timeout = 0.0f;
+  u8 controls_frozen = 0;
+  if (!TryReadFloat(guard, player + PLAYER_FROZEN_TIMEOUT_OFFSET, &frozen_timeout) ||
+      !std::isfinite(frozen_timeout) || frozen_timeout > 0.0f ||
+      !TryReadU8(guard, player + PLAYER_CONTROLS_FROZEN_OFFSET, &controls_frozen) ||
+      controls_frozen != 0)
+  {
+    s_directional_move_speed = 0.0f;
+    return;
+  }
+
+  float mass = 0.0f;
   float vx = 0.0f;
   float vy = 0.0f;
   float vz = 0.0f;
-  if (!TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x00u, &vx) ||
+  if (!TryReadFloat(guard, player + PLAYER_MASS_OFFSET, &mass) ||
+      !std::isfinite(mass) || mass <= 0.0f ||
+      !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x00u, &vx) ||
       !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x04u, &vy) ||
       !TryReadFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x08u, &vz) ||
       !std::isfinite(vx) || !std::isfinite(vy) || !std::isfinite(vz))
   {
+    s_directional_move_speed = 0.0f;
     return;
   }
 
@@ -4726,9 +4753,23 @@ void UpdateDirectionalMovement(const Core::CPUThreadGuard& guard,
   else
     s_directional_move_speed = std::max(target_speed, s_directional_move_speed - max_delta);
 
-  TryWriteFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x00u, dir_x * s_directional_move_speed);
-  TryWriteFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x04u, dir_y * s_directional_move_speed);
-  TryWriteFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x08u, vz);
+  const float new_vx = dir_x * s_directional_move_speed;
+  const float new_vy = dir_y * s_directional_move_speed;
+  const float constant_force_x = mass * new_vx;
+  const float constant_force_y = mass * new_vy;
+  if (!std::isfinite(new_vx) || !std::isfinite(new_vy) ||
+      !std::isfinite(constant_force_x) || !std::isfinite(constant_force_y))
+  {
+    s_directional_move_speed = 0.0f;
+    return;
+  }
+
+  // Match CPhysicsActor::SetVelocityWR: derived velocity and xfc_constantForce must agree.
+  // Only change horizontal components; leave vertical motion and pending jump impulses to Prime.
+  TryWriteFloat(guard, player + PLAYER_CONSTANT_FORCE_OFFSET + 0x00u, constant_force_x);
+  TryWriteFloat(guard, player + PLAYER_CONSTANT_FORCE_OFFSET + 0x04u, constant_force_y);
+  TryWriteFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x00u, new_vx);
+  TryWriteFloat(guard, player + PLAYER_VELOCITY_OFFSET + 0x04u, new_vy);
 }
 #endif
 
@@ -8088,6 +8129,64 @@ void UpdateShaderHunterGameFlowFlags(const Core::CPUThreadGuard& guard)
   }
 }
 
+bool CheckFrameCompletion(Core::System& system, const Core::CPUThreadGuard& guard)
+{
+  // GM8E01 revision 0: CGraphics::EndScene waits for SwapBuffers and VI callbacks.
+  // Validate the wait loop before interpreting its globals, including patched ISOs.
+  u32 load = 0, branch = 0, frame = 0, pending = 0, flipping = 0;
+  const bool waiting = TryReadU32(guard, 0x8030BAF4, &load) && load == 0x801D0000 &&
+                       TryReadU32(guard, 0x8030BAFC, &branch) && branch == 0x4181FFF4 &&
+                       TryReadU32(guard, 0x805A93C0, &frame) &&
+                       TryReadU32(guard, 0x805A93CC, &pending) && pending == 1 &&
+                       TryReadU32(guard, 0x805A93D0, &flipping) && flipping == 0;
+  const auto action = s_frame_completion_watchdog.Update(waiting, frame);
+  if (!s_frame_completion_watchdog.IsStalled())
+    s_frame_stall_reported = false;
+
+  if (action == FrameCompletionWatchdog::Action::Retry)
+  {
+    // Wake the existing consumer/status check. Never synthesize a completion,
+    // discard FIFO contents, or wait synchronously on a potentially stuck GPU.
+    system.GetFifo().RunGpu();
+  }
+  if (action != FrameCompletionWatchdog::Action::Pause)
+    return false;
+
+  system.GetCPU().Break();
+  if (!s_frame_stall_reported)
+  {
+    s_frame_stall_reported = true;
+    const auto& fifo = system.GetCommandProcessor().GetFifo();
+    const std::string diagnostic = fmt::format(
+        "PrimedGun paused before Prime's frame-completion watchdog.\n"
+        "Frame={:08X} Pending={} Flipping={} DualCore={} DeterministicGPU={}\n"
+        "FIFO base={:08X} end={:08X} read={:08X} write={:08X} distance={:08X} "
+        "breakpoint={:08X} read_enabled={} bp_enabled={} bp_interrupt={} bp_hit={} "
+        "interrupt_waiting={}\n",
+        frame, pending, flipping, system.IsDualCoreMode(),
+        system.GetFifo().UseDeterministicGPUThread(), fifo.CPBase.load(), fifo.CPEnd.load(),
+        fifo.CPReadPointer.load(), fifo.CPWritePointer.load(), fifo.CPReadWriteDistance.load(),
+        fifo.CPBreakpoint.load(), fifo.bFF_GPReadEnable.load(), fifo.bFF_BPEnable.load(),
+        fifo.bFF_BPInt.load(), fifo.bFF_Breakpoint.load(),
+        system.GetCommandProcessor().IsInterruptWaiting());
+    const std::string path = File::GetUserPath(D_LOGS_IDX) + "PrimedGunFrameStall.txt";
+    File::CreateFullPath(File::GetUserPath(D_LOGS_IDX));
+    const bool written = File::WriteStringToFile(path, diagnostic);
+    Core::QueueHostJob([path, written, diagnostic](Core::System& current_system) {
+      if (Core::GetState(current_system) != Core::State::Paused)
+        return;
+      Core::NotifyStateChanged(Core::State::Paused);
+      PanicAlertFmt("PrimedGun paused because graphics frame completion stalled. "
+                    "Recovery was attempted, but the frame has not completed. "
+                    "This pause prevents the game's fatal timeout; it is not a recovered frame.\n\n"
+                    "If resuming pauses again, restart the game and load your last normal save. "
+                    "Please report the boss, graphics backend, and these diagnostics:\n{}",
+                    written ? path : diagnostic);
+    });
+  }
+  return true;
+}
+
 void UpdateSpringBallInput(const Core::CPUThreadGuard& guard, const RuntimeSettings& settings,
                            u32 player)
 {
@@ -8120,6 +8219,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   const RuntimeSettings settings = GetRuntimeSettings();
   if (!settings.enabled)
   {
+    s_frame_completion_watchdog = {};
+    s_frame_stall_reported = false;
     TryWriteU8(guard, SPRINGBALL_TRIGGER_SCRATCH, 0u);
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
@@ -8137,6 +8238,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   const bool game_active = Core::IsRunning(system) && IsMetroidPrimeRev0(guard);
   if (!game_active)
   {
+    s_frame_completion_watchdog = {};
+    s_frame_stall_reported = false;
     TryWriteU8(guard, SPRINGBALL_TRIGGER_SCRATCH, 0u);
     TryWriteU32(guard, MORPHBALL_CAMERA_LEVEL_ENABLE_SCRATCH, 0);
     TryWriteU32(guard, FIRST_PERSON_ORBIT_AIM_VECTOR_ENABLE_SCRATCH, 0);
@@ -8155,6 +8258,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   s_game_was_active = true;
+  if (CheckFrameCompletion(system, guard))
+    return;
   UpdateCinematicScreenState(guard, settings);
   UpdateCinematicFrustumCulling(guard, settings);
   UpdateShaderHunterGameFlowFlags(guard);
@@ -8312,6 +8417,8 @@ bool IsOrbitLockActive()
 
 void ResetNativeRuntime()
 {
+  s_frame_completion_watchdog = {};
+  s_frame_stall_reported = false;
   s_patches_applied_this_boot = false;
   s_frame_counter = 0;
   s_thermal_orbit_candidates.clear();

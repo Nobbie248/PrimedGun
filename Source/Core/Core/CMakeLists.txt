@@ -495,6 +495,7 @@ add_library(core
   PatchEngine.h
   PrimedGun/NativeRuntime.cpp
   PrimedGun/NativeRuntime.h
+  PrimedGun/FrameCompletionWatchdog.h
   PrimedGun/PPCTrace.cpp
   PrimedGun/PPCTrace.h
   PowerPC/BreakPoints.cpp
