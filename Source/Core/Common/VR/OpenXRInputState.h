@@ -111,6 +111,7 @@ struct PrimedGunVrOverlayState
   bool primedgun_grip_inputs_enabled = true;
   bool primedgun_grip_inputs_use_trackpad = false;
   float primedgun_trackpad_press_threshold = 0.5f;
+  float primedgun_index_grip_press_threshold = 0.5f;
   bool combat_jump_use_primary_button = false;
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;

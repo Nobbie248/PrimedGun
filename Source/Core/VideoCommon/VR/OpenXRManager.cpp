@@ -19,6 +19,7 @@
 #include "Common/Matrix.h"
 #include "Common/Thread.h"
 #include "Common/Timer.h"
+#include "Common/VR/ControllerPressure.h"
 #include "Common/VR/OpenXRInputState.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VideoConfig.h"
@@ -654,6 +655,8 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_squeeze_value, "squeeze_value", "Squeeze Value",
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
+      !create_action(&m_action_squeeze_force, "squeeze_force", "Squeeze Force",
+                     XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_thumbstick_x, "thumbstick_x", "Thumbstick X",
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_thumbstick_y, "thumbstick_y", "Thumbstick Y",
@@ -796,6 +799,7 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_trigger_value, "/user/hand/left/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/left/input/squeeze/value"},
                        {m_action_trackpad_touch, "/user/hand/left/input/trackpad/touch"},
+                       {m_action_squeeze_force, "/user/hand/left/input/squeeze/force"},
                        {m_action_trackpad_x, "/user/hand/left/input/trackpad/x"},
                        {m_action_trackpad_y, "/user/hand/left/input/trackpad/y"},
                        {m_action_trackpad_force, "/user/hand/left/input/trackpad/force"},
@@ -809,6 +813,7 @@ bool OpenXRManager::InitializeInputActions()
                        {m_action_trigger_value, "/user/hand/right/input/trigger/value"},
                        {m_action_squeeze_value, "/user/hand/right/input/squeeze/value"},
                        {m_action_trackpad_touch, "/user/hand/right/input/trackpad/touch"},
+                       {m_action_squeeze_force, "/user/hand/right/input/squeeze/force"},
                        {m_action_trackpad_x, "/user/hand/right/input/trackpad/x"},
                        {m_action_trackpad_y, "/user/hand/right/input/trackpad/y"},
                        {m_action_trackpad_force, "/user/hand/right/input/trackpad/force"},
@@ -934,6 +939,9 @@ void OpenXRManager::DestroyInputActions()
   m_action_squeeze_click = XR_NULL_HANDLE;
   m_action_trigger_value = XR_NULL_HANDLE;
   m_action_squeeze_value = XR_NULL_HANDLE;
+  m_action_squeeze_force = XR_NULL_HANDLE;
+  m_index_grip_pressed = {};
+  m_index_trackpad_pressed = {};
   m_action_thumbstick_x = XR_NULL_HANDLE;
   m_action_thumbstick_y = XR_NULL_HANDLE;
   m_action_trackpad_click = XR_NULL_HANDLE;
@@ -949,6 +957,8 @@ void OpenXRManager::DestroyInputActions()
 
 void OpenXRManager::ResetInputActionsState()
 {
+  m_index_grip_pressed = {};
+  m_index_trackpad_pressed = {};
   m_haptics_active = {false, false};
   Common::VR::OpenXRInputState::Reset();
 }
@@ -1015,7 +1025,7 @@ void OpenXRManager::UpdateInputActions()
   sync_info.countActiveActionSets = 1;
   sync_info.activeActionSets = &active_action_set;
   const XrResult sync_result = xrSyncActions(m_session, &sync_info);
-  if (XR_FAILED(sync_result))
+  if (sync_result != XR_SUCCESS)
   {
     ResetInputActionsState();
     return;
@@ -1023,6 +1033,7 @@ void OpenXRManager::UpdateInputActions()
 
   std::array<Common::VR::OpenXRControllerState, 2> controllers{};
   std::array<std::string, 2> interaction_profiles{};
+  const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
 
   const auto path_to_string = [this](XrPath path) {
     if (path == XR_NULL_PATH)
@@ -1107,7 +1118,7 @@ void OpenXRManager::UpdateInputActions()
       if (XR_FAILED(xrGetActionStateBoolean(m_session, &get_info, &state)))
         return false;
       action_seen |= (state.isActive == XR_TRUE);
-      return state.currentState == XR_TRUE;
+      return state.isActive == XR_TRUE && state.currentState == XR_TRUE;
     };
 
     const auto get_float = [this, hand_path, &action_seen](XrAction action) -> float {
@@ -1118,7 +1129,8 @@ void OpenXRManager::UpdateInputActions()
       if (XR_FAILED(xrGetActionStateFloat(m_session, &get_info, &state)))
         return 0.0f;
       action_seen |= (state.isActive == XR_TRUE);
-      return state.currentState;
+      return state.isActive == XR_TRUE && std::isfinite(state.currentState) ?
+                 state.currentState : 0.0f;
     };
 
     controller.primary_button = get_boolean(m_action_primary_click);
@@ -1134,6 +1146,7 @@ void OpenXRManager::UpdateInputActions()
 
     controller.trigger_value = std::clamp(get_float(m_action_trigger_value), 0.0f, 1.0f);
     controller.squeeze_value = std::clamp(get_float(m_action_squeeze_value), 0.0f, 1.0f);
+    controller.squeeze_force = std::clamp(get_float(m_action_squeeze_force), 0.0f, 1.0f);
     controller.thumbstick_x = std::clamp(get_float(m_action_thumbstick_x), -1.0f, 1.0f);
     controller.thumbstick_y = std::clamp(get_float(m_action_thumbstick_y), -1.0f, 1.0f);
     controller.trackpad_x = std::clamp(get_float(m_action_trackpad_x), -1.0f, 1.0f);
@@ -1146,6 +1159,22 @@ void OpenXRManager::UpdateInputActions()
 
     controller.trigger_button = trigger_click || controller.trigger_value > 0.5f;
     controller.squeeze_button = squeeze_click || controller.squeeze_value > 0.5f;
+    if (interaction_profiles[hand] == "/interaction_profiles/valve/index_controller")
+    {
+      m_index_grip_pressed[hand] = Common::VR::UpdatePressureButton(
+          controller.squeeze_force, overlay.primedgun_index_grip_press_threshold,
+          m_index_grip_pressed[hand]);
+      m_index_trackpad_pressed[hand] = Common::VR::UpdatePressureButton(
+          controller.trackpad_force, overlay.primedgun_trackpad_press_threshold,
+          m_index_trackpad_pressed[hand]);
+      controller.squeeze_button = m_index_grip_pressed[hand];
+      controller.trackpad_button = m_index_trackpad_pressed[hand];
+    }
+    else
+    {
+      m_index_grip_pressed[hand] = false;
+      m_index_trackpad_pressed[hand] = false;
+    }
     controller.connected = action_seen || controller.aim_pose.valid || controller.grip_pose.valid;
   }
 

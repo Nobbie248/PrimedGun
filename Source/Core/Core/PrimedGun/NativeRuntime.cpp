@@ -5049,7 +5049,7 @@ bool VrMenuRowIsNumeric(u32 tab, u32 index)
       return true;
 
     const int actual_index = VrMenuControlActualIndex(index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
+    return actual_index == 3 || actual_index == 9 || actual_index == 11 || actual_index == 12 ||
            actual_index == 13 || actual_index == 14;
   }
   case VR_MENU_MOVEMENT_TAB:
@@ -5213,6 +5213,7 @@ void ResetControllerSettings(RuntimeSettings* settings)
   settings->primedgun_grip_inputs_enabled = true;
   settings->primedgun_grip_inputs_use_trackpad = false;
   settings->primedgun_trackpad_press_threshold = 0.5f;
+  settings->primedgun_index_grip_press_threshold = 0.5f;
   settings->combat_jump_use_primary_button = false;
   settings->vr_menu_hold_left_stick = false;
   settings->vr_menu_requires_head_zone = false;
@@ -5559,7 +5560,11 @@ void AdjustVrMenuSetting(RuntimeSettings* settings, int direction)
       break;
     case 9:
       settings->primedgun_trackpad_press_threshold =
-          std::clamp(settings->primedgun_trackpad_press_threshold + sign * 0.05f, 0.05f, 1.0f);
+          std::clamp(settings->primedgun_trackpad_press_threshold + sign * 0.01f, 0.05f, 1.0f);
+      break;
+    case 11:
+      settings->primedgun_index_grip_press_threshold =
+          std::clamp(settings->primedgun_index_grip_press_threshold + sign * 0.01f, 0.05f, 1.0f);
       break;
     case 12:
       settings->xr_dpad_head_radius =
@@ -5717,7 +5722,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->vr_menu_requires_head_zone = !settings->vr_menu_requires_head_zone;
     else if (actual_index == 8)
       settings->primedgun_grip_inputs_use_trackpad = !settings->primedgun_grip_inputs_use_trackpad;
-    else if (actual_index == 10 || actual_index == 11)
+    else if (actual_index == 10)
       settings->xr_dpad_enabled = !settings->xr_dpad_enabled;
     else if (actual_index == 15)
     {
@@ -5858,6 +5863,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.primedgun_grip_inputs_enabled = settings.primedgun_grip_inputs_enabled;
   overlay.primedgun_grip_inputs_use_trackpad = settings.primedgun_grip_inputs_use_trackpad;
   overlay.primedgun_trackpad_press_threshold = settings.primedgun_trackpad_press_threshold;
+  overlay.primedgun_index_grip_press_threshold = settings.primedgun_index_grip_press_threshold;
   overlay.combat_jump_use_primary_button = settings.combat_jump_use_primary_button;
   overlay.vr_menu_hold_left_stick = settings.vr_menu_hold_left_stick;
   overlay.vr_menu_requires_head_zone = settings.vr_menu_requires_head_zone;
@@ -8479,6 +8485,9 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
   s_settings.primedgun_trackpad_press_threshold =
       ClampFinite(s_settings.primedgun_trackpad_press_threshold,
                   defaults.primedgun_trackpad_press_threshold, 0.05f, 1.0f);
+  s_settings.primedgun_index_grip_press_threshold =
+      ClampFinite(s_settings.primedgun_index_grip_press_threshold,
+                  defaults.primedgun_index_grip_press_threshold, 0.05f, 1.0f);
   s_settings.rumble_intensity =
       ClampFinite(s_settings.rumble_intensity, defaults.rumble_intensity, 0.0f, 1.0f);
   s_settings.rumble_hand_mode = std::clamp(s_settings.rumble_hand_mode, 0, 2);

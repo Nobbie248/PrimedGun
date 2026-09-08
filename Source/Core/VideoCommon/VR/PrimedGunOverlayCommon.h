@@ -315,7 +315,7 @@ inline bool MenuRowIsNumeric(const Common::VR::PrimedGunVrOverlayState& s, int i
       return true;
 
     const int actual_index = ControlMenuActualIndex(s.control_page, index);
-    return actual_index == 3 || actual_index == 9 || actual_index == 12 ||
+    return actual_index == 3 || actual_index == 9 || actual_index == 11 || actual_index == 12 ||
            actual_index == 13 || actual_index == 14;
   }
   default:
@@ -407,10 +407,10 @@ inline std::vector<MenuRow> BuildMenuRows(const Common::VR::PrimedGunVrOverlaySt
     else
     {
       rows.push_back(
-          {"GRIP INPUT SOURCE", s.primedgun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
-      rows.push_back({"TRACKPAD SENSITIVITY", FloatText(s.primedgun_trackpad_press_threshold, 2)});
+          {"INDEX GRIP SOURCE", s.primedgun_grip_inputs_use_trackpad ? "TRACKPAD" : "GRIP"});
+      rows.push_back({"INDEX TOUCHPAD PRESSURE", FloatText(s.primedgun_trackpad_press_threshold, 2)});
       rows.push_back({"VISOR GESTURE", s.xr_dpad_enabled ? "ON" : "OFF"});
-      rows.push_back({"DIRECTION PAD", s.xr_dpad_enabled ? "ON" : "OFF"});
+      rows.push_back({"INDEX GRIP PRESSURE", FloatText(s.primedgun_index_grip_press_threshold, 2)});
       rows.push_back({"HEAD RADIUS", FloatText(s.xr_dpad_head_radius, 2)});
       rows.push_back({"HEAD BELOW", FloatText(s.xr_dpad_head_y_below, 2)});
       rows.push_back({"STICK DEADZONE", FloatText(s.xr_dpad_deadzone, 2)});

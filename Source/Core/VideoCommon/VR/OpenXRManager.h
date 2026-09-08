@@ -316,6 +316,9 @@ private:
   XrAction m_action_squeeze_click = XR_NULL_HANDLE;
   XrAction m_action_trigger_value = XR_NULL_HANDLE;
   XrAction m_action_squeeze_value = XR_NULL_HANDLE;
+  XrAction m_action_squeeze_force = XR_NULL_HANDLE;
+  std::array<bool, 2> m_index_grip_pressed{};
+  std::array<bool, 2> m_index_trackpad_pressed{};
   XrAction m_action_thumbstick_x = XR_NULL_HANDLE;
   XrAction m_action_thumbstick_y = XR_NULL_HANDLE;
   XrAction m_action_trackpad_click = XR_NULL_HANDLE;

@@ -242,60 +242,28 @@ static void ApplyPrimedGunClassicMenuControls(const Common::VR::OpenXRController
 
 static bool PrimedGunIsValveIndexProfile(std::string_view profile)
 {
-  return profile.find("/interaction_profiles/valve/index_controller") != std::string_view::npos ||
-         (profile.find("valve") != std::string_view::npos &&
-          profile.find("index") != std::string_view::npos);
+  return profile == "/interaction_profiles/valve/index_controller";
 }
 
-static void PrimedGunDisableIndexSqueeze(const Common::VR::OpenXRInputSnapshot& snapshot,
-                                         Common::VR::OpenXRControllerState* left,
-                                         Common::VR::OpenXRControllerState* right,
-                                         bool* left_index, bool* right_index)
-{
-  *left_index = PrimedGunIsValveIndexProfile(snapshot.interaction_profiles[0]);
-  *right_index = PrimedGunIsValveIndexProfile(snapshot.interaction_profiles[1]);
-  if (*left_index)
-  {
-    left->squeeze_button = false;
-    left->squeeze_value = 0.0f;
-    left->squeeze_force = 0.0f;
-  }
-  if (*right_index)
-  {
-    right->squeeze_button = false;
-    right->squeeze_value = 0.0f;
-    right->squeeze_force = 0.0f;
-  }
-}
-
-static void ApplyPrimedGunGripInputs(const Common::VR::OpenXRControllerState& left,
-                                     const Common::VR::OpenXRControllerState& right,
+static void ApplyPrimedGunGripInputs(const Common::VR::OpenXRInputSnapshot& snapshot,
                                      const Common::VR::PrimedGunVrOverlayState& overlay,
-                                     bool force_left_trackpad, bool force_right_trackpad,
                                      GCPadStatus* pad)
 {
   if (!overlay.primedgun_grip_inputs_enabled)
     return;
 
-  if (left.connected)
-  {
-    const bool left_grip_action =
-        (force_left_trackpad || overlay.primedgun_grip_inputs_use_trackpad) ?
-            left.trackpad_touch && left.trackpad_force >= overlay.primedgun_trackpad_press_threshold :
-            left.squeeze_button;
-    if (left_grip_action)
-      pad->button |= PAD_TRIGGER_Z;
-  }
+  const auto grip_pressed = [&](size_t hand) {
+    const auto& controller = snapshot.controllers[hand];
+    const bool use_trackpad = overlay.primedgun_grip_inputs_use_trackpad &&
+                             PrimedGunIsValveIndexProfile(snapshot.interaction_profiles[hand]);
+    return controller.connected &&
+           (use_trackpad ? controller.trackpad_button : controller.squeeze_button);
+  };
 
-  if (right.connected)
-  {
-    const bool right_grip_action =
-        (force_right_trackpad || overlay.primedgun_grip_inputs_use_trackpad) ?
-            right.trackpad_touch && right.trackpad_force >= overlay.primedgun_trackpad_press_threshold :
-            right.squeeze_button;
-    if (right_grip_action)
-      pad->button |= PAD_BUTTON_Y;
-  }
+  if (grip_pressed(overlay.use_right_hand ? 0 : 1))
+    pad->button |= PAD_TRIGGER_Z;
+  if (grip_pressed(overlay.use_right_hand ? 1 : 0))
+    pad->button |= PAD_BUTTON_Y;
 }
 
 enum class PrimedGunBeamSlot
@@ -587,10 +555,6 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
 
   auto game_left = left;
   auto game_right = right;
-  bool game_left_index = false;
-  bool game_right_index = false;
-  PrimedGunDisableIndexSqueeze(snapshot, &game_left, &game_right, &game_left_index,
-                               &game_right_index);
   if (!overlay.use_right_hand)
   {
     std::swap(game_left.trigger_button, game_right.trigger_button);
@@ -600,7 +564,6 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
     std::swap(game_left.trackpad_button, game_right.trackpad_button);
     std::swap(game_left.trackpad_touch, game_right.trackpad_touch);
     std::swap(game_left.trackpad_force, game_right.trackpad_force);
-    std::swap(game_left_index, game_right_index);
   }
 
   if (overlay.menu_visible)
@@ -661,7 +624,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
   if (!gameplay)
   {
     ApplyPrimedGunClassicMenuControls(game_left, game_right, pad, suppress_left_stick, false);
-    ApplyPrimedGunGripInputs(game_left, game_right, overlay, game_left_index, game_right_index, pad);
+    ApplyPrimedGunGripInputs(snapshot, overlay, pad);
     if (pad->button & PAD_BUTTON_A)
       pad->analogA = 0xFF;
     if (pad->button & PAD_BUTTON_B)
@@ -733,8 +696,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
       pad->button |= PAD_BUTTON_B;
 
     if (!suppress_grip_inputs)
-      ApplyPrimedGunGripInputs(game_left, game_right, overlay, game_left_index, game_right_index,
-                               pad);
+      ApplyPrimedGunGripInputs(snapshot, overlay, pad);
 
     if (pad->button & PAD_BUTTON_A)
       pad->analogA = 0xFF;
@@ -802,7 +764,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
     pad->button |= PAD_BUTTON_B;
 
   if (!suppress_grip_inputs)
-    ApplyPrimedGunGripInputs(game_left, game_right, overlay, game_left_index, game_right_index, pad);
+    ApplyPrimedGunGripInputs(snapshot, overlay, pad);
 
   if (pad->button & PAD_BUTTON_A)
     pad->analogA = 0xFF;
