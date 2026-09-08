@@ -1059,20 +1059,24 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
             source_rc, *left_fov, left_fov->left, left_fov->right, down, up);
         const MathUtil::Rectangle<int> right_source = MakeMirrorSourceRectangle(
             source_rc, *right_fov, right_fov->left, right_fov->right, down, up);
-        constexpr float blend_width = 0.18f;
+        const float blend_width = g_ActiveConfig.vr_mirror_join_blend_width;
         if (g_ActiveConfig.vr_mirror_view == OpenXRMirrorView::JoinedEyesRightDominant)
         {
           m_post_processor->BlitFromTexture(left_target, left_source, source_texture, 0);
           m_post_processor->BlitFromTexture(
               right_target, right_source, source_texture, 1,
-              PostProcessing::HorizontalBlend{0.0f, blend_width, false});
+              blend_width > 0.0f ? std::make_optional(
+                                       PostProcessing::HorizontalBlend{0.0f, blend_width, false}) :
+                                   std::nullopt);
         }
         else
         {
           m_post_processor->BlitFromTexture(right_target, right_source, source_texture, 1);
           m_post_processor->BlitFromTexture(
               left_target, left_source, source_texture, 0,
-              PostProcessing::HorizontalBlend{1.0f - blend_width, 1.0f, true});
+              blend_width > 0.0f ? std::make_optional(PostProcessing::HorizontalBlend{
+                                       1.0f - blend_width, 1.0f, true}) :
+                                   std::nullopt);
         }
       }
     }

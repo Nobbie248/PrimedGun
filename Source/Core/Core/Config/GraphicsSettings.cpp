@@ -214,6 +214,8 @@ const Info<float> GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET{
     {System::GFX, "VR", "MirrorJoinLeftEyeOffset"}, 0.0f};
 const Info<float> GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET{
     {System::GFX, "VR", "MirrorJoinRightEyeOffset"}, 0.0f};
+const Info<float> GFX_VR_MIRROR_JOIN_BLEND_WIDTH{
+    {System::GFX, "VR", "MirrorJoinBlendWidth"}, 0.10f};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
     {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::StageHeight};
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},

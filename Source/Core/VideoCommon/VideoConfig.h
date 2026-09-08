@@ -369,6 +369,7 @@ struct VideoConfig final
   float vr_mirror_join_separation = 0.0f;
   float vr_mirror_join_left_eye_offset = 0.0f;
   float vr_mirror_join_right_eye_offset = 0.0f;
+  float vr_mirror_join_blend_width = 0.10f;
   OpenXRReferenceSpaceMode vr_reference_space_mode = OpenXRReferenceSpaceMode::Local;
   OpenXRTrackingMode vr_tracking_mode = OpenXRTrackingMode::Full6DoF;
   int vr_opcode_replay_target_refresh_rate = -1;

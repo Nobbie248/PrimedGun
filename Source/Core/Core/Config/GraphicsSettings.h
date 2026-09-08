@@ -203,6 +203,7 @@ static constexpr float GFX_VR_MIRROR_JOIN_SEPARATION_MAX = 0.25f;
 static constexpr float GFX_VR_MIRROR_JOIN_SEPARATION_STEP = 0.0001f;
 extern const Info<float> GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET;
 extern const Info<float> GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET;
+extern const Info<float> GFX_VR_MIRROR_JOIN_BLEND_WIDTH;
 static constexpr float GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN = -0.25f;
 static constexpr float GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX = 0.25f;
 static constexpr float GFX_VR_MIRROR_JOIN_EYE_OFFSET_STEP = 0.0001f;

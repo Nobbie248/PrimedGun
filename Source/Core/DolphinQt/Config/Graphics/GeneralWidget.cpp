@@ -138,6 +138,12 @@ void GeneralWidget::CreateWidgets()
       Config::GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET, Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_STEP,
       m_game_layer);
   m_desktop_mirror_join_right_eye_offset_value = new QLabel;
+  m_desktop_mirror_join_blend_width = new ConfigFloatSlider(
+      0.0f, 1.0f, Config::GFX_VR_MIRROR_JOIN_BLEND_WIDTH, 0.001f, m_game_layer);
+  m_desktop_mirror_join_blend_width->setToolTip(
+      tr("Width of the fade at the dominant eye's edge in the joined desktop view. "
+         "0% disables the fade. Default: 10%. Does not affect the headset view."));
+  m_desktop_mirror_join_blend_width_value = new QLabel;
 
   m_options_box->setLayout(m_options_layout);
 
@@ -159,6 +165,10 @@ void GeneralWidget::CreateWidgets()
       4, 0);
   m_options_layout->addWidget(m_desktop_mirror_join_right_eye_offset, 4, 1);
   m_options_layout->addWidget(m_desktop_mirror_join_right_eye_offset_value, 4, 2);
+  m_options_layout->addWidget(
+      new ConfigFloatLabel(tr("Join Blend Fade:"), m_desktop_mirror_join_blend_width), 5, 0);
+  m_options_layout->addWidget(m_desktop_mirror_join_blend_width, 5, 1);
+  m_options_layout->addWidget(m_desktop_mirror_join_blend_width_value, 5, 2);
 
   // Other
   auto* shader_compilation_box = new QGroupBox(tr("Shader Compilation"));
@@ -216,6 +226,10 @@ void GeneralWidget::ConnectWidgets()
     m_desktop_mirror_join_left_eye_offset_value->setEnabled(joined_mode);
     m_desktop_mirror_join_right_eye_offset->setEnabled(joined_mode);
     m_desktop_mirror_join_right_eye_offset_value->setEnabled(joined_mode);
+    m_desktop_mirror_join_blend_width_value->setText(
+        QString::asprintf("%.1f%%", m_desktop_mirror_join_blend_width->GetValue() * 100.0f));
+    m_desktop_mirror_join_blend_width->setEnabled(joined_mode);
+    m_desktop_mirror_join_blend_width_value->setEnabled(joined_mode);
   };
   update_join_separation();
   connect(m_desktop_mirror_mode, &QComboBox::currentIndexChanged, this,
@@ -225,6 +239,8 @@ void GeneralWidget::ConnectWidgets()
   connect(m_desktop_mirror_join_left_eye_offset, &ConfigFloatSlider::valueChanged, this,
           update_join_separation);
   connect(m_desktop_mirror_join_right_eye_offset, &ConfigFloatSlider::valueChanged, this,
+          update_join_separation);
+  connect(m_desktop_mirror_join_blend_width, &ConfigFloatSlider::valueChanged, this,
           update_join_separation);
 }
 

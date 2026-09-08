@@ -4,6 +4,7 @@
 #include "VideoCommon/VideoConfig.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include "Common/CPUDetect.h"
@@ -224,6 +225,9 @@ void VideoConfig::Refresh()
                  Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MIN,
                  Config::GFX_VR_MIRROR_JOIN_EYE_OFFSET_MAX);
   vr_reference_space_mode = Config::Get(Config::GFX_VR_REFERENCE_SPACE_MODE);
+  const float blend_width = Config::Get(Config::GFX_VR_MIRROR_JOIN_BLEND_WIDTH);
+  vr_mirror_join_blend_width =
+      std::isfinite(blend_width) ? std::clamp(blend_width, 0.0f, 1.0f) : 0.10f;
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);
   vr_use_xr_pacing_thread = Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD);
   vr_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);

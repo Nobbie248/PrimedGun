@@ -66,6 +66,8 @@ private:
   QLabel* m_desktop_mirror_join_left_eye_offset_value;
   ConfigFloatSlider* m_desktop_mirror_join_right_eye_offset;
   QLabel* m_desktop_mirror_join_right_eye_offset_value;
+  ConfigFloatSlider* m_desktop_mirror_join_blend_width;
+  QLabel* m_desktop_mirror_join_blend_width_value;
 
   std::array<ConfigRadioInt*, 4> m_shader_compilation_mode{};
   ConfigBool* m_wait_for_shaders;
