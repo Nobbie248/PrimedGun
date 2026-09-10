@@ -3075,20 +3075,6 @@ void MainWindow::ConnectStack()
   controller_layout->addLayout(rumble_hand_row);
   controller_layout->addWidget(primedgun_grip_inputs_enabled);
   controller_layout->addWidget(primedgun_grip_inputs_use_trackpad);
-  auto* trackpad_press_threshold_spin =
-      add_float_row(controller_layout, tr("Index touchpad pressure"), 0.05, 1.00, 0.01,
-                    runtime->primedgun_trackpad_press_threshold,
-                    [runtime](float v) { runtime->primedgun_trackpad_press_threshold = v; });
-  auto* index_grip_press_threshold_spin =
-      add_float_row(controller_layout, tr("Index grip pressure"), 0.05, 1.00, 0.01,
-                    runtime->primedgun_index_grip_press_threshold,
-                    [runtime](float v) { runtime->primedgun_index_grip_press_threshold = v; });
-  const auto pressure_tooltip =
-      tr("Required pressure: lower values need a lighter squeeze; higher values need more force. "
-         "Resting fingers on the sensor does not activate it. "
-         "Releases below 80% of the selected pressure to prevent repeated presses.");
-  trackpad_press_threshold_spin->setToolTip(pressure_tooltip);
-  index_grip_press_threshold_spin->setToolTip(pressure_tooltip);
   auto* rumble_intensity_spin =
       add_float_row(controller_layout, tr("Rumble intensity"), 0.00, 1.00, 0.05,
                     runtime->rumble_intensity,
@@ -3798,8 +3784,6 @@ void MainWindow::ConnectStack()
     visor_helmet_enabled->setChecked(runtime->visor_helmet_enabled);
     position_marker_enabled->setChecked(runtime->position_marker_enabled);
     set_float(dpad_radius_spin, runtime->xr_dpad_head_radius);
-    set_float(trackpad_press_threshold_spin, runtime->primedgun_trackpad_press_threshold);
-    set_float(index_grip_press_threshold_spin, runtime->primedgun_index_grip_press_threshold);
     set_float(rumble_intensity_spin, runtime->rumble_intensity);
     set_float(dpad_below_spin, runtime->xr_dpad_head_y_below);
     set_float(dpad_deadzone_spin, runtime->xr_dpad_deadzone);
