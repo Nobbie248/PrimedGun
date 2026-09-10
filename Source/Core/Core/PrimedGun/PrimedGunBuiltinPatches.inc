@@ -14,6 +14,11 @@ $PrimedGun Disable Charged Shot Camera Recoil
 # Original 801BBB30: 4BE4EEF1 (bl 8000AA20). Keep projectile and gun animation intact.
 041BBB30 60000000
 
+$PrimedGun Omnidirectional Charged Pickup Attraction
+# Rev 0 CScriptPickup::Think: skip only the camera-forward cone rejection.
+# Original 800C2F9C: 40810058 (ble 800C2FF4). Keep charge, generated-item and range checks.
+040C2F9C 60000000
+
 $PrimedGun Beam Projectile Timing Hook
 040DF8DC 4BF22A25
 040DF008 4BF232F9
