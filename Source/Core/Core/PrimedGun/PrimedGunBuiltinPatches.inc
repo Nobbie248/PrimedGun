@@ -9,6 +9,11 @@ $PrimedGun No Idle Sway
 $PrimedGun Disable Arm Cannon Idle Fidget
 0403BDB8 4E800020
 
+$PrimedGun Disable Charged Shot Camera Recoil
+# Rev 0 CGunWeapon::Fire: skip AddCameraShaker(skHardRecoil, false).
+# Original 801BBB30: 4BE4EEF1 (bl 8000AA20). Keep projectile and gun animation intact.
+041BBB30 60000000
+
 $PrimedGun Beam Projectile Timing Hook
 040DF8DC 4BF22A25
 040DF008 4BF232F9
