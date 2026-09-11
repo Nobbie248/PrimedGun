@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Common/CommonTypes.h"
@@ -140,7 +141,7 @@ protected:
   bool CompilePixelShader();
   bool CompilePipeline();
 
-  // Pipelines for one output (framebuffer) format. Cached per format because the VR
+  // Pipelines for one output format and fragment density map attachment state. Cached because the VR
   // present path alternates between the mirror window and the OpenXR eye buffers every
   // frame; destroying and recompiling pipelines mid-frame is both slow and unsafe on
   // Vulkan (the current command buffer may still reference the old pipeline).
@@ -154,6 +155,7 @@ protected:
     std::unique_ptr<AbstractPipeline> default_multiview_pipeline;
     std::unique_ptr<AbstractPipeline> multiview_pipeline;
   };
+  void SelectFramebufferPipelines(const AbstractFramebuffer& framebuffer);
   void SetActivePipelines(const FormatPipelines& pipelines);
   void ClearPipelineCache();
 
@@ -183,8 +185,8 @@ protected:
   std::vector<u8> m_uniform_staging_buffer;
 
   // Owning per-format pipeline cache; the m_*pipeline members below are non-owning
-  // pointers into the entry for m_framebuffer_format.
-  std::map<AbstractTextureFormat, FormatPipelines> m_pipelines_per_format;
+  // pointers into the entry for the current output format and attachment state.
+  std::map<std::pair<AbstractTextureFormat, bool>, FormatPipelines> m_pipelines_per_format;
   const AbstractPipeline* m_default_pipeline = nullptr;
   const AbstractPipeline* m_pipeline = nullptr;
   const AbstractPipeline* m_default_blend_pipeline = nullptr;
@@ -193,5 +195,6 @@ protected:
   const AbstractPipeline* m_multiview_pipeline = nullptr;
 
   AbstractTextureFormat m_framebuffer_format = AbstractTextureFormat::Undefined;
+  bool m_framebuffer_foveated = false;
 };
 }  // namespace VideoCommon

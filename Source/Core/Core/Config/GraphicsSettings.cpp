@@ -253,6 +253,8 @@ const Info<bool> GFX_VR_AR_MODE_DEBUG{{System::GFX, "VR", "ARModeDebug"}, false}
 const Info<float> GFX_VR_AR_BACKGROUND_ALPHA{{System::GFX, "VR", "ARBackgroundAlpha"}, 0.0f};
 const Info<float> GFX_VR_GAMMA{{System::GFX, "VR", "Gamma"}, 1.0f};
 const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0};
+// Off by default on every platform: PrimedGun's multiview path renders the wrong eye
+// (confirmed on Quest 3). Opt in only for testing until that is fixed.
 const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, false};
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
@@ -265,6 +267,16 @@ constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = false;
 #endif
 const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCores"},
                                             DEFAULT_VR_PIN_EMULATION_CORES};
+
+#if defined(__ANDROID__)
+constexpr int DEFAULT_VR_FOVEATION_LEVEL = 2;  // Medium fixed foveated rendering
+#else
+constexpr int DEFAULT_VR_FOVEATION_LEVEL = 0;  // Off; few PC runtimes expose XR_FB_foveation
+#endif
+const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
+                                       DEFAULT_VR_FOVEATION_LEVEL};
+const Info<bool> GFX_VR_FOVEATION_DYNAMIC{{System::GFX, "VR", "DynamicFoveation"}, true};
+const Info<bool> GFX_VR_EFB_FOVEATION{{System::GFX, "VR", "FoveateEFB"}, false};
 // Graphics.Hacks
 
 const Info<bool> GFX_HACK_EFB_ACCESS_ENABLE{{System::GFX, "Hacks", "EFBAccessEnable"}, false};

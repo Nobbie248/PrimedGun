@@ -68,6 +68,9 @@ public:
   u32 GetEFBSamples() const { return m_efb_color_texture->GetSamples(); }
   bool IsEFBMultisampled() const { return m_efb_color_texture->IsMultisampled(); }
   bool IsEFBStereo() const { return m_efb_color_texture->GetLayers() > 1; }
+  // True when the EFB render pass carries a fragment density map (Vulkan VR foveation).
+  // Session opt-in is latched; recreation still checks the current framebuffer requirements.
+  bool IsEFBFoveated() const;
   FramebufferState GetEFBFramebufferState() const;
 
   // EFB coordinate conversion functions
@@ -162,6 +165,9 @@ protected:
   };
 
   bool CreateEFBFramebuffer(int efb_scale);
+
+  // See IsEFBFoveated(). Latched by the first CreateEFBFramebuffer of the session.
+  std::optional<bool> m_efb_foveated;
   void DestroyEFBFramebuffer();
 
   bool CompileConversionPipelines();

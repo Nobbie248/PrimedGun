@@ -41,7 +41,14 @@ public:
   u32 GetSamples() const { return m_samples; }
   MathUtil::Rectangle<int> GetRect() const;
 
+  // True when this framebuffer's render passes read a fragment density map (Vulkan VR
+  // foveation). Pipelines drawing into it must be built with a matching render pass
+  // (FramebufferState::fragment_density_map).
+  bool HasFragmentDensityMap() const { return m_has_fragment_density_map; }
+
 protected:
+  bool m_has_fragment_density_map = false;
+
   AbstractTexture* m_color_attachment;
   AbstractTexture* m_depth_attachment;
   std::vector<AbstractTexture*> m_additional_color_attachments;

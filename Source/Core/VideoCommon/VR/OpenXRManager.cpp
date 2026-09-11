@@ -343,6 +343,93 @@ bool OpenXRManager::IsRuntimeExtensionSupported(const char* extension_name)
   return false;
 }
 
+std::vector<const char*> OpenXRManager::GetAvailableFoveationExtensions(bool for_vulkan)
+{
+#if defined(ANDROID)
+  if (!EnsureAndroidOpenXRLoaderInitialized())
+    return {};
+#endif
+
+  // All three are needed to configure and apply a foveation profile; foveation_vulkan
+  // additionally exposes the runtime's fragment density map images to the app.
+  if (!IsRuntimeExtensionSupported(XR_FB_FOVEATION_EXTENSION_NAME) ||
+      !IsRuntimeExtensionSupported(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME) ||
+      !IsRuntimeExtensionSupported(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME))
+  {
+    return {};
+  }
+
+  std::vector<const char*> result = {XR_FB_FOVEATION_EXTENSION_NAME,
+                                     XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME,
+                                     XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME};
+  if (for_vulkan)
+  {
+    // Spelled out because the XR_FB_FOVEATION_VULKAN_EXTENSION_NAME macro lives in
+    // openxr_platform.h behind XR_USE_GRAPHICS_API_VULKAN, which this file doesn't define.
+    static constexpr const char* kFoveationVulkanExt = "XR_FB_foveation_vulkan";
+    if (!IsRuntimeExtensionSupported(kFoveationVulkanExt))
+      return {};
+    result.push_back(kFoveationVulkanExt);
+  }
+  return result;
+}
+
+bool OpenXRManager::IsFoveationUsable() const
+{
+  return m_xrCreateFoveationProfileFB != nullptr && m_xrUpdateSwapchainFB != nullptr &&
+         Config::Get(Config::GFX_VR_FOVEATION_LEVEL) > Config::GFX_VR_FOVEATION_LEVEL_OFF;
+}
+
+bool OpenXRManager::ApplyFoveationToSwapchain(XrSwapchain swapchain)
+{
+  if (!IsFoveationUsable() || m_session == XR_NULL_HANDLE || swapchain == XR_NULL_HANDLE)
+    return false;
+
+  const int level =
+      std::clamp(Config::Get(Config::GFX_VR_FOVEATION_LEVEL), Config::GFX_VR_FOVEATION_LEVEL_OFF,
+                 Config::GFX_VR_FOVEATION_LEVEL_MAX);
+  const bool dynamic = Config::Get(Config::GFX_VR_FOVEATION_DYNAMIC);
+
+  XrFoveationLevelProfileCreateInfoFB level_info{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+  level_info.level = static_cast<XrFoveationLevelFB>(level);
+  level_info.verticalOffset = 0.0f;
+  level_info.dynamic =
+      dynamic ? XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB : XR_FOVEATION_DYNAMIC_DISABLED_FB;
+
+  XrFoveationProfileCreateInfoFB profile_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+  profile_info.next = &level_info;
+
+  XrFoveationProfileFB profile = XR_NULL_HANDLE;
+  XrResult result = m_xrCreateFoveationProfileFB(m_session, &profile_info, &profile);
+  if (XR_FAILED(result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrCreateFoveationProfileFB failed ({}).",
+                 static_cast<int>(result));
+    return false;
+  }
+
+  XrSwapchainStateFoveationFB foveation_state{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+  foveation_state.flags = 0;
+  foveation_state.profile = profile;
+  result = m_xrUpdateSwapchainFB(
+      swapchain, reinterpret_cast<const XrSwapchainStateBaseHeaderFB*>(&foveation_state));
+
+  // The runtime snapshots the profile during the update; ours can go away immediately.
+  if (m_xrDestroyFoveationProfileFB != nullptr)
+    m_xrDestroyFoveationProfileFB(profile);
+
+  if (XR_FAILED(result))
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: xrUpdateSwapchainFB (foveation) failed ({}).",
+                 static_cast<int>(result));
+    return false;
+  }
+
+  INFO_LOG_FMT(OPENXR, "OpenXR: Foveation applied: level {} ({}dynamic).", level,
+               dynamic ? "" : "non-");
+  return true;
+}
+
 std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
 {
   std::vector<const char*> extensions;
@@ -454,6 +541,36 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
   INFO_LOG_FMT(OPENXR, "OpenXR: Runtime '{}' version {}.{}.{}", props.runtimeName,
                XR_VERSION_MAJOR(props.runtimeVersion), XR_VERSION_MINOR(props.runtimeVersion),
                XR_VERSION_PATCH(props.runtimeVersion));
+
+  if (IsExtensionEnabled(XR_FB_FOVEATION_EXTENSION_NAME) &&
+      IsExtensionEnabled(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME))
+  {
+    const auto load_foveation_pfn = [this](const char* name, auto* out_pfn) {
+      const XrResult r = xrGetInstanceProcAddr(m_instance, name,
+                                               reinterpret_cast<PFN_xrVoidFunction*>(out_pfn));
+      if (XR_FAILED(r) || *out_pfn == nullptr)
+      {
+        WARN_LOG_FMT(OPENXR, "OpenXR: XR_FB_foveation enabled but {} could not be loaded ({}).",
+                     name, static_cast<int>(r));
+        *out_pfn = nullptr;
+        return false;
+      }
+      return true;
+    };
+
+    if (load_foveation_pfn("xrCreateFoveationProfileFB", &m_xrCreateFoveationProfileFB) &&
+        load_foveation_pfn("xrDestroyFoveationProfileFB", &m_xrDestroyFoveationProfileFB) &&
+        load_foveation_pfn("xrUpdateSwapchainFB", &m_xrUpdateSwapchainFB))
+    {
+      INFO_LOG_FMT(OPENXR, "OpenXR: XR_FB_foveation enabled.");
+    }
+    else
+    {
+      m_xrCreateFoveationProfileFB = nullptr;
+      m_xrDestroyFoveationProfileFB = nullptr;
+      m_xrUpdateSwapchainFB = nullptr;
+    }
+  }
 
 #if defined(ANDROID)
   if (IsExtensionEnabled(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
@@ -733,6 +850,8 @@ void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
     m_xfb_pose_stamp_next = 0;
     m_xfb_pose_stamp_serial = 0;
     m_present_eye_views_valid = false;
+    std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
+    m_input_eye_views_valid = false;
     return;
   }
 
@@ -849,12 +968,31 @@ void OpenXRManager::PublishLayers(
     frame.layers.emplace_back(std::move(layer));
   }
 
-  if (frame.layers.empty())
+  {
+    std::lock_guard<std::mutex> lock(m_publish_mutex);
+    m_published_frame = std::move(frame);
+    ++m_publish_serial;
+  }
+  m_publish_cv.notify_all();
+}
+
+void OpenXRManager::RemovePublishedSwapchain(XrSwapchain swapchain)
+{
+  if (swapchain == XR_NULL_HANDLE)
     return;
 
   {
     std::lock_guard<std::mutex> lock(m_publish_mutex);
-    m_published_frame = std::move(frame);
+    const auto removed = std::erase_if(m_published_frame.layers, [swapchain](const auto& layer) {
+      if (layer.kind == PublishedXRLayer::Kind::Quad)
+        return layer.quad.subImage.swapchain == swapchain;
+      return std::any_of(layer.projection_views.begin(), layer.projection_views.end(),
+                         [swapchain](const auto& view) {
+                           return view.subImage.swapchain == swapchain;
+                         });
+    });
+    if (removed == 0)
+      return;
     ++m_publish_serial;
   }
   m_publish_cv.notify_all();
@@ -881,6 +1019,9 @@ void OpenXRManager::FrameThreadLoop()
   uint64_t consumed_serial = 0;
   double end_frame_cost_us = 500.0;
   uint64_t previous_cycle_us = 0;
+  uint64_t stats_start_us = Common::Timer::NowUs();
+  uint32_t stat_cycles = 0, stat_fresh = 0, stat_repeat = 0, stat_empty = 0, stat_errors = 0;
+  double stat_wait_ms = 0.0, stat_content_wait_ms = 0.0, stat_end_ms = 0.0;
 
   while (!m_frame_thread_should_exit.load(std::memory_order_acquire))
   {
@@ -907,6 +1048,7 @@ void OpenXRManager::FrameThreadLoop()
         break;
     }
 
+    const uint64_t wait_frame_start_us = Common::Timer::NowUs();
     if (!WaitFrame())
     {
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -920,6 +1062,7 @@ void OpenXRManager::FrameThreadLoop()
     const int64_t period_ns =
         m_predicted_display_period_snapshot.load(std::memory_order_acquire);
     const uint64_t content_wait_start_us = Common::Timer::NowUs();
+    bool fresh = false;
     if (should_render)
     {
       const int64_t since_wait_ns =
@@ -948,6 +1091,7 @@ void OpenXRManager::FrameThreadLoop()
         last_frame = m_published_frame;
         consumed_serial = m_publish_serial;
         have_frame = true;
+        fresh = true;
       }
     }
 
@@ -958,6 +1102,11 @@ void OpenXRManager::FrameThreadLoop()
       std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
 
+    // The last released image is selected by xrEndFrame. Hold the backend queue
+    // lock from this snapshot through submission so a release/publish transaction
+    // cannot replace that image while we still hold its previous pose.
+    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                   std::unique_lock<std::mutex>{};
     {
       std::lock_guard<std::mutex> lock(m_publish_mutex);
       if (m_publish_serial != consumed_serial)
@@ -965,6 +1114,7 @@ void OpenXRManager::FrameThreadLoop()
         last_frame = m_published_frame;
         consumed_serial = m_publish_serial;
         have_frame = true;
+        fresh = true;
       }
     }
 
@@ -975,7 +1125,7 @@ void OpenXRManager::FrameThreadLoop()
     quads.reserve(last_frame.layers.size());
     submitted_layers.reserve(last_frame.layers.size());
 
-    const bool submit_content = should_render && have_frame;
+    const bool submit_content = should_render && have_frame && !last_frame.layers.empty();
     if (submit_content)
     {
       for (PublishedXRLayer& published_layer : last_frame.layers)
@@ -1003,11 +1153,39 @@ void OpenXRManager::FrameThreadLoop()
     }
 
     const uint64_t end_start_us = Common::Timer::NowUs();
-    EndFrameDetached(m_frame_state.predictedDisplayTime, GetActiveBlendMode(),
-                     submit_content, submitted_layers);
+    const bool success = EndFrameDetached(m_frame_state.predictedDisplayTime, GetActiveBlendMode(),
+                                          submit_content, submitted_layers, false);
+    if (queue_lock.owns_lock())
+      queue_lock.unlock();
     const uint64_t end_us = Common::Timer::NowUs() - end_start_us;
     end_frame_cost_us = end_frame_cost_us * 0.8 + static_cast<double>(end_us) * 0.2;
     previous_cycle_us = Common::Timer::NowUs() - cycle_start_us;
+
+    ++stat_cycles;
+    stat_errors += !success;
+    if (!submit_content)
+      ++stat_empty;
+    else if (fresh)
+      ++stat_fresh;
+    else
+      ++stat_repeat;
+    stat_wait_ms += (wait_frame_return_us - wait_frame_start_us) / 1000.0;
+    stat_content_wait_ms += (end_start_us - content_wait_start_us) / 1000.0;
+    stat_end_ms += end_us / 1000.0;
+
+    const uint64_t now_us = Common::Timer::NowUs();
+    if (now_us - stats_start_us >= 5'000'000)
+    {
+      INFO_LOG_FMT(OPENXR,
+                   "XRPacing: {:.1f} cycles/s (fresh={} repeat={} empty={} errors={}) | "
+                   "xrWaitFrame={:.2f}ms content_wait={:.2f}ms xrEndFrame={:.2f}ms",
+                   stat_cycles / ((now_us - stats_start_us) / 1'000'000.0), stat_fresh,
+                   stat_repeat, stat_empty, stat_errors, stat_wait_ms / stat_cycles,
+                   stat_content_wait_ms / stat_cycles, stat_end_ms / stat_cycles);
+      stats_start_us = now_us;
+      stat_cycles = stat_fresh = stat_repeat = stat_empty = stat_errors = 0;
+      stat_wait_ms = stat_content_wait_ms = stat_end_ms = 0.0;
+    }
   }
 
   m_frame_thread_running.store(false, std::memory_order_release);
@@ -1613,56 +1791,43 @@ void OpenXRManager::UpdateInputActions()
 
   // Provide HMD head orientation for IR pointer reference direction.
   // Use left eye orientation as a proxy for head center (negligible difference from averaged).
-  Common::VR::OpenXRPoseState head_pose;
-  if (m_eye_views[0].pose.orientation.w != 0.0f || m_eye_views[0].pose.orientation.x != 0.0f ||
-      m_eye_views[0].pose.orientation.y != 0.0f || m_eye_views[0].pose.orientation.z != 0.0f)
+  std::array<XREyeView, 2> eye_views;
+  XrVector3f home_position;
+  bool eye_views_valid;
   {
-    if (!m_home_set)
-    {
-      if (m_reference_space_is_stage)
-      {
-        m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
-      }
-      else
-      {
-        m_home_position.x =
-            0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
-        m_home_position.y =
-            0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
-        m_home_position.z =
-            0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
-      }
-      m_home_set = true;
-    }
+    std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
+    eye_views = m_input_eye_views;
+    home_position = m_input_home_position;
+    eye_views_valid = m_input_eye_views_valid;
+  }
+  Common::VR::OpenXRPoseState head_pose;
+  const auto make_home_relative = [&home_position](Common::VR::OpenXRPoseState* pose) {
+    if (!pose || !pose->valid)
+      return;
 
-    const auto make_home_relative = [this](Common::VR::OpenXRPoseState* pose) {
-      if (!pose || !pose->valid)
-        return;
+    pose->position[0] -= home_position.x;
+    pose->position[1] -= home_position.y;
+    pose->position[2] -= home_position.z;
+  };
 
-      pose->position[0] -= m_home_position.x;
-      pose->position[1] -= m_home_position.y;
-      pose->position[2] -= m_home_position.z;
-    };
+  for (auto& controller : controllers)
+  {
+    make_home_relative(&controller.aim_pose);
+    make_home_relative(&controller.grip_pose);
+  }
 
-    for (auto& controller : controllers)
-    {
-      make_home_relative(&controller.aim_pose);
-      make_home_relative(&controller.grip_pose);
-    }
-
+  if (eye_views_valid)
+  {
     head_pose.valid = true;
-    head_pose.orientation = {m_eye_views[0].pose.orientation.x,
-                             m_eye_views[0].pose.orientation.y,
-                             m_eye_views[0].pose.orientation.z,
-                             m_eye_views[0].pose.orientation.w};
-    head_pose.position = {m_eye_views[0].pose.position.x,
-                          m_eye_views[0].pose.position.y,
-                          m_eye_views[0].pose.position.z};
+    head_pose.orientation = {eye_views[0].pose.orientation.x, eye_views[0].pose.orientation.y,
+                             eye_views[0].pose.orientation.z, eye_views[0].pose.orientation.w};
+    head_pose.position = {eye_views[0].pose.position.x, eye_views[0].pose.position.y,
+                          eye_views[0].pose.position.z};
     make_home_relative(&head_pose);
   }
 
-  const std::array<float, 3> tracking_origin_position{m_home_position.x, m_home_position.y,
-                                                      m_home_position.z};
+  const std::array<float, 3> tracking_origin_position{home_position.x, home_position.y,
+                                                     home_position.z};
   Common::VR::OpenXRInputState::SetInteractionProfiles(interaction_profiles);
   Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose,
                                                tracking_origin_position);
@@ -1801,7 +1966,8 @@ bool OpenXRManager::WaitFrame()
 
 bool OpenXRManager::BeginFrame()
 {
-  if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("before xrBeginFrame"))
+  if (!IsFrameThreadActive() && m_swapchain &&
+      !m_swapchain->WaitForPendingFrameFinalization("before xrBeginFrame"))
     return false;
 
   XrFrameBeginInfo begin_info{XR_TYPE_FRAME_BEGIN_INFO};
@@ -1851,7 +2017,8 @@ XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
 bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                      XrEnvironmentBlendMode environment_blend_mode,
                                      bool should_render,
-                                     const std::vector<XrCompositionLayerBaseHeader*>& layers)
+                                     const std::vector<XrCompositionLayerBaseHeader*>& layers,
+                                     bool lock_graphics_queue)
 {
   XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
   end_info.displayTime = display_time;
@@ -1863,8 +2030,9 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
     end_info.layers = layers.data();
   }
 
-  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
-                                  std::unique_lock<std::mutex>{};
+  std::unique_lock<std::mutex> queue_lock;
+  if (lock_graphics_queue && m_swapchain)
+    queue_lock = m_swapchain->AcquireGraphicsQueueLock();
   XR_CHECK(xrEndFrame(m_session, &end_info));
   return true;
 }
@@ -1891,14 +2059,22 @@ bool OpenXRManager::LocateViews()
   m_views.fill({XR_TYPE_VIEW});
   m_eye_views_valid = false;
 
-  XR_CHECK(xrLocateViews(m_session, &locate_info, &view_state,
-                          view_count, &view_count, m_views.data()));
+  const XrResult locate_result = xrLocateViews(m_session, &locate_info, &view_state,
+                                              view_count, &view_count, m_views.data());
+  if (XR_FAILED(locate_result))
+  {
+    std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
+    m_input_eye_views_valid = false;
+  }
+  XR_CHECK(locate_result);
 
   constexpr XrViewStateFlags required_flags =
       XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
   m_eye_views_valid = view_count >= 2 && (view_state.viewStateFlags & required_flags) == required_flags;
   if (!m_eye_views_valid)
   {
+    std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
+    m_input_eye_views_valid = false;
     WARN_LOG_FMT(OPENXR, "OpenXR: Skipping projection layer because view pose is invalid (flags={:#x}, views={}).",
                  static_cast<unsigned int>(view_state.viewStateFlags), view_count);
     return true;
@@ -1908,6 +2084,22 @@ bool OpenXRManager::LocateViews()
   {
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
+  }
+
+  if (!m_home_set)
+  {
+    if (m_reference_space_is_stage)
+    {
+      m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
+    }
+    else
+    {
+      m_home_position = {
+          0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x),
+          0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y),
+          0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z)};
+    }
+    m_home_set = true;
   }
 
   if (m_recenter_requested.exchange(false, std::memory_order_acq_rel) && view_count >= 2)
@@ -1922,6 +2114,13 @@ bool OpenXRManager::LocateViews()
     m_home_set = true;
     INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home height only to ({:.4f},{:.4f},{:.4f})",
                  m_home_position.x, m_home_position.y, m_home_position.z);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
+    m_input_eye_views = m_eye_views;
+    m_input_home_position = m_home_position;
+    m_input_eye_views_valid = m_eye_views_valid;
   }
 
   static uint64_t s_locate_log_counter = 0;

@@ -267,6 +267,11 @@ void VideoConfig::Refresh()
                                       Config::GFX_VR_CLEAR_EFB_MIN,
                                       Config::GFX_VR_CLEAR_EFB_MAX);
   vr_use_vulkan_multiview = Config::Get(Config::GFX_VR_USE_VULKAN_MULTIVIEW);
+  vr_foveation_level = std::clamp(Config::Get(Config::GFX_VR_FOVEATION_LEVEL),
+                                  Config::GFX_VR_FOVEATION_LEVEL_OFF,
+                                  Config::GFX_VR_FOVEATION_LEVEL_MAX);
+  vr_foveation_dynamic = Config::Get(Config::GFX_VR_FOVEATION_DYNAMIC);
+  vr_efb_foveation = Config::Get(Config::GFX_VR_EFB_FOVEATION);
   vr_android_direct_to_hmd = Config::Get(Config::GFX_VR_ANDROID_DIRECT_TO_HMD);
   bEFBAccessEnable = Config::Get(Config::GFX_HACK_EFB_ACCESS_ENABLE);
   bEFBAccessDeferInvalidation = Config::Get(Config::GFX_HACK_EFB_DEFER_INVALIDATION);
@@ -395,6 +400,7 @@ void CheckForConfigChanges()
 {
   const ShaderHostConfig old_shader_host_config = ShaderHostConfig::GetCurrent();
   const StereoMode old_stereo = g_ActiveConfig.stereo_mode;
+  const bool old_vulkan_multiview = g_ActiveConfig.vr_use_vulkan_multiview;
   const u32 old_multisamples = g_ActiveConfig.iMultisamples;
   const auto old_anisotropy = g_ActiveConfig.iMaxAnisotropy;
   const int old_efb_access_tile_size = g_ActiveConfig.iEFBAccessTileSize;
@@ -450,7 +456,8 @@ void CheckForConfigChanges()
   u32 changed_bits = 0;
   if (old_shader_host_config.bits != new_host_config.bits)
     changed_bits |= CONFIG_CHANGE_BIT_HOST_CONFIG;
-  if (old_stereo != g_ActiveConfig.stereo_mode)
+  if (old_stereo != g_ActiveConfig.stereo_mode ||
+      old_vulkan_multiview != g_ActiveConfig.vr_use_vulkan_multiview)
     changed_bits |= CONFIG_CHANGE_BIT_STEREO_MODE;
   if (old_multisamples != g_ActiveConfig.iMultisamples)
     changed_bits |= CONFIG_CHANGE_BIT_MULTISAMPLES;

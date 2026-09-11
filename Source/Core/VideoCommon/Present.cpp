@@ -1107,11 +1107,9 @@ bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
   if (!VR::g_openxr->WaitFrame() || !VR::g_openxr->BeginFrame())
     return false;
 
-  if (do_locate_views && VR::g_openxr->ShouldRender())
+  // A successful BeginFrame must still be ended if locating the pose fails.
+  if (do_locate_views && VR::g_openxr->ShouldRender() && VR::g_openxr->LocateViews())
   {
-    if (!VR::g_openxr->LocateViews())
-      return false;
-
     auto& geometry_shader_manager = Core::System::GetInstance().GetGeometryShaderManager();
     geometry_shader_manager.SetProjectionChanged();
     if (!g_ActiveConfig.VRLockHeadPoseEffective())
@@ -1237,18 +1235,10 @@ void Presenter::Present(PresentInfo* present_info)
   UpdateDrawRectangle();
 
 #ifdef ENABLE_VR
-  // OpenXR frame lifecycle — restructured so BeginFrame→EndFrame brackets the full game
-  // render time (~33ms at 30fps), not just the final blit.  This gives the compositor
-  // accurate frame timing for ATW/ASW reprojection.
-  //
-  // Flow:
-  //   Present(N): [frame N already begun at end of Present(N-1)]
-  //     → render + blit eyes → EndFrame(N)
-  //     → WaitFrame(N+1) → BeginFrame(N+1) → LocateViews(N+1)
-  //   [game renders frame N+1 — ~33ms]
-  //   Present(N+1): EndFrame(N+1) → WaitFrame(N+2) → BeginFrame(N+2) → ...
-  //
-  // The first legacy frame is started here if no frame was prepared previously.
+  // Detached pacing owns WaitFrame/BeginFrame/EndFrame and resubmits the latest
+  // published layer stack at the headset cadence. Inline mode starts the next XR
+  // frame at the previous Present, bracketing the game's full rendering interval.
+  // Start the first inline frame here if no frame was prepared previously.
   const bool vr_pacing_active =
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
       VR::g_openxr->IsFrameThreadActive();
@@ -1313,8 +1303,7 @@ void Presenter::Present(PresentInfo* present_info)
   }
 
 #ifdef ENABLE_VR
-  // --- End current VR frame ---
-  // xrEndFrame must be called if (and only if) WaitFrame+BeginFrame succeeded.
+  // Publish detached content, or end the successfully begun inline frame.
   if (vr_frame_started && !vr_skip_duplicate_publish)
   {
     VR::OpenXRManager::ScopedVideoFrameHandoff handoff(

@@ -242,6 +242,15 @@ extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
 extern const Info<bool> GFX_VR_PIN_EMULATION_CORES;
 
+// XR_FB_foveation (fixed foveated rendering). Level: 0 off, 1 low, 2 medium, 3 high.
+extern const Info<int> GFX_VR_FOVEATION_LEVEL;
+extern const Info<bool> GFX_VR_FOVEATION_DYNAMIC;
+// Foveate the EFB as well as the eye swapchains. Needs fragmentDensityMapNonSubsampledImages.
+extern const Info<bool> GFX_VR_EFB_FOVEATION;
+
+static constexpr int GFX_VR_FOVEATION_LEVEL_OFF = 0;
+static constexpr int GFX_VR_FOVEATION_LEVEL_MAX = 3;
+
 static constexpr float GFX_VR_SCREEN_DISTANCE_MIN = 0.5f;
 static constexpr float GFX_VR_SCREEN_DISTANCE_MAX = 10.0f;
 static constexpr float GFX_VR_SCREEN_DISTANCE_STEP = 0.1f;

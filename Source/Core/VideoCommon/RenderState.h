@@ -85,6 +85,9 @@ union FramebufferState
   BitField<25, 3, u32> additional_color_attachment_count;
   // Set when this pipeline targets a multiview render pass (VR stereo via VK_KHR_multiview).
   BitField<28, 1, u32> multiview;
+  // Set when this pipeline targets a render pass with a fragment density map attachment
+  // (Vulkan VR foveation via VK_EXT_fragment_density_map).
+  BitField<29, 1, u32> fragment_density_map;
 
   u32 hex = 0;
 };

@@ -159,4 +159,7 @@ struct alignas(16) GeometryShaderConstants
   float4 head_locked_params{};
   // Copy of the VS viewport-sign and pixel-center correction for GS-built VR positions.
   float4 pixel_center_correction{};
+  // Flat-screen-pane NDC remap for the multiview VR path (cvr_pane_remap in shaders):
+  // {scale_x, scale_y, offset_x, offset_y}. Neutral is {1, 1, 0, 0}.
+  float4 vr_pane_remap{};
 };

@@ -182,6 +182,14 @@ TextureConfig FramebufferManager::GetEFBDepthTextureConfig(u32 width, u32 height
                        AbstractTextureType::Texture_2DArray);
 }
 
+bool FramebufferManager::IsEFBFoveated() const
+{
+  return m_efb_foveated.value_or(false) && m_efb_color_texture &&
+         m_efb_color_texture->GetLayers() == 2 && m_efb_color_texture->GetSamples() == 1 &&
+         g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+         g_ActiveConfig.vr_use_vulkan_multiview && g_backend_info.bSupportsMultiview;
+}
+
 FramebufferState FramebufferManager::GetEFBFramebufferState() const
 {
   FramebufferState ret = {};
@@ -196,6 +204,9 @@ FramebufferState FramebufferManager::GetEFBFramebufferState() const
                    g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
                    g_ActiveConfig.vr_use_vulkan_multiview &&
                    g_backend_info.bSupportsMultiview) ? 1u : 0u;
+  // EFB foveation (Vulkan VR): pipelines must target the fragment-density-map render
+  // pass the backend gave the EFB framebuffer. Latched, so always consistent with it.
+  ret.fragment_density_map = m_efb_framebuffer->HasFragmentDensityMap() ? 1u : 0u;
   return ret;
 }
 
@@ -255,6 +266,32 @@ std::tuple<u32, u32> FramebufferManager::CalculateTargetSize(int efb_scale)
 bool FramebufferManager::CreateEFBFramebuffer(int efb_scale)
 {
   auto [width, height] = CalculateTargetSize(efb_scale);
+
+  // Latched once per session: the EFB framebuffer and every GX pipeline must agree on
+  // whether the render pass has a density map, and pipelines are cached across EFB
+  // recreations. Only the density map *contents* (FoveationLevel) may change later.
+  // Opt-in via FoveateEFB: the density map forces Adreno into binned rendering, so
+  // games that split the EFB pass with frequent EFB copies lose more to per-split GMEM
+  // load/store than foveation saves in fragment work.
+  if (!m_efb_foveated.has_value())
+  {
+    const bool multiview_efb =
+        CalculateEFBLayers() == 2 && g_ActiveConfig.iMultisamples == 1 &&
+        g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+        g_ActiveConfig.vr_use_vulkan_multiview && g_backend_info.bSupportsMultiview;
+    m_efb_foveated = multiview_efb && g_backend_info.bSupportsVRFoveatedEFB &&
+                     g_ActiveConfig.vr_foveation_level > 0 && g_ActiveConfig.vr_efb_foveation;
+    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+        g_ActiveConfig.vr_foveation_level > 0)
+    {
+      INFO_LOG_FMT(
+          VIDEO,
+          "EFB foveated rendering: {} (opt_in={} multiview_efb={} backend_support={} level={})",
+          *m_efb_foveated ? "ENABLED" : "disabled", g_ActiveConfig.vr_efb_foveation,
+          multiview_efb, g_backend_info.bSupportsVRFoveatedEFB,
+          g_ActiveConfig.vr_foveation_level);
+    }
+  }
 
   const TextureConfig efb_color_texture_config = GetEFBColorTextureConfig(width, height);
   const TextureConfig efb_depth_texture_config = GetEFBDepthTextureConfig(width, height);

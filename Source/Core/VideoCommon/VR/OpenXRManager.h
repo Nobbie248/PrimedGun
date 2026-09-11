@@ -59,8 +59,8 @@ public:
   // Signal the runtime that rendering into the given eye's current image is done.
   virtual void ReleaseEyeTexture(uint32_t eye) = 0;
 
-  // Build the XrCompositionLayerProjection from the current eye poses and submit
-  // via xrEndFrame. Call after both eyes have been rendered and released.
+  // Publish the rendered layer stack to the pacing thread, or submit it inline
+  // when detached pacing is disabled. Call after both eyes have been rendered.
   virtual bool SubmitFrame() = 0;
 
   // Pixel dimensions of the eye render targets (typically HMD recommended resolution).
@@ -68,6 +68,7 @@ public:
   virtual uint32_t GetEyeHeight() const = 0;
 
   virtual bool SupportsLayeredRendering() const { return false; }
+  virtual bool HasFoveatedFramebuffers() const { return false; }
   virtual AbstractFramebuffer* AcquireLayeredFramebuffer() { return nullptr; }
   virtual void ReleaseLayeredTexture() {}
   virtual XrSwapchain GetFlatSwapchain() const { return XR_NULL_HANDLE; }
@@ -87,6 +88,23 @@ public:
 
   static bool IsRuntimeExtensionSupported(const char* extension_name);
   static std::vector<const char*> GetAvailableControllerExtensions();
+
+  // ---- XR_FB_foveation (fixed foveated rendering) ----
+
+  // Foveation extensions the runtime advertises, for the backend's CreateInstance list:
+  // XR_FB_foveation, XR_FB_foveation_configuration, XR_FB_swapchain_update_state, and
+  // (when for_vulkan) XR_FB_foveation_vulkan. Empty when the base extensions are missing.
+  static std::vector<const char*> GetAvailableFoveationExtensions(bool for_vulkan);
+
+  // True when the foveation extensions are enabled on this instance and the user's
+  // FoveationLevel setting is not Off. Backends check this before creating swapchains
+  // with a foveation profile request.
+  bool IsFoveationUsable() const;
+
+  // Create a foveation profile from the FoveationLevel/DynamicFoveation settings and
+  // attach it to an already-created swapchain via xrUpdateSwapchainFB
+  // (the swapchain must have been created with XrSwapchainCreateInfoFoveationFB).
+  bool ApplyFoveationToSwapchain(XrSwapchain swapchain);
 
   // Step 1: Create XrInstance.
   // extra_extensions must include the graphics API extension (e.g. XR_KHR_D3D11_ENABLE_EXTENSION_NAME).
@@ -127,7 +145,8 @@ public:
   bool EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& layers);
   bool EndFrameDetached(XrTime display_time, XrEnvironmentBlendMode environment_blend_mode,
                         bool should_render,
-                        const std::vector<XrCompositionLayerBaseHeader*>& layers);
+                        const std::vector<XrCompositionLayerBaseHeader*>& layers,
+                        bool lock_graphics_queue = true);
 
   // Dedicated OpenXR pacing loop. The pacing thread owns the frame protocol and
   // re-submits the most recently published layers while the game renders its next frame.
@@ -141,8 +160,13 @@ public:
                     XrCompositionLayerFlags layer_flags);
   void PublishLayers(const std::vector<XrCompositionLayerBaseHeader*>& layers);
 
-  // Prevent the pacing thread from submitting a newly released swapchain image
-  // before the video thread has published the matching composition-layer pose.
+  // Remove cached layers before destroying a swapchain. The backend must hold its
+  // graphics queue lock and finish pending publications that reference the swapchain.
+  void RemovePublishedSwapchain(XrSwapchain swapchain);
+
+  // Give an in-progress video handoff time to publish before the pacing deadline.
+  // Backends must also hold their graphics queue lock across image release and
+  // PublishLayers; pacing holds that lock from its final snapshot through xrEndFrame.
   void BeginVideoFrameHandoff() { m_video_handoff_active.fetch_add(1, std::memory_order_release); }
   void EndVideoFrameHandoff() { m_video_handoff_active.fetch_sub(1, std::memory_order_release); }
   class ScopedVideoFrameHandoff
@@ -310,6 +334,11 @@ private:
   IOpenXRSwapchain* m_swapchain = nullptr;
   std::vector<std::string> m_enabled_extensions;
 
+  // XR_FB_foveation entry points (null when the extension is unavailable).
+  PFN_xrCreateFoveationProfileFB m_xrCreateFoveationProfileFB = nullptr;
+  PFN_xrDestroyFoveationProfileFB m_xrDestroyFoveationProfileFB = nullptr;
+  PFN_xrUpdateSwapchainFB m_xrUpdateSwapchainFB = nullptr;
+
 #if defined(ANDROID)
   PFN_xrVoidFunction m_xrSetAndroidApplicationThreadKHR = nullptr;
   PFN_xrVoidFunction m_xrPerfSettingsSetPerformanceLevelEXT = nullptr;
@@ -399,6 +428,13 @@ private:
 
   bool m_eye_views_valid = false;
   bool m_submitted_eye_views_valid = false;
+
+  // LocateViews owns render tracking on the video thread. Input runs on the pacing
+  // thread and consumes this coherent copy, including PrimedGun's recentered origin.
+  std::mutex m_input_tracking_mutex;
+  std::array<XREyeView, 2> m_input_eye_views{};
+  XrVector3f m_input_home_position{};
+  bool m_input_eye_views_valid = false;
 
   // "Home" head-center position. With stage space this remains the runtime's play-space origin;
   // local-space fallback records the first usable head-center position.

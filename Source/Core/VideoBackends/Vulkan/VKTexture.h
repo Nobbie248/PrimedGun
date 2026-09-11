@@ -137,7 +137,8 @@ public:
   VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attachment,
                 std::vector<AbstractTexture*> additional_color_attachments, u32 width, u32 height,
                 u32 layers, u32 samples, VkFramebuffer fb, VkRenderPass load_render_pass,
-                VkRenderPass discard_render_pass, VkRenderPass clear_render_pass);
+                VkRenderPass discard_render_pass, VkRenderPass clear_render_pass,
+                bool has_fragment_density_map = false);
   ~VKFramebuffer() override;
 
   VkFramebuffer GetFB() const { return m_fb; }
@@ -160,10 +161,12 @@ public:
 
   static std::unique_ptr<VKFramebuffer>
   Create(VKTexture* color_attachments, VKTexture* depth_attachment,
-         std::vector<AbstractTexture*> additional_color_attachments);
+         std::vector<AbstractTexture*> additional_color_attachments,
+         VkImageView fragment_density_map_view = VK_NULL_HANDLE);
   static std::unique_ptr<VKFramebuffer>
   CreateMultiview(VKTexture* color_attachment, VKTexture* depth_attachment,
-                  std::vector<AbstractTexture*> additional_color_attachments);
+                  std::vector<AbstractTexture*> additional_color_attachments,
+                  VkImageView fragment_density_map_view = VK_NULL_HANDLE);
 
 protected:
   VkFramebuffer m_fb;

@@ -155,9 +155,9 @@ public:
   std::unique_lock<std::mutex> AcquireGraphicsQueueLock() override;
   bool WaitForPendingFrameFinalization(std::string_view reason = {}) override;
 
-  // Build the XrCompositionLayerProjection and call xrEndFrame.
+  // Publish the rendered layer stack; the pacing thread owns xrEndFrame when active.
   bool SubmitFrame() override;
-  bool SupportsDetachedFrameLoop() const override { return false; }
+  bool SupportsDetachedFrameLoop() const override { return true; }
 
   uint32_t GetEyeWidth() const override
   {
@@ -176,9 +176,12 @@ private:
     XrTime display_time = 0;
     XrEnvironmentBlendMode environment_blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     bool should_render = false;
+    bool publish_to_pacing_thread = false;
+    bool has_projection = false;
     XrSpace space = XR_NULL_HANDLE;
     XrCompositionLayerFlags layer_flags = 0;
     std::array<XrCompositionLayerProjectionView, 2> projection_views{};
+    std::vector<XrCompositionLayerQuad> quad_layers;
     uint64_t debug_frame_id = 0;
     uint64_t queued_time_us = 0;
 

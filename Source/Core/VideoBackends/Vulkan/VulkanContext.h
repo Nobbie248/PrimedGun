@@ -57,6 +57,12 @@ public:
     bool shaderSubgroupOperations = false;
     bool multiview = false;
     bool timelineSemaphore = false;
+    // VK_EXT_fragment_density_map (VR foveation). nonSubsampled is required to foveate
+    // render passes whose attachments are ordinary images (the EFB).
+    bool fragmentDensityMap = false;
+    bool fragmentDensityMapNonSubsampled = false;
+    VkExtent2D minFragmentDensityTexelSize{1, 1};
+    VkExtent2D maxFragmentDensityTexelSize{1, 1};
     u32 maxMultiviewViewCount = 0;
     u32 maxMultiviewInstanceIndex = 0;
   };
@@ -124,6 +130,12 @@ public:
   // True when the timelineSemaphore feature was enabled at device creation (done when the
   // OpenXR runtime lists VK_KHR_timeline_semaphore as a required device extension).
   bool SupportsTimelineSemaphores() const { return m_timeline_semaphore_enabled; }
+
+  // True when VK_EXT_fragment_density_map was enabled at device creation (VR foveation).
+  bool SupportsFragmentDensityMap() const { return m_fragment_density_map_enabled; }
+  // True when fragmentDensityMapNonSubsampledImages is enabled: FDM render passes may
+  // target ordinary (non-subsampled) images such as the EFB.
+  bool SupportsNonSubsampledFragmentDensityMap() const { return m_fdm_non_subsampled_enabled; }
 
   // Lightweight CPU-side perf counters for diagnosing VR frame cost. Accumulated by the
   // backend, dumped and reset periodically by CommandBufferManager on present.
@@ -196,6 +208,8 @@ private:
 
   bool m_multiview_enabled = false;
   bool m_timeline_semaphore_enabled = false;
+  bool m_fragment_density_map_enabled = false;
+  bool m_fdm_non_subsampled_enabled = false;
   PerfCounters m_perf_counters;
 };
 

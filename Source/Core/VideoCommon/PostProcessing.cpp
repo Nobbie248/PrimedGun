@@ -429,6 +429,25 @@ bool PostProcessing::Initialize(AbstractTextureFormat format)
   return true;
 }
 
+void PostProcessing::SelectFramebufferPipelines(const AbstractFramebuffer& framebuffer)
+{
+  const auto format = framebuffer.GetColorFormat();
+  const bool foveated = framebuffer.HasFragmentDensityMap();
+  if (format == m_framebuffer_format && foveated == m_framebuffer_foveated)
+    return;
+
+  m_framebuffer_format = format;
+  m_framebuffer_foveated = foveated;
+  // Eye swapchains, the mirror, and intermediary targets may use the same color format
+  // with different render-pass attachments. Retain both pipeline variants while draws
+  // recorded earlier in the current command buffer still reference them.
+  const auto iter = m_pipelines_per_format.find({format, foveated});
+  if (iter != m_pipelines_per_format.end())
+    SetActivePipelines(iter->second);
+  else
+    CompilePipeline();
+}
+
 void PostProcessing::SetActivePipelines(const FormatPipelines& pipelines)
 {
   m_default_pipeline = pipelines.default_pipeline.get();
@@ -513,19 +532,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
                                      const AbstractTexture* src_tex, int src_layer,
                                      std::optional<HorizontalBlend> horizontal_blend)
 {
-  if (g_gfx->GetCurrentFramebuffer()->GetColorFormat() != m_framebuffer_format)
-  {
-    m_framebuffer_format = g_gfx->GetCurrentFramebuffer()->GetColorFormat();
-    // The VR present path alternates between the mirror window and the OpenXR eye
-    // buffers every frame, so reuse the cached pipelines for this format if we have
-    // them. Compiling here would destroy pipelines the current command buffer still
-    // references (use-after-free on Vulkan) and cost two pipeline builds per frame.
-    const auto iter = m_pipelines_per_format.find(m_framebuffer_format);
-    if (iter != m_pipelines_per_format.end())
-      SetActivePipelines(iter->second);
-    else
-      CompilePipeline();
-  }
+  SelectFramebufferPipelines(*g_gfx->GetCurrentFramebuffer());
 
   // By default all source layers will be copied into the respective target layers
   const bool copy_all_layers = src_layer < 0;
@@ -665,17 +672,7 @@ bool PostProcessing::BlitFromTextureLayered(const MathUtil::Rectangle<int>& dst,
     return false;
   }
 
-  if (current_framebuffer->GetColorFormat() != m_framebuffer_format)
-  {
-    m_framebuffer_format = current_framebuffer->GetColorFormat();
-    // Same as BlitFromTexture: reuse cached pipelines for this format instead of
-    // destroying pipelines the current command buffer may still reference.
-    const auto iter = m_pipelines_per_format.find(m_framebuffer_format);
-    if (iter != m_pipelines_per_format.end())
-      SetActivePipelines(iter->second);
-    else
-      CompilePipeline();
-  }
+  SelectFramebufferPipelines(*current_framebuffer);
 
   g_gfx->SetSamplerState(0, RenderState::GetLinearSamplerState());
   g_gfx->SetSamplerState(1, RenderState::GetPointSamplerState());
@@ -1214,7 +1211,8 @@ bool PostProcessing::CompilePipeline()
   // If this is true, the "m_default_pipeline" won't be the only one that runs
   const bool needs_intermediary_buffer = NeedsIntermediaryBuffer();
 
-  FormatPipelines& format_pipelines = m_pipelines_per_format[m_framebuffer_format];
+  FormatPipelines& format_pipelines =
+      m_pipelines_per_format[{m_framebuffer_format, m_framebuffer_foveated}];
 
   AbstractPipelineConfig config = {};
   config.vertex_shader = m_default_vertex_shader.get();
@@ -1229,6 +1227,8 @@ bool PostProcessing::CompilePipeline()
   config.blending_state = RenderState::GetNoBlendingBlendState();
   config.framebuffer_state = RenderState::GetColorFramebufferState(
       needs_intermediary_buffer ? s_intermediary_buffer_format : m_framebuffer_format);
+  config.framebuffer_state.fragment_density_map =
+      m_framebuffer_foveated && !needs_intermediary_buffer;
   config.usage = AbstractPipelineUsage::Utility;
   // We continue even if it failed, it will be skipped later on
   if (config.pixel_shader)
@@ -1240,6 +1240,7 @@ bool PostProcessing::CompilePipeline()
                                nullptr;
   config.pixel_shader = m_pixel_shader.get();
   config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
+  config.framebuffer_state.fragment_density_map = m_framebuffer_foveated;
   format_pipelines.pipeline = g_gfx->CreatePipeline(config);
   if (!format_pipelines.pipeline)
   {
@@ -1283,6 +1284,7 @@ bool PostProcessing::CompilePipeline()
     multiview_config.framebuffer_state =
         RenderState::GetColorFramebufferState(m_framebuffer_format);
     multiview_config.framebuffer_state.multiview = vulkan_multiview_blit ? 1 : 0;
+    multiview_config.framebuffer_state.fragment_density_map = m_framebuffer_foveated;
     multiview_config.usage = AbstractPipelineUsage::Utility;
 
     if (multiview_config.pixel_shader)

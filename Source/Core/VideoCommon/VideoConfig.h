@@ -216,6 +216,9 @@ struct BackendInfo
   bool bSupportsHDROutput = false;
   bool bSupportsUnrestrictedDepthRange = false;
   bool bSupportsMultiview = false;  // VK_KHR_multiview (Vulkan only); used for OpenXR stereo path
+  // EFB render pass foveation: Vulkan with VK_EXT_fragment_density_map incl. the
+  // non-subsampled images feature (the EFB is an ordinary image, not a subsampled one).
+  bool bSupportsVRFoveatedEFB = false;
 };
 
 extern BackendInfo g_backend_info;
@@ -396,6 +399,9 @@ struct VideoConfig final
   float vr_hud_3d_closer = 0.5f;  // 0=near plane, 1=far plane; depth at which 3D HUDs land on virtual screen
   int vr_clear_efb_min_width = 0;  // 0=disabled, >0=clear EFB copies wider than this
   bool vr_use_vulkan_multiview = true;  // Render OpenXR stereo via VK_KHR_multiview (Quest perf path)
+  int vr_foveation_level = 0;   // XR_FB_foveation level: 0=off, 1=low, 2=medium, 3=high
+  bool vr_foveation_dynamic = true;  // Let the runtime drop the foveation level when GPU load allows
+  bool vr_efb_foveation = false;  // Also foveate the EFB pass (hurts EFB-copy-heavy games)
   bool vr_android_direct_to_hmd = false;  // Android OpenXR shortcut that skips backbuffer present
   // D3D only config, mostly to be merged into the above
   int iAdapter = 0;

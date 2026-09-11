@@ -303,6 +303,7 @@ void WriteSwitch(ShaderCode& out, APIType ApiType, std::string_view variable,
 #define I_HEAD_PROJ "cvr_head_proj"
 #define I_HEAD_PARAMS "cvr_head_params"
 #define I_VR_PIXELCENTER "cvr_pixelcenter"
+#define I_VR_PANE_REMAP "cvr_pane_remap"
 
 static const char s_shader_uniforms[] = "\tuint    components;\n"
                                         "\tuint    xfmem_dualTexInfo;\n"
@@ -347,6 +348,7 @@ static const char s_shader_uniforms[] = "\tuint    components;\n"
 //   offset 160: float4 cvr_depth      (16 bytes) - {P[2][2], P[2][3], depth_scale, depth_offset}
 //   offset 176: float4 cvr_screen     (16 bytes) - {half_w, half_h, distance, ortho_layer}
 //   offset 192: float4 cvr_head_proj[4] (64 bytes) — unrotated per-eye projection (head-locked)
+//   (tail) float4 cvr_pane_remap  (16 bytes) - multiview flat-pane NDC remap {sx, sy, ox, oy}
 static const char s_geometry_shader_uniforms[] = "\tfloat4 " I_STEREOPARAMS ";\n"
                                                  "\tfloat4 " I_LINEPTPARAMS ";\n"
                                                  "\tint4 " I_TEXOFFSET ";\n"
@@ -360,7 +362,8 @@ static const char s_geometry_shader_uniforms[] = "\tfloat4 " I_STEREOPARAMS ";\n
                                                  "\tfloat4 " I_VR_SCREEN ";\n"
                                                  "\tfloat4 " I_HEAD_PROJ "[4];\n"
                                                  "\tfloat4 " I_HEAD_PARAMS ";\n"
-                                                 "\tfloat4 " I_VR_PIXELCENTER ";\n";
+                                                 "\tfloat4 " I_VR_PIXELCENTER ";\n"
+                                                 "\tfloat4 " I_VR_PANE_REMAP ";\n";
 
 constexpr std::string_view CUSTOM_PIXELSHADER_COLOR_FUNC = "customShaderColor";
 

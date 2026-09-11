@@ -208,7 +208,12 @@ void VKGfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_en
     }
     if (!clear_attachments.empty())
     {
-      VkClearRect vk_rect = {target_vk_rc, 0, g_framebuffer_manager->GetEFBLayers()};
+      // Multiview broadcasts the clear to the render-pass view mask. Vulkan requires
+      // layerCount=1 in this case, even though the EFB texture has two array layers.
+      const u32 clear_layers = g_framebuffer_manager->GetEFBFramebufferState().multiview ?
+                                   1u :
+                                   g_framebuffer_manager->GetEFBLayers();
+      VkClearRect vk_rect = {target_vk_rc, 0, clear_layers};
       if (!StateTracker::GetInstance()->IsWithinRenderArea(
               target_vk_rc.offset.x, target_vk_rc.offset.y, target_vk_rc.extent.width,
               target_vk_rc.extent.height))
@@ -345,15 +350,27 @@ void VKGfx::PresentBackbuffer()
     // Because this final command buffer is rendering to the swap chain, we need to wait for
     // the available semaphore to be signaled before executing the buffer. This final submission
     // can happen off-thread in the background while we're preparing the next frame.
+#ifdef ENABLE_VR
+    // The OpenXR pacing thread owns submission ordering; submitting off-thread as well
+    // would race it.
     const bool submit_off_thread =
         !(g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr);
+#else
+    const bool submit_off_thread = true;
+#endif
     g_command_buffer_mgr->SubmitCommandBuffer(submit_off_thread, false, true, m_swap_chain->GetSwapChain(),
                                               m_swap_chain->GetCurrentImageIndex());
   }
   else
   {
+#ifdef ENABLE_VR
+    // The OpenXR pacing thread owns submission ordering; submitting off-thread as well
+    // would race it.
     const bool submit_off_thread =
         !(g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr);
+#else
+    const bool submit_off_thread = true;
+#endif
     g_command_buffer_mgr->SubmitCommandBuffer(submit_off_thread, false, true);
   }
 

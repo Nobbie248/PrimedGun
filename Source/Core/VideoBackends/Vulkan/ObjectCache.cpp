@@ -5,12 +5,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <type_traits>
 
 #include "Common/FileUtil.h"
 #include "Common/LinearDiskCache.h"
 #include "Common/MsgHandler.h"
 
+#include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
@@ -29,6 +31,7 @@ ObjectCache::~ObjectCache()
   DestroySamplers();
   DestroyPipelineLayouts();
   DestroyDescriptorSetLayouts();
+  DestroyEFBFragmentDensityMap();
   DestroyRenderPassCache();
   m_dummy_texture.reset();
 }
@@ -417,10 +420,16 @@ VkSampler ObjectCache::GetSampler(const SamplerState& info)
 
 VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_format,
                                         u32 multisamples, VkAttachmentLoadOp load_op,
-                                        u8 additional_attachment_count, bool multiview)
+                                        u8 additional_attachment_count, bool multiview,
+                                        bool fragment_density_map)
 {
+  if (fragment_density_map && !g_vulkan_context->SupportsFragmentDensityMap())
+  {
+    ERROR_LOG_FMT(VIDEO, "Fragment density map render pass requested without device support.");
+    return VK_NULL_HANDLE;
+  }
   auto key = std::tie(color_format, depth_format, multisamples, load_op,
-                      additional_attachment_count, multiview);
+                      additional_attachment_count, multiview, fragment_density_map);
   auto it = m_render_pass_cache.find(key);
   if (it != m_render_pass_cache.end())
     return it->second;
@@ -466,6 +475,23 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
   }
 
+  // VR foveation: reference a fragment density map. The attachment is not part of the
+  // subpass; it's a render-pass-global input the GPU samples to pick per-region fragment
+  // shading density. Per spec its loadOp must be LOAD/DONT_CARE and storeOp DONT_CARE.
+  VkRenderPassFragmentDensityMapCreateInfoEXT fdm_info = {
+      VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT};
+  if (fragment_density_map)
+  {
+    fdm_info.fragmentDensityMapAttachment = {
+        static_cast<uint32_t>(attachments.size()),
+        VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+    attachments.push_back({0, VK_FORMAT_R8G8_UNORM, VK_SAMPLE_COUNT_1_BIT,
+                           VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                           VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                           VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT,
+                           VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT});
+  }
+
   VkSubpassDescription subpass = {
       0,
       VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -491,6 +517,9 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   // 0b11 replicates the subpass into layers 0 and 1; gl_ViewIndex selects per-eye state
   // in the vertex shader. We deliberately omit a correlation mask — some mobile (Adreno)
   // drivers handle that hint poorly, and skipping it costs at most a small optimization.
+  if (fragment_density_map)
+    pass_info.pNext = &fdm_info;
+
   VkRenderPassMultiviewCreateInfo multiview_info = {};
   const uint32_t view_mask = 0x3;
   if (multiview)
@@ -500,6 +529,8 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
     multiview_info.pViewMasks = &view_mask;
     multiview_info.correlationMaskCount = 0;
     multiview_info.pCorrelationMasks = nullptr;
+    // Preserve the fragment density map chain entry when both are active.
+    multiview_info.pNext = pass_info.pNext;
     pass_info.pNext = &multiview_info;
   }
 
@@ -513,6 +544,225 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
 
   m_render_pass_cache.emplace(key, pass);
   return pass;
+}
+
+// Static elliptical falloff: full shading rate in the centre, dropping toward the
+// periphery. Two channels (x/y density) written identically.
+static void FillFoveationDensityLayer(u8* dst, u32 width, u32 height, int level)
+{
+  struct LevelParams
+  {
+    float inner_radius;  // full-density region, in normalized [-1,1] coordinates
+    float min_density;
+    float falloff_exponent;
+  };
+  static constexpr LevelParams kLevels[] = {
+      {0.70f, 0.50f, 2.0f},  // Low
+      {0.50f, 0.25f, 2.0f},  // Medium
+      {0.35f, 0.25f, 1.0f},  // High: linear falloff reaches quarter rate sooner
+  };
+  const LevelParams& p = kLevels[std::clamp(level, 1, 3) - 1];
+
+  for (u32 y = 0; y < height; ++y)
+  {
+    const float ny = ((y + 0.5f) / height) * 2.0f - 1.0f;
+    for (u32 x = 0; x < width; ++x)
+    {
+      const float nx = ((x + 0.5f) / width) * 2.0f - 1.0f;
+      const float r = std::sqrt(nx * nx + ny * ny);
+      float density = 1.0f;
+      if (r > p.inner_radius)
+      {
+        const float t = std::min((r - p.inner_radius) / (1.05f - p.inner_radius), 1.0f);
+        density = 1.0f - (1.0f - p.min_density) * std::pow(t, p.falloff_exponent);
+      }
+      const u8 value = static_cast<u8>(
+          std::lround(std::clamp(density, p.min_density, 1.0f) * 255.0f));
+      dst[(y * width + x) * 2 + 0] = value;
+      dst[(y * width + x) * 2 + 1] = value;
+    }
+  }
+}
+
+VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_height, u32 layers)
+{
+  if (!g_vulkan_context->SupportsFragmentDensityMap() ||
+      !g_vulkan_context->SupportsNonSubsampledFragmentDensityMap())
+  {
+    return VK_NULL_HANDLE;
+  }
+
+  const int level = std::clamp(g_ActiveConfig.vr_foveation_level, 1, 3);
+  if (m_efb_fdm_view != VK_NULL_HANDLE && m_efb_fdm_fb_width == fb_width &&
+      m_efb_fdm_fb_height == fb_height && m_efb_fdm_layers == layers &&
+      m_efb_fdm_level == level)
+  {
+    return m_efb_fdm_view;
+  }
+
+  DestroyEFBFragmentDensityMap();
+
+  // Coarsest granularity the device allows, capped at 32x32 so the map keeps enough
+  // texels to shape the falloff. One density texel covers texel_w x texel_h pixels.
+  const auto& info = g_vulkan_context->GetDeviceInfo();
+  const u32 texel_w = std::clamp<u32>(32, std::max(1u, info.minFragmentDensityTexelSize.width),
+                                      std::max(1u, info.maxFragmentDensityTexelSize.width));
+  const u32 texel_h = std::clamp<u32>(32, std::max(1u, info.minFragmentDensityTexelSize.height),
+                                      std::max(1u, info.maxFragmentDensityTexelSize.height));
+  const u32 fdm_width = (fb_width + texel_w - 1) / texel_w;
+  const u32 fdm_height = (fb_height + texel_h - 1) / texel_h;
+
+  const VkImageCreateInfo image_info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                        nullptr,
+                                        0,
+                                        VK_IMAGE_TYPE_2D,
+                                        VK_FORMAT_R8G8_UNORM,
+                                        {fdm_width, fdm_height, 1},
+                                        1,
+                                        layers,
+                                        VK_SAMPLE_COUNT_1_BIT,
+                                        VK_IMAGE_TILING_OPTIMAL,
+                                        VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
+                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                        VK_SHARING_MODE_EXCLUSIVE,
+                                        0,
+                                        nullptr,
+                                        VK_IMAGE_LAYOUT_UNDEFINED};
+
+  VmaAllocationCreateInfo image_alloc_info = {};
+  image_alloc_info.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+  image_alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+  VkResult res = vmaCreateImage(g_vulkan_context->GetMemoryAllocator(), &image_info,
+                                &image_alloc_info, &m_efb_fdm_image, &m_efb_fdm_alloc, nullptr);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vmaCreateImage (EFB fragment density map) failed: ");
+    m_efb_fdm_image = VK_NULL_HANDLE;
+    m_efb_fdm_alloc = VK_NULL_HANDLE;
+    return VK_NULL_HANDLE;
+  }
+
+  // Upload the density values through a transient staging buffer.
+  const VkDeviceSize layer_size = static_cast<VkDeviceSize>(fdm_width) * fdm_height * 2;
+  const VkDeviceSize upload_size = layer_size * layers;
+  const VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                          nullptr,
+                                          0,
+                                          upload_size,
+                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                          VK_SHARING_MODE_EXCLUSIVE,
+                                          0,
+                                          nullptr};
+  VmaAllocationCreateInfo buffer_alloc_info = {};
+  buffer_alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                            VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+  buffer_alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+  VkBuffer staging_buffer = VK_NULL_HANDLE;
+  VmaAllocation staging_alloc = VK_NULL_HANDLE;
+  VmaAllocationInfo staging_map_info = {};
+  res = vmaCreateBuffer(g_vulkan_context->GetMemoryAllocator(), &buffer_info, &buffer_alloc_info,
+                        &staging_buffer, &staging_alloc, &staging_map_info);
+  if (res != VK_SUCCESS || staging_map_info.pMappedData == nullptr)
+  {
+    LOG_VULKAN_ERROR(res, "vmaCreateBuffer (EFB fragment density map staging) failed: ");
+    if (staging_buffer != VK_NULL_HANDLE)
+      vmaDestroyBuffer(g_vulkan_context->GetMemoryAllocator(), staging_buffer, staging_alloc);
+    DestroyEFBFragmentDensityMap();
+    return VK_NULL_HANDLE;
+  }
+
+  u8* map = static_cast<u8*>(staging_map_info.pMappedData);
+  for (u32 layer = 0; layer < layers; ++layer)
+    FillFoveationDensityLayer(map + layer * layer_size, fdm_width, fdm_height, level);
+  vmaFlushAllocation(g_vulkan_context->GetMemoryAllocator(), staging_alloc, 0, VK_WHOLE_SIZE);
+
+  VkCommandBuffer cmd = g_command_buffer_mgr->GetCurrentInitCommandBuffer();
+
+  VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                  nullptr,
+                                  0,
+                                  VK_ACCESS_TRANSFER_WRITE_BIT,
+                                  VK_IMAGE_LAYOUT_UNDEFINED,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  VK_QUEUE_FAMILY_IGNORED,
+                                  VK_QUEUE_FAMILY_IGNORED,
+                                  m_efb_fdm_image,
+                                  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers}};
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                       0, nullptr, 0, nullptr, 1, &barrier);
+
+  const VkBufferImageCopy copy = {0,
+                                  0,
+                                  0,
+                                  {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers},
+                                  {0, 0, 0},
+                                  {fdm_width, fdm_height, 1}};
+  vkCmdCopyBufferToImage(cmd, staging_buffer, m_efb_fdm_image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  g_command_buffer_mgr->DeferBufferDestruction(staging_buffer, staging_alloc);
+
+  const VkImageViewCreateInfo view_info = {
+      VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      nullptr,
+      0,
+      m_efb_fdm_image,
+      layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
+      VK_FORMAT_R8G8_UNORM,
+      {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+       VK_COMPONENT_SWIZZLE_IDENTITY},
+      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers}};
+  res = vkCreateImageView(g_vulkan_context->GetDevice(), &view_info, nullptr, &m_efb_fdm_view);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkCreateImageView (EFB fragment density map) failed: ");
+    m_efb_fdm_view = VK_NULL_HANDLE;
+    DestroyEFBFragmentDensityMap();
+    return VK_NULL_HANDLE;
+  }
+
+  m_efb_fdm_fb_width = fb_width;
+  m_efb_fdm_fb_height = fb_height;
+  m_efb_fdm_layers = layers;
+  m_efb_fdm_level = level;
+
+  INFO_LOG_FMT(VIDEO,
+               "Vulkan: EFB fragment density map ready: {}x{} texels ({}x{} px granularity) "
+               "x{} layers, level {}.",
+               fdm_width, fdm_height, texel_w, texel_h, layers, level);
+  return m_efb_fdm_view;
+}
+
+void ObjectCache::DestroyEFBFragmentDensityMap()
+{
+  // In-flight frames (and the current EFB framebuffer during recreation) may still
+  // reference these; destruction must be deferred to fence completion.
+  if (m_efb_fdm_view != VK_NULL_HANDLE)
+  {
+    g_command_buffer_mgr->DeferImageViewDestruction(m_efb_fdm_view);
+    m_efb_fdm_view = VK_NULL_HANDLE;
+  }
+  if (m_efb_fdm_image != VK_NULL_HANDLE)
+  {
+    g_command_buffer_mgr->DeferImageDestruction(m_efb_fdm_image, m_efb_fdm_alloc);
+    m_efb_fdm_image = VK_NULL_HANDLE;
+    m_efb_fdm_alloc = VK_NULL_HANDLE;
+  }
+  m_efb_fdm_fb_width = 0;
+  m_efb_fdm_fb_height = 0;
+  m_efb_fdm_layers = 0;
+  m_efb_fdm_level = 0;
 }
 
 void ObjectCache::DestroyRenderPassCache()
