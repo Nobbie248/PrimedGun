@@ -16,11 +16,13 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout.OnRefreshListener
 import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.tabs.TabLayout
+import org.dolphinemu.dolphinemu.NativeLibrary
 import org.dolphinemu.dolphinemu.R
 import org.dolphinemu.dolphinemu.adapters.PlatformPagerAdapter
 import org.dolphinemu.dolphinemu.databinding.ActivityMainBinding
 import org.dolphinemu.dolphinemu.features.settings.model.IntSetting
 import org.dolphinemu.dolphinemu.features.settings.model.NativeConfig
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
 import org.dolphinemu.dolphinemu.features.settings.ui.MenuTag
 import org.dolphinemu.dolphinemu.features.settings.ui.SettingsActivity
 import org.dolphinemu.dolphinemu.fragments.GridOptionDialogFragment
@@ -30,6 +32,7 @@ import org.dolphinemu.dolphinemu.ui.platform.PlatformTab
 import org.dolphinemu.dolphinemu.utils.AfterDirectoryInitializationRunner
 import org.dolphinemu.dolphinemu.utils.DirectoryInitialization
 import org.dolphinemu.dolphinemu.utils.InsetsHelper
+import org.dolphinemu.dolphinemu.utils.Log
 import org.dolphinemu.dolphinemu.utils.PermissionsHandler
 import org.dolphinemu.dolphinemu.utils.StartupHandler
 import org.dolphinemu.dolphinemu.utils.ThemeHelper
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity(), MainView, OnRefreshListener, ThemeProv
     private lateinit var binding: ActivityMainBinding
 
     private lateinit var menu: Menu
+    private var staleQuestStopRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition { !DirectoryInitialization.areDolphinDirectoriesReady() }
@@ -51,6 +55,8 @@ class MainActivity : AppCompatActivity(), MainView, OnRefreshListener, ThemeProv
         enableEdgeToEdge()
 
         super.onCreate(savedInstanceState)
+
+        stopStaleQuestEmulation()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -100,7 +106,16 @@ class MainActivity : AppCompatActivity(), MainView, OnRefreshListener, ThemeProv
                 .runWithLifecycle(this) { setPlatformTabsAndStartGameFileCacheService() }
         }
 
+        stopStaleQuestEmulation()
         presenter.onResume()
+    }
+
+    private fun stopStaleQuestEmulation() {
+        if (!staleQuestStopRequested && QuestVrSettings.isQuestBuild() && NativeLibrary.IsRunning()) {
+            staleQuestStopRequested = true
+            Log.warning("[MainActivity] Stopping stale Quest emulation before showing main UI.")
+            NativeLibrary.StopEmulation()
+        }
     }
 
     override fun onStop() {

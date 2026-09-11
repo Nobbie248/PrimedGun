@@ -12,11 +12,13 @@
 #include "Common/Assert.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/Thread.h"
 #include "Common/Timer.h"
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/Constants.h"
 #if defined(ANDROID) && defined(ENABLE_VR)
+#include "Core/Config/GraphicsSettings.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
 #include "vulkan/vulkan_core.h"
@@ -280,6 +282,14 @@ bool CommandBufferManager::CreateSubmitThread()
                           "for 'VK submission thread'",
                           static_cast<int>(registered));
 #endif
+      // Fast core, off the CPU/Video cores (see Core.cpp thread pins).
+      if (Config::Get(Config::GFX_VR_PIN_EMULATION_CORES))
+      {
+        const int core =
+            Common::PinCurrentThreadToPerformanceCore(Common::ThreadCoreRole::VRSubmit);
+        if (core >= 0)
+          INFO_LOG_FMT(VIDEO, "Vulkan submit worker pinned to performance core cpu{}.", core);
+      }
       registered_with_openxr = true;
     }
 #endif

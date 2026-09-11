@@ -30,7 +30,7 @@ class StartupBenchmarks {
 
     private fun benchmark(compilationMode: CompilationMode) {
         rule.measureRepeated(
-            packageName = "org.dolphinemu.dolphinemu",
+            packageName = "org.primedgun.primedgun",
             metrics = listOf(StartupTimingMetric()),
             compilationMode = compilationMode,
             startupMode = StartupMode.COLD,

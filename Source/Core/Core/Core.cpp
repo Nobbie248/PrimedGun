@@ -41,6 +41,7 @@
 #include "Core/Boot/Boot.h"
 #include "Core/BootManager.h"
 #include "Core/CPUThreadConfigCallback.h"
+#include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/CoreTiming.h"
@@ -76,6 +77,10 @@
 
 #ifdef USE_MEMORYWATCHER
 #include "Core/MemoryWatcher.h"
+#endif
+
+#if defined(ANDROID) && defined(ENABLE_VR)
+#include "VideoCommon/VR/OpenXRManager.h"
 #endif
 
 #include "DiscIO/RiivolutionPatcher.h"
@@ -116,6 +121,33 @@ static std::atomic<State> s_state = State::Uninitialized;
 #ifdef USE_MEMORYWATCHER
 static std::unique_ptr<MemoryWatcher> s_memory_watcher;
 #endif
+
+#if defined(ANDROID) && defined(ENABLE_VR)
+static void RegisterCurrentThreadWithOpenXR(VR::OpenXRManager::AndroidThreadType type,
+                                            const char* label)
+{
+  if (VR::g_openxr)
+    VR::g_openxr->RegisterCurrentAndroidThread(type, label);
+}
+#endif
+
+// Android big.LITTLE: pin the calling emulator thread to a dedicated performance core.
+// No-op off Android or when PinEmulationCores is disabled. Logs the chosen core.
+static void PinEmulationThreadToPerformanceCore(Common::ThreadCoreRole role, const char* label)
+{
+#if defined(ANDROID)
+  if (!Config::Get(Config::GFX_VR_PIN_EMULATION_CORES))
+    return;
+  const int core = Common::PinCurrentThreadToPerformanceCore(role);
+  if (core >= 0)
+    INFO_LOG_FMT(CORE, "Pinned {} to performance core cpu{}.", label, core);
+  else
+    WARN_LOG_FMT(CORE, "Could not pin {} to a performance core.", label);
+#else
+  (void)role;
+  (void)label;
+#endif
+}
 
 static void Callback_FramePresented(const PresentInfo& present_info);
 
@@ -331,6 +363,17 @@ static void CpuThread(Core::System& system, const std::optional<std::string>& sa
   else
     Common::SetCurrentThreadName("CPU-GPU thread");
 
+#if defined(ANDROID) && defined(ENABLE_VR)
+  RegisterCurrentThreadWithOpenXR(system.IsDualCoreMode() ?
+                                      VR::OpenXRManager::AndroidThreadType::ApplicationMain :
+                                      VR::OpenXRManager::AndroidThreadType::RendererMain,
+                                  system.IsDualCoreMode() ? "CPU thread" : "CPU-GPU thread");
+#endif
+  // The PPC JIT is the serial, latency-critical path. In single-core it also runs the
+  // GPU work, so it stays the top-priority pin either way.
+  PinEmulationThreadToPerformanceCore(Common::ThreadCoreRole::EmuCPU,
+                                      system.IsDualCoreMode() ? "CPU thread" : "CPU-GPU thread");
+
   // This needs to be delayed until after the video backend is ready.
   DolphinAnalytics::Instance().ReportGameStart();
 
@@ -413,6 +456,14 @@ static void FifoPlayerThread(Core::System& system, const std::optional<std::stri
   else
     Common::SetCurrentThreadName("FIFO-GPU thread");
 
+#if defined(ANDROID) && defined(ENABLE_VR)
+  RegisterCurrentThreadWithOpenXR(system.IsDualCoreMode() ?
+                                      VR::OpenXRManager::AndroidThreadType::ApplicationMain :
+                                      VR::OpenXRManager::AndroidThreadType::RendererMain,
+                                  system.IsDualCoreMode() ? "FIFO player thread" :
+                                                            "FIFO-GPU thread");
+#endif
+
   // Enter CPU run loop. When we leave it - we are done.
   if (auto cpu_core = system.GetFifoPlayer().GetCPUCore())
   {
@@ -476,6 +527,15 @@ static void FifoPlayerThread(Core::System& system, const std::optional<std::stri
       Common::SetCurrentThreadName("Video thread");
 
       const bool is_init = init_video();
+#if defined(ANDROID) && defined(ENABLE_VR)
+      if (is_init)
+      {
+        RegisterCurrentThreadWithOpenXR(VR::OpenXRManager::AndroidThreadType::RendererMain,
+                                        "Video thread");
+      }
+#endif
+      // Dedicated fast core for FIFO/GPU submit, distinct from the CPU thread's.
+      PinEmulationThreadToPerformanceCore(Common::ThreadCoreRole::EmuVideo, "Video thread");
       init_from_thread.set_value(is_init);
 
       if (!is_init)

@@ -87,6 +87,11 @@ public final class DirectoryInitialization
 
     areDirectoriesAvailable = true;
 
+    // Must follow areDirectoriesAvailable: this reads getUserDirectory(), which throws until
+    // the flag is set. Still ahead of DOLPHIN_DIRECTORIES_INITIALIZED so consumers observing
+    // that state already see the extracted payload.
+    extractPrimedGunLoadDirectory(context);
+
     checkThemeSettings(context);
 
     directoryState.postValue(DirectoryInitializationState.DOLPHIN_DIRECTORIES_INITIALIZED);
@@ -173,6 +178,51 @@ public final class DirectoryInitialization
     SetGpuDriverDirectories(driverDirectory.getPath(),
             context.getApplicationInfo().nativeLibraryDir);
     DirectoryInitialization.driverPath = driverExtractedDir.getAbsolutePath();
+  }
+
+  /**
+   * Extracts the PrimedGun asset payload (Gecko/Riivolution data and the default arm-cannon
+   * texture pack) from the APK into the user's Load directory.
+   *
+   * Only the two PrimedGun-owned subfolders are touched, so user-added texture packs elsewhere
+   * under Load are left alone. Keyed on the git revision like the Sys extraction, so an upgrade
+   * refreshes the payload but a normal launch does not re-copy it.
+   */
+  private static void extractPrimedGunLoadDirectory(Context context)
+  {
+    final String[] primedGunAssetFolders = {"PrimedGun", "Textures/000_PrimedGunCannon"};
+
+    SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+    String revision = NativeLibrary.GetGitRevision();
+    if (preferences.getString("primedGunLoadVersion", "").equals(revision))
+      return;
+
+    File loadDirectory = new File(getUserDirectory(), "Load");
+    if (!loadDirectory.exists() && !loadDirectory.mkdirs())
+    {
+      Log.error("[DirectoryInitialization] Failed to create " + loadDirectory.getAbsolutePath());
+      return;
+    }
+
+    for (String assetFolder : primedGunAssetFolders)
+    {
+      File output = new File(loadDirectory, assetFolder);
+      File parent = output.getParentFile();
+      if (parent != null && !parent.exists() && !parent.mkdirs())
+      {
+        Log.error("[DirectoryInitialization] Failed to create " + parent.getAbsolutePath());
+        continue;
+      }
+
+      if (output.exists())
+        deleteDirectoryRecursively(output);
+      copyAssetFolder("User" + File.separator + "Load" + File.separator + assetFolder, output,
+              context);
+    }
+
+    SharedPreferences.Editor editor = preferences.edit();
+    editor.putString("primedGunLoadVersion", revision);
+    editor.apply();
   }
 
   private static void deleteDirectoryRecursively(@NonNull final File file)

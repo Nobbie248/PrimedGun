@@ -17,6 +17,8 @@ android {
         buildConfig = true
     }
 
+    flavorDimensions += "device"
+
     compileOptions {
         // Flag to enable support for the new language APIs
         isCoreLibraryDesugaringEnabled = true
@@ -42,7 +44,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "org.dolphinemu.dolphinemu"
+        applicationId = "org.primedgun.primedgun"
         minSdk = 21
         targetSdk = 36
 
@@ -75,7 +77,7 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
 
-            resValue("string", "app_name_suffixed", "Dolphin Emulator")
+            resValue("string", "app_name_suffixed", "PrimedGun")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -87,10 +89,59 @@ android {
         // Signed by debug key disallowing distribution on Play Store.
         // Attaches "debug" suffix to version and package name, allowing installation alongside the release build.
         debug {
-            resValue("string", "app_name_suffixed", "Dolphin Debug")
+            resValue("string", "app_name_suffixed", "PrimedGun Debug")
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             isJniDebuggable = true
+        }
+
+        // Diagnostic release variants. These keep the release application ID so they can be
+        // tested against the same Quest package data/runtime profile as the real release build.
+        // They require the same release signing properties as questRelease.
+        create("releaseNoMinify") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+
+        create("releaseDebuggable") {
+            initWith(getByName("releaseNoMinify"))
+            matchingFallbacks += listOf("release")
+            isDebuggable = true
+            isJniDebuggable = true
+        }
+    }
+
+    productFlavors {
+        create("standard") {
+            dimension = "device"
+            buildConfigField("boolean", "IS_QUEST", "false")
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DENABLE_VR=OFF"
+                }
+            }
+        }
+
+        create("quest") {
+            dimension = "device"
+            applicationIdSuffix = ".quest"
+            versionNameSuffix = "-quest"
+            buildConfigField("boolean", "IS_QUEST", "true")
+            manifestPlaceholders["questSupportedDevices"] = "quest2|quest3|quest3s|questpro"
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DENABLE_VR=ON"
+                }
+            }
         }
     }
 
@@ -111,7 +162,6 @@ android {
                     "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
                     // , "-DENABLE_GENERIC=ON"
                 )
-                abiFilters("arm64-v8a", "x86_64") //, "armeabi-v7a", "x86"
 
                 // Uncomment the line below if you don't want to build the C++ unit tests
                 //targets("main", "hook_impl", "main_hook", "gsl_alloc_hook", "file_redirect_hook")

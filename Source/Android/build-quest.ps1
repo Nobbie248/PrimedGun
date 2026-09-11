@@ -6,7 +6,7 @@ $androidRoot = "C:\Users\Christophe\AppData\Local\Android"
 $androidHome = Join-Path $androidRoot "Sdk"
 $ndkHome = Join-Path $androidRoot "android-ndk-r29"
 $vsCmakeBin = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
-$vsNinjaBin = "C:\Program Files\Microsoft Visual Studio\2022\Community\CommonExtensions\Microsoft\CMake\Ninja"
+$vsNinjaBin = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
 
 if (-not (Test-Path (Join-Path $javaHome "bin\java.exe"))) {
     throw "JDK 17 not found at $javaHome"

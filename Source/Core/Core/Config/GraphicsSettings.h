@@ -240,6 +240,7 @@ static constexpr int GFX_VR_CLEAR_EFB_STEP = 10;
 extern const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW;
 extern const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD;
 extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
+extern const Info<bool> GFX_VR_PIN_EMULATION_CORES;
 
 static constexpr float GFX_VR_SCREEN_DISTANCE_MIN = 0.5f;
 static constexpr float GFX_VR_SCREEN_DISTANCE_MAX = 10.0f;

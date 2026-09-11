@@ -103,8 +103,16 @@ FastTextureSampling = True
 [Settings]
 BackendMultithreading = True
 FastDepthCalc = True
-InternalResolution = 4
-SaveTextureCacheToState = True
+)";
+  // Quest 3 renders ~2064x2208 per eye; 4x internal res on top of that is well past what
+  // the Adreno GPU can fill at 60fps (measured: jitter and slow-motion). 3x is the highest
+  // that holds frame rate on this hardware.
+#ifdef ANDROID
+  file << "InternalResolution = 3\n";
+#else
+  file << "InternalResolution = 4\n";
+#endif
+  file << R"(SaveTextureCacheToState = True
 MSAA = 0x00000001
 SSAA = False
 SWDrawEnd = 100000
@@ -144,8 +152,17 @@ SWDumpTevTexFetches = False
 FrameDumpsResolutionType = 1
 EnableMods = False
 WaitForShadersBeforeStarting = True
-EnableGPUTextureDecoding = True
-ShaderCompilationMode = 0
+)";
+  // Adreno's Vulkan driver segfaults inside vkUpdateDescriptorSets when Dolphin's GPU
+  // texture decoder binds its compute texel buffers. Dolphin assumes every Vulkan backend
+  // supports this path (VulkanContext.cpp sets bSupportsGPUTextureDecoding unconditionally),
+  // so it has to be turned off explicitly for Quest. CPU decoding is slower but correct.
+#ifdef ANDROID
+  file << "EnableGPUTextureDecoding = False\n";
+#else
+  file << "EnableGPUTextureDecoding = True\n";
+#endif
+  file << R"(ShaderCompilationMode = 0
 CPUCull = False
 UseLossless = False
 [Stereoscopy]
@@ -291,8 +308,18 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
   video->Set("ShaderCompilationMode", "0");
   video->Set("MSAA", "0x00000001");
   video->Set("SSAA", "False");
+#ifdef ANDROID
+  // See EnsurePrimedGunDefaultGFXConfig: 4x does not hold 60fps on Quest hardware.
+  video->Set("InternalResolution", "3");
+#else
   video->Set("InternalResolution", "4");
+#endif
+#ifdef ANDROID
+  // See EnsurePrimedGunDefaultGFXConfig: the GPU texture decoder crashes Adreno drivers.
+  video->Set("EnableGPUTextureDecoding", "False");
+#else
   video->Set("EnableGPUTextureDecoding", "True");
+#endif
   video->Set("WaitForShadersBeforeStarting", "True");
   video->Set("SafeTextureCacheColorSamples", "512");
 

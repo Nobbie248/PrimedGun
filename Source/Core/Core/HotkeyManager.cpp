@@ -205,8 +205,12 @@ constexpr std::array<const char*, NUM_HOTKEYS> s_hotkey_labels{{
     _trans("Increase Units Per Meter"),
     _trans("Decrease Lean Back Angle"),
     _trans("Increase Lean Back Angle"),
+    _trans("Toggle Enable Camera Forward"),
     _trans("Decrease Camera Forward"),
     _trans("Increase Camera Forward"),
+    _trans("Toggle Enable Camera Height"),
+    _trans("Decrease Camera Height"),
+    _trans("Increase Camera Height"),
     _trans("Toggle Virtual Screen"),
     _trans("Decrease Screen Distance"),
     _trans("Increase Screen Distance"),
@@ -227,7 +231,9 @@ constexpr std::array<const char*, NUM_HOTKEYS> s_hotkey_labels{{
     _trans("Previous Texture Hash"),
     _trans("Next Texture Hash"),
     _trans("Add/Remove Texture Hash"),
-    _trans("Save Shader Override")
+    _trans("Save Shader Override"),
+
+    _trans("Return to Main Menu")
 }};
 // clang-format on
 static_assert(NUM_HOTKEYS == s_hotkey_labels.size(), "Wrong count of hotkey_labels");
@@ -357,7 +363,8 @@ constexpr std::array<HotkeyGroupInfo, NUM_HOTKEY_GROUPS> s_groups_info = {
      {_trans("GBA Window Size"), HK_GBA_1X, HK_GBA_4X, true},
      {_trans("USB Emulation Devices"), HK_SKYLANDERS_PORTAL, HK_INFINITY_BASE},
      {_trans("VR"), HK_VR_TOGGLE_OPENXR, HK_VR_TOGGLE_REMOVE_CINEMATIC_BARS},
-     {_trans("Shader"), HK_VR_SHADER_TOGGLE_HUNTING, HK_VR_SHADER_SAVE_OVERRIDE}}};
+     {_trans("Shader"), HK_VR_SHADER_TOGGLE_HUNTING, HK_VR_SHADER_SAVE_OVERRIDE},
+     {_trans("Android"), HK_ANDROID_RETURN_TO_MAIN_MENU, HK_ANDROID_RETURN_TO_MAIN_MENU, true}}};
 
 HotkeyManager::HotkeyManager()
 {

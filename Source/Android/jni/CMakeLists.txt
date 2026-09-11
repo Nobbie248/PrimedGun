@@ -27,6 +27,8 @@ add_library(main SHARED
   Input/CoreDevice.h
   Input/EmulatedController.cpp
   Input/EmulatedController.h
+  Input/HotkeyDispatcher.cpp
+  Input/HotkeyDispatcher.h
   Input/InputDetector.cpp
   Input/InputOverrider.cpp
   Input/MappingCommon.cpp

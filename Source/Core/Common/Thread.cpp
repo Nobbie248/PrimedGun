@@ -11,6 +11,15 @@
 #include <unistd.h>
 #endif
 
+#if defined(ANDROID)
+#include <sched.h>
+#include <algorithm>
+#include <cstdio>
+#include <mutex>
+#include <utility>
+#include <vector>
+#endif
+
 #ifdef __APPLE__
 #include <mach/mach.h>
 #elif defined BSD4_4 || defined __FreeBSD__ || defined __OpenBSD__
@@ -187,6 +196,94 @@ void SetCurrentThreadName(const char* name)
 #endif
 }
 
+#endif  // !WIN32
+
+#if defined(ANDROID)
+
+namespace
+{
+// Indices of the device's fastest CPU cores (all cores sharing the top cpufreq tier),
+// in ascending order. Detected once. On Quest 3 this is {2,3,4,5}; cpu0/1 are the
+// slower cores. The app runs as top-app so it may use all of them.
+std::vector<int> s_performance_cores;
+std::once_flag s_performance_cores_once;
+
+void DetectPerformanceCores()
+{
+  std::vector<std::pair<int, long>> cores;  // (cpu index, max frequency)
+  long top_freq = 0;
+  for (int cpu = 0; cpu < 64; ++cpu)
+  {
+    char path[128];
+    std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq",
+                  cpu);
+    FILE* file = std::fopen(path, "r");
+    if (!file)
+      break;  // CPU nodes are contiguous; the first missing one marks the end.
+    long freq = 0;
+    if (std::fscanf(file, "%ld", &freq) == 1 && freq > 0)
+    {
+      cores.emplace_back(cpu, freq);
+      top_freq = std::max(top_freq, freq);
+    }
+    std::fclose(file);
+  }
+
+  for (const auto& [index, freq] : cores)
+  {
+    if (freq == top_freq)
+      s_performance_cores.push_back(index);
+  }
+}
+}  // namespace
+
+int PinCurrentThreadToPerformanceCore(ThreadCoreRole role)
+{
+  std::call_once(s_performance_cores_once, DetectPerformanceCores);
+  if (s_performance_cores.empty())
+    return -1;
+
+  // Hand out distinct cores from the fast tier, top-down (highest core index is usually
+  // the turbo/prime core). EmuCPU gets the fastest, then EmuVideo, then the VR helpers.
+  // If there are fewer fast cores than roles, later roles share (wrap).
+  int slot = 0;
+  switch (role)
+  {
+  case ThreadCoreRole::EmuCPU:
+    slot = 0;
+    break;
+  case ThreadCoreRole::EmuVideo:
+    slot = 1;
+    break;
+  case ThreadCoreRole::VRPacing:
+  case ThreadCoreRole::VRSubmit:
+    // Meta's runtime confines RendererWorker-registered threads to a cpuset (on Quest 3,
+    // {3,4,5}); a pin outside it silently fails. Both light VR workers therefore share the
+    // 3rd fast core - inside that set, and off the EmuCPU/EmuVideo cores (top two).
+    slot = 2;
+    break;
+  }
+  const int count = static_cast<int>(s_performance_cores.size());
+  const int core = s_performance_cores[count - 1 - (slot % count)];
+
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(core, &set);
+  if (sched_setaffinity(0, sizeof(set), &set) != 0)
+    return -1;
+  return core;
+}
+
+#else
+
+int PinCurrentThreadToPerformanceCore(ThreadCoreRole /*role*/)
+{
+  return -1;
+}
+
+#endif  // ANDROID
+
+#ifndef _WIN32
 std::tuple<void*, size_t> GetCurrentThreadStack()
 {
   void* stack_addr;

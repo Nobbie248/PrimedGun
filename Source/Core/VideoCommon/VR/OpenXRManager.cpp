@@ -5,6 +5,21 @@
 
 #include "VideoCommon/VR/OpenXRManager.h"
 
+#if defined(ANDROID)
+#ifndef XR_USE_PLATFORM_ANDROID
+#define XR_USE_PLATFORM_ANDROID
+#endif
+#ifndef XR_USE_TIMESPEC
+#define XR_USE_TIMESPEC
+#endif
+#include <ctime>
+#include <openxr/openxr_platform.h>
+#include <android/log.h>
+#include <mutex>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -72,6 +87,193 @@ static void CopyOpenXRName(char* dst, size_t dst_size, std::string_view src)
   const size_t copy_size = std::min(dst_size - 1, src.size());
   std::memcpy(dst, src.data(), copy_size);
 }
+#if defined(ANDROID)
+std::mutex s_android_openxr_mutex;
+JavaVM* s_android_vm = nullptr;
+jobject s_android_activity = nullptr;
+jobject s_android_application_context = nullptr;
+bool s_android_loader_initialized = false;
+
+bool EnsureAndroidOpenXRLoaderInitialized()
+{
+  std::lock_guard guard{s_android_openxr_mutex};
+
+  if (s_android_loader_initialized)
+    return true;
+
+  if (!s_android_vm || (!s_android_activity && !s_android_application_context))
+  {
+    ERROR_LOG_FMT(OPENXR, "OpenXR: Android VM/context not set before loader initialization.");
+    return false;
+  }
+
+  XrLoaderInitInfoAndroidKHR loader_init{XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
+  loader_init.applicationVM = s_android_vm;
+  // Pass the ACTIVITY as the loader-init context (an Activity is a Context), matching
+  // Meta's samples and known-working OpenXR apps. Meta's runtime hooks this context for
+  // activity-readiness/launch-id tracking; with a plain Application context the runtime
+  // skips the launch-id query, assigns no volumetric-window token, and parks the session
+  // in IDLE forever.
+  loader_init.applicationContext =
+      s_android_activity ? s_android_activity : s_android_application_context;
+
+  PFN_xrInitializeLoaderKHR initialize_loader = nullptr;
+  XrResult result =
+      xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+                            reinterpret_cast<PFN_xrVoidFunction*>(&initialize_loader));
+  if (XR_FAILED(result) || initialize_loader == nullptr)
+  {
+    ERROR_LOG_FMT(OPENXR, "OpenXR: Could not load xrInitializeLoaderKHR ({}).",
+                  static_cast<int>(result));
+    return false;
+  }
+
+  result = initialize_loader(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loader_init));
+  if (XR_FAILED(result))
+  {
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrInitializeLoaderKHR failed ({}).", static_cast<int>(result));
+    return false;
+  }
+
+  s_android_loader_initialized = true;
+  INFO_LOG_FMT(OPENXR, "OpenXR: Android loader initialized.");
+  return true;
+}
+
+uint32_t GetCurrentAndroidThreadId()
+{
+#if defined(SYS_gettid)
+  const long tid = syscall(SYS_gettid);
+#elif defined(__NR_gettid)
+  const long tid = syscall(__NR_gettid);
+#else
+  const long tid = gettid();
+#endif
+  return tid > 0 ? static_cast<uint32_t>(tid) : 0;
+}
+
+XrAndroidThreadTypeKHR ToXrAndroidThreadType(OpenXRManager::AndroidThreadType type)
+{
+  switch (type)
+  {
+  case OpenXRManager::AndroidThreadType::ApplicationMain:
+    return XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR;
+  case OpenXRManager::AndroidThreadType::ApplicationWorker:
+    return XR_ANDROID_THREAD_TYPE_APPLICATION_WORKER_KHR;
+  case OpenXRManager::AndroidThreadType::RendererMain:
+    return XR_ANDROID_THREAD_TYPE_RENDERER_MAIN_KHR;
+  case OpenXRManager::AndroidThreadType::RendererWorker:
+    return XR_ANDROID_THREAD_TYPE_RENDERER_WORKER_KHR;
+  }
+
+  return XR_ANDROID_THREAD_TYPE_APPLICATION_WORKER_KHR;
+}
+
+const char* AndroidThreadTypeName(OpenXRManager::AndroidThreadType type)
+{
+  switch (type)
+  {
+  case OpenXRManager::AndroidThreadType::ApplicationMain:
+    return "application-main";
+  case OpenXRManager::AndroidThreadType::ApplicationWorker:
+    return "application-worker";
+  case OpenXRManager::AndroidThreadType::RendererMain:
+    return "renderer-main";
+  case OpenXRManager::AndroidThreadType::RendererWorker:
+    return "renderer-worker";
+  }
+
+  return "unknown";
+}
+
+bool HasAndroidThreadTypeFallback(OpenXRManager::AndroidThreadType type)
+{
+  return type == OpenXRManager::AndroidThreadType::RendererWorker;
+}
+
+OpenXRManager::AndroidThreadType
+GetAndroidThreadTypeFallback(OpenXRManager::AndroidThreadType type)
+{
+  // Some Quest runtime builds advertise XR_KHR_android_thread_settings but reject
+  // XR_ANDROID_THREAD_TYPE_RENDERER_WORKER_KHR. PrimedGun's pacing thread still does
+  // renderer work, so retry as renderer-main instead of leaving it untagged.
+  if (type == OpenXRManager::AndroidThreadType::RendererWorker)
+    return OpenXRManager::AndroidThreadType::RendererMain;
+
+  return type;
+}
+
+bool TrySetAndroidApplicationThread(XrInstance instance, XrSession session,
+                                    PFN_xrSetAndroidApplicationThreadKHR set_thread,
+                                    OpenXRManager::AndroidThreadType requested_type,
+                                    OpenXRManager::AndroidThreadType type, uint32_t thread_id,
+                                    std::string_view label, bool fallback)
+{
+  const XrResult result = set_thread(session, ToXrAndroidThreadType(type), thread_id);
+  const char* label_data = label.empty() ? "" : label.data();
+  if (XR_FAILED(result))
+  {
+    char result_string[XR_MAX_RESULT_STRING_SIZE]{};
+    xrResultToString(instance, result, result_string);
+    WARN_LOG_FMT(OPENXR,
+                 "OpenXR: xrSetAndroidApplicationThreadKHR failed for {} thread '{}' "
+                 "(requested {}, tid={}): {}",
+                 AndroidThreadTypeName(type), label, AndroidThreadTypeName(requested_type),
+                 thread_id, result_string);
+    __android_log_print(ANDROID_LOG_WARN, "PrimedGun",
+                        "OpenXR: xrSetAndroidApplicationThreadKHR failed for %s thread '%.*s' "
+                        "(requested %s, tid=%u): %s",
+                        AndroidThreadTypeName(type), static_cast<int>(label.size()), label_data,
+                        AndroidThreadTypeName(requested_type), thread_id, result_string);
+    return false;
+  }
+
+  INFO_LOG_FMT(OPENXR, "OpenXR: Registered Android {} thread '{}' (requested {}, tid={}{}).",
+               AndroidThreadTypeName(type), label, AndroidThreadTypeName(requested_type),
+               thread_id, fallback ? ", fallback" : "");
+  __android_log_print(ANDROID_LOG_INFO, "PrimedGun",
+                      "OpenXR: registered Android %s thread '%.*s' (requested %s, tid=%u%s)",
+                      AndroidThreadTypeName(type), static_cast<int>(label.size()), label_data,
+                      AndroidThreadTypeName(requested_type), thread_id,
+                      fallback ? ", fallback" : "");
+  return true;
+}
+
+bool SetAndroidApplicationThreadWithFallback(XrInstance instance, XrSession session,
+                                             PFN_xrSetAndroidApplicationThreadKHR set_thread,
+                                             OpenXRManager::AndroidThreadType type,
+                                             uint32_t thread_id, std::string_view label)
+{
+  if (TrySetAndroidApplicationThread(instance, session, set_thread, type, type, thread_id, label,
+                                     false))
+  {
+    return true;
+  }
+
+  if (!HasAndroidThreadTypeFallback(type))
+    return false;
+
+  const OpenXRManager::AndroidThreadType fallback_type = GetAndroidThreadTypeFallback(type);
+  WARN_LOG_FMT(OPENXR, "OpenXR: Retrying Android thread '{}' registration as {}.", label,
+               AndroidThreadTypeName(fallback_type));
+  return TrySetAndroidApplicationThread(instance, session, set_thread, type, fallback_type,
+                                        thread_id, label, true);
+}
+
+const char* PerfSettingsDomainName(XrPerfSettingsDomainEXT domain)
+{
+  switch (domain)
+  {
+  case XR_PERF_SETTINGS_DOMAIN_CPU_EXT:
+    return "CPU";
+  case XR_PERF_SETTINGS_DOMAIN_GPU_EXT:
+    return "GPU";
+  default:
+    return "unknown";
+  }
+}
+#endif
+
 }  // namespace
 
 // Checks an XrResult and returns false (with an error log) on failure.
@@ -113,6 +315,11 @@ OpenXRManager::~OpenXRManager()
 
 bool OpenXRManager::IsRuntimeExtensionSupported(const char* extension_name)
 {
+#if defined(ANDROID)
+  if (!EnsureAndroidOpenXRLoaderInitialized())
+    return false;
+#endif
+
   if (!extension_name || extension_name[0] == '\0')
     return false;
 
@@ -146,6 +353,11 @@ std::vector<const char*> OpenXRManager::GetAvailableControllerExtensions()
 
 bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensions)
 {
+#if defined(ANDROID)
+  if (!EnsureAndroidOpenXRLoaderInitialized())
+    return false;
+#endif
+
   m_enabled_extensions.clear();
 
   // Log available API layers.
@@ -194,6 +406,21 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
   create_info.enabledExtensionCount = static_cast<uint32_t>(extra_extensions.size());
   create_info.enabledExtensionNames = extra_extensions.data();
 
+#if defined(ANDROID)
+  XrInstanceCreateInfoAndroidKHR android_create_info{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
+  {
+    std::lock_guard guard{s_android_openxr_mutex};
+    if (!s_android_vm || !s_android_activity)
+    {
+      ERROR_LOG_FMT(OPENXR, "OpenXR: Android VM/activity not set before xrCreateInstance.");
+      return false;
+    }
+    android_create_info.applicationVM = s_android_vm;
+    android_create_info.applicationActivity = s_android_activity;
+  }
+  create_info.next = &android_create_info;
+#endif
+
   XrResult result = xrCreateInstance(&create_info, &m_instance);
   if (result == XR_ERROR_API_VERSION_UNSUPPORTED && requested_api_version != XR_API_VERSION_1_0)
   {
@@ -228,8 +455,195 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
                XR_VERSION_MAJOR(props.runtimeVersion), XR_VERSION_MINOR(props.runtimeVersion),
                XR_VERSION_PATCH(props.runtimeVersion));
 
+#if defined(ANDROID)
+  if (IsExtensionEnabled(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
+  {
+    const XrResult thread_settings_result =
+        xrGetInstanceProcAddr(m_instance, "xrSetAndroidApplicationThreadKHR",
+                              &m_xrSetAndroidApplicationThreadKHR);
+    if (XR_FAILED(thread_settings_result) || m_xrSetAndroidApplicationThreadKHR == nullptr)
+    {
+      WARN_LOG_FMT(OPENXR,
+                   "OpenXR: XR_KHR_android_thread_settings enabled but "
+                   "xrSetAndroidApplicationThreadKHR could not be loaded ({}).",
+                   static_cast<int>(thread_settings_result));
+      m_xrSetAndroidApplicationThreadKHR = nullptr;
+    }
+    else
+    {
+      INFO_LOG_FMT(OPENXR, "OpenXR: XR_KHR_android_thread_settings enabled.");
+    }
+  }
+
+  if (IsExtensionEnabled(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME))
+  {
+    const XrResult perf_settings_result =
+        xrGetInstanceProcAddr(m_instance, "xrPerfSettingsSetPerformanceLevelEXT",
+                              &m_xrPerfSettingsSetPerformanceLevelEXT);
+    if (XR_FAILED(perf_settings_result) || m_xrPerfSettingsSetPerformanceLevelEXT == nullptr)
+    {
+      WARN_LOG_FMT(OPENXR,
+                   "OpenXR: XR_EXT_performance_settings enabled but "
+                   "xrPerfSettingsSetPerformanceLevelEXT could not be loaded ({}).",
+                   static_cast<int>(perf_settings_result));
+      m_xrPerfSettingsSetPerformanceLevelEXT = nullptr;
+    }
+    else
+    {
+      INFO_LOG_FMT(OPENXR, "OpenXR: XR_EXT_performance_settings enabled.");
+    }
+  }
+#endif
+
   return true;
 }
+
+#if defined(ANDROID)
+void OpenXRManager::SetAndroidAppInfo(JavaVM* vm, JNIEnv* env, jobject activity)
+{
+  std::lock_guard guard{s_android_openxr_mutex};
+
+  if (s_android_activity)
+    env->DeleteGlobalRef(s_android_activity);
+  if (s_android_application_context)
+    env->DeleteGlobalRef(s_android_application_context);
+
+  s_android_vm = vm;
+  s_android_loader_initialized = false;
+  s_android_activity = activity ? env->NewGlobalRef(activity) : nullptr;
+  s_android_application_context = nullptr;
+
+  if (!activity)
+    return;
+
+  jclass activity_class = env->GetObjectClass(activity);
+  jmethodID get_application_context =
+      env->GetMethodID(activity_class, "getApplicationContext", "()Landroid/content/Context;");
+  jobject application_context = env->CallObjectMethod(activity, get_application_context);
+  if (application_context)
+  {
+    s_android_application_context = env->NewGlobalRef(application_context);
+    env->DeleteLocalRef(application_context);
+  }
+  env->DeleteLocalRef(activity_class);
+}
+
+void OpenXRManager::ClearAndroidAppInfo(JNIEnv* env)
+{
+  std::lock_guard guard{s_android_openxr_mutex};
+
+  if (s_android_activity)
+  {
+    env->DeleteGlobalRef(s_android_activity);
+    s_android_activity = nullptr;
+  }
+  if (s_android_application_context)
+  {
+    env->DeleteGlobalRef(s_android_application_context);
+    s_android_application_context = nullptr;
+  }
+
+  s_android_vm = nullptr;
+  s_android_loader_initialized = false;
+}
+
+bool OpenXRManager::RegisterCurrentAndroidThread(AndroidThreadType type, std::string_view label)
+{
+  if (m_xrSetAndroidApplicationThreadKHR == nullptr)
+    return false;
+
+  const uint32_t thread_id = GetCurrentAndroidThreadId();
+  if (thread_id == 0)
+  {
+    WARN_LOG_FMT(OPENXR, "OpenXR: Could not determine Android thread id for '{}'.", label);
+    return false;
+  }
+
+  {
+    // Threads spawn before the video backend creates the XrSession. Queue and replay from
+    // SetSession so Meta's runtime sees the thread tags it needs to grant big.LITTLE
+    // scheduling and DVFS escalation.
+    //
+    // The m_session check and the push must be inside the same lock the flush uses,
+    // otherwise SetSession's flush could run between our check and our push and leave the
+    // entry orphaned.
+    std::lock_guard guard(m_pending_thread_registrations_mutex);
+    if (m_session == XR_NULL_HANDLE)
+    {
+      m_pending_thread_registrations.push_back({thread_id, type, std::string(label)});
+      INFO_LOG_FMT(OPENXR,
+                   "OpenXR: Deferring Android {} thread '{}' (tid={}) - session not yet created.",
+                   AndroidThreadTypeName(type), label, thread_id);
+      return false;
+    }
+  }
+
+  const auto set_thread =
+      reinterpret_cast<PFN_xrSetAndroidApplicationThreadKHR>(m_xrSetAndroidApplicationThreadKHR);
+  return SetAndroidApplicationThreadWithFallback(m_instance, m_session, set_thread, type,
+                                                 thread_id, label);
+}
+
+void OpenXRManager::FlushPendingAndroidThreadRegistrations()
+{
+  if (m_session == XR_NULL_HANDLE || m_xrSetAndroidApplicationThreadKHR == nullptr)
+    return;
+
+  std::vector<PendingAndroidThreadRegistration> to_flush;
+  {
+    std::lock_guard guard(m_pending_thread_registrations_mutex);
+    to_flush.swap(m_pending_thread_registrations);
+  }
+
+  if (to_flush.empty())
+    return;
+
+  const auto set_thread =
+      reinterpret_cast<PFN_xrSetAndroidApplicationThreadKHR>(m_xrSetAndroidApplicationThreadKHR);
+
+  for (const auto& pending : to_flush)
+  {
+    SetAndroidApplicationThreadWithFallback(m_instance, m_session, set_thread, pending.type,
+                                            pending.thread_id, pending.label);
+  }
+}
+
+bool OpenXRManager::RequestAndroidHighPerformanceLevel()
+{
+  if (m_session == XR_NULL_HANDLE || m_xrPerfSettingsSetPerformanceLevelEXT == nullptr)
+    return false;
+
+  if (!Config::Get(Config::GFX_VR_QUEST_CPU_LEVEL_5_HINT))
+  {
+    INFO_LOG_FMT(OPENXR, "OpenXR: Quest CPU level 5 hint disabled; not requesting sustained high.");
+    return false;
+  }
+
+  const auto set_performance_level = reinterpret_cast<PFN_xrPerfSettingsSetPerformanceLevelEXT>(
+      m_xrPerfSettingsSetPerformanceLevelEXT);
+
+  const auto request_domain = [&](XrPerfSettingsDomainEXT domain) {
+    constexpr XrPerfSettingsLevelEXT level = XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+    const XrResult result = set_performance_level(m_session, domain, level);
+    if (XR_FAILED(result))
+    {
+      char result_string[XR_MAX_RESULT_STRING_SIZE]{};
+      xrResultToString(m_instance, result, result_string);
+      WARN_LOG_FMT(OPENXR, "OpenXR: xrPerfSettingsSetPerformanceLevelEXT failed for {}: {}",
+                   PerfSettingsDomainName(domain), result_string);
+      return false;
+    }
+
+    INFO_LOG_FMT(OPENXR, "OpenXR: Requested {} performance level SUSTAINED_HIGH.",
+                 PerfSettingsDomainName(domain));
+    return true;
+  };
+
+  const bool cpu_ok = request_domain(XR_PERF_SETTINGS_DOMAIN_CPU_EXT);
+  const bool gpu_ok = request_domain(XR_PERF_SETTINGS_DOMAIN_GPU_EXT);
+  return cpu_ok && gpu_ok;
+}
+#endif
 
 bool OpenXRManager::InitializeSystem()
 {
@@ -300,6 +714,13 @@ void OpenXRManager::SetSession(XrSession session)
     WARN_LOG_FMT(OPENXR, "OpenXR: Controller input actions unavailable.");
     ResetInputActionsState();
   }
+
+#if defined(ANDROID)
+  // The pacing/emulation threads register before the backend creates the session; replay
+  // those tags now so the Quest runtime grants big.LITTLE scheduling and DVFS escalation.
+  FlushPendingAndroidThreadRegistrations();
+  RequestAndroidHighPerformanceLevel();
+#endif
 }
 
 void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
@@ -442,6 +863,18 @@ void OpenXRManager::PublishLayers(
 void OpenXRManager::FrameThreadLoop()
 {
   Common::SetCurrentThreadName("OpenXR Pacing");
+#if defined(ANDROID)
+  // Meta's runtime applies big.LITTLE pinning / DVFS escalation to tagged threads.
+  RegisterCurrentAndroidThread(AndroidThreadType::RendererWorker, "OpenXR Pacing");
+  // A fast core, but off the CPU/Video cores so the wakeup-heavy pacing loop doesn't
+  // steal cycles from the emulator's hot threads.
+  if (Config::Get(Config::GFX_VR_PIN_EMULATION_CORES))
+  {
+    const int core = Common::PinCurrentThreadToPerformanceCore(Common::ThreadCoreRole::VRPacing);
+    if (core >= 0)
+      INFO_LOG_FMT(OPENXR, "OpenXR: Pinned pacing thread to performance core cpu{}.", core);
+  }
+#endif
 
   PublishedXRFrame last_frame;
   bool have_frame = false;

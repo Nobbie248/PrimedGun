@@ -465,7 +465,17 @@ void VulkanContext::PopulateBackendInfo(BackendInfo* backend_info)
   backend_info->bSupportsClipControl = true;                // Assumed support.
   backend_info->bSupportsMultithreading = true;             // Assumed support.
   backend_info->bSupportsComputeShaders = true;             // Assumed support.
+#ifdef ANDROID
+  // Adreno's Vulkan driver segfaults inside vkUpdateDescriptorSets when the GPU texture
+  // decoder binds its compute texel buffers (TextureCacheBase::DecodeTextureOnGPU ->
+  // VKGfx::DispatchComputeShader -> StateTracker::UpdateComputeDescriptorSet). Report no
+  // support so TextureCacheBase falls back to CPU decoding: slower, but it does not crash.
+  // This is a hard gate, unlike the EnableGPUTextureDecoding config, which a stale GFX.ini
+  // can still turn back on.
+  backend_info->bSupportsGPUTextureDecoding = false;
+#else
   backend_info->bSupportsGPUTextureDecoding = true;         // Assumed support.
+#endif
   backend_info->bSupportsBitfield = true;                   // Assumed support.
   backend_info->bSupportsPartialDepthCopies = true;         // Assumed support.
   backend_info->bSupportsShaderBinaries = true;             // Assumed support.

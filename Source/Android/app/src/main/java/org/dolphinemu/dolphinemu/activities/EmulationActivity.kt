@@ -44,6 +44,7 @@ import org.dolphinemu.dolphinemu.features.input.model.ControllerInterface
 import org.dolphinemu.dolphinemu.features.input.model.DolphinSensorEventListener
 import org.dolphinemu.dolphinemu.features.settings.model.BooleanSetting
 import org.dolphinemu.dolphinemu.features.settings.model.IntSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
 import org.dolphinemu.dolphinemu.features.settings.model.Settings
 import org.dolphinemu.dolphinemu.features.settings.model.StringSetting
 import org.dolphinemu.dolphinemu.features.settings.ui.MenuTag
@@ -1111,10 +1112,11 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             riivolution: Boolean
         ) {
             ignoreLaunchRequests = true
+            prepareQuestLaunchSettings(false)
             val launcher = Intent(activity, EmulationActivity::class.java)
             launcher.putExtra(EXTRA_SELECTED_GAMES, filePaths)
             launcher.putExtra(EXTRA_RIIVOLUTION, riivolution)
-            activity.startActivity(launcher)
+            startEmulationActivity(activity, launcher)
         }
 
         private fun performLaunchChecks(activity: FragmentActivity, fromIntent: Boolean, continueCallback: Runnable) {
@@ -1165,9 +1167,38 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
 
         private fun launchSystemMenuWithoutChecks(activity: FragmentActivity) {
             ignoreLaunchRequests = true
+            prepareQuestLaunchSettings(true)
             val launcher = Intent(activity, EmulationActivity::class.java)
             launcher.putExtra(EXTRA_SYSTEM_MENU, true)
-            activity.startActivity(launcher)
+            startEmulationActivity(activity, launcher)
+        }
+
+        private fun startEmulationActivity(activity: FragmentActivity, launcher: Intent) {
+            // Opt into the XR compositor so EmulationActivity opens immersively instead of as
+            // another flat panel. Both gates default to true, so VR is on out of the box.
+            if (QuestVrSettings.isLaunchInVrEnabled()) {
+                launcher.addCategory("com.oculus.intent.category.VR")
+                launcher.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                activity.startActivity(launcher)
+                activity.finish()
+            } else {
+                activity.startActivity(launcher)
+            }
+        }
+
+        private fun prepareQuestLaunchSettings(launchSystemMenu: Boolean) {
+            if (!QuestVrSettings.isQuestBuild()) {
+                return
+            }
+
+            val settings = Settings()
+            settings.loadSettings()
+            try {
+                QuestVrSettings.prepareLaunchSettings(settings, launchSystemMenu)
+                settings.saveSettings()
+            } finally {
+                settings.close()
+            }
         }
 
         @JvmStatic

@@ -18,6 +18,10 @@
 
 #include <openxr/openxr.h>
 
+#if defined(ANDROID)
+#include <jni.h>
+#endif
+
 #include "Common/Matrix.h"
 #include "VideoCommon/AbstractFramebuffer.h"
 
@@ -181,6 +185,29 @@ public:
   bool IsSessionRunning() const { return m_session_running.load(std::memory_order_acquire); }
   bool ShouldRender() const { return m_should_render_snapshot.load(std::memory_order_acquire); }
   bool IsExtensionEnabled(const char* extension_name) const;
+
+#if defined(ANDROID)
+  // Publish the JavaVM and Activity the OpenXR loader and runtime need. Must be called
+  // before any other OpenXR entry point on Android.
+  static void SetAndroidAppInfo(JavaVM* vm, JNIEnv* env, jobject activity);
+  static void ClearAndroidAppInfo(JNIEnv* env);
+
+  enum class AndroidThreadType
+  {
+    ApplicationMain,
+    ApplicationWorker,
+    RendererMain,
+    RendererWorker,
+  };
+
+  // Register the calling thread with runtimes that expose XR_KHR_android_thread_settings.
+  // Returns false when the extension is unavailable or the runtime rejects the request.
+  bool RegisterCurrentAndroidThread(AndroidThreadType type, std::string_view label = {});
+
+  // Ask Quest/OpenXR runtimes for the highest available CPU/GPU performance level.
+  bool RequestAndroidHighPerformanceLevel();
+#endif
+
   bool ShouldUseVulkanLegacyProjectionFallback() const;
   bool IsQuestOrVirtualDesktopRuntime() const;
   XrEnvironmentBlendMode GetActiveBlendMode() const { return m_active_blend_mode; }
@@ -282,6 +309,26 @@ private:
   // Non-owning pointer; lifetime managed by the backend (D3DOpenXR).
   IOpenXRSwapchain* m_swapchain = nullptr;
   std::vector<std::string> m_enabled_extensions;
+
+#if defined(ANDROID)
+  PFN_xrVoidFunction m_xrSetAndroidApplicationThreadKHR = nullptr;
+  PFN_xrVoidFunction m_xrPerfSettingsSetPerformanceLevelEXT = nullptr;
+
+  // Threads that called RegisterCurrentAndroidThread before the XrSession existed.
+  // Replayed by FlushPendingAndroidThreadRegistrations() from SetSession().
+  // Reason: Meta's runtime needs threads tagged via XR_KHR_android_thread_settings to
+  // apply big.LITTLE pinning + DVFS escalation; without tags it keeps clocks idle.
+  struct PendingAndroidThreadRegistration
+  {
+    uint32_t thread_id;
+    AndroidThreadType type;
+    std::string label;
+  };
+  std::mutex m_pending_thread_registrations_mutex;
+  std::vector<PendingAndroidThreadRegistration> m_pending_thread_registrations;
+
+  void FlushPendingAndroidThreadRegistrations();
+#endif
 
   XrSessionState m_session_state = XR_SESSION_STATE_UNKNOWN;
   std::atomic<bool> m_session_running{false};

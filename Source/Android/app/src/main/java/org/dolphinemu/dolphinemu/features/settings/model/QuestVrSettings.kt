@@ -131,7 +131,9 @@ object QuestVrSettings {
 
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
         BooleanSetting.GFX_BACKEND_MULTITHREADING.setBoolean(settings, true)
-        IntSetting.GFX_EFB_SCALE.setInt(settings, 4)
+        // 3x is the highest internal resolution that holds 60fps on Quest 3; 4x produces
+        // visible jitter and slow-motion.
+        IntSetting.GFX_EFB_SCALE.setInt(settings, 3)
         BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, false)
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(settings, false)
         lockHeadPoseSetting().setBoolean(settings, false)

@@ -19,7 +19,7 @@ class BaselineProfileGenerator {
 
     @Test
     fun generate() {
-        rule.collect("org.dolphinemu.dolphinemu") {
+        rule.collect("org.primedgun.primedgun") {
             pressHome()
             startActivityAndWait()
 

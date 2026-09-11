@@ -258,6 +258,13 @@ const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirect
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
 const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"},
                                                false};
+#if defined(__ANDROID__)
+constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = true;
+#else
+constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = false;
+#endif
+const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCores"},
+                                            DEFAULT_VR_PIN_EMULATION_CORES};
 // Graphics.Hacks
 
 const Info<bool> GFX_HACK_EFB_ACCESS_ENABLE{{System::GFX, "Hacks", "EFBAccessEnable"}, false};

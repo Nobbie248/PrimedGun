@@ -26,6 +26,22 @@ int CurrentThreadId();
 void SetThreadAffinity(std::thread::native_handle_type thread, u32 mask);
 void SetCurrentThreadAffinity(u32 mask);
 
+// The hottest emulator threads, for big.LITTLE performance-core pinning.
+enum class ThreadCoreRole
+{
+  EmuCPU,    // PowerPC JIT ("CPU thread") - serial, latency-critical: dedicated fast core
+  EmuVideo,  // FIFO/GPU-submit ("Video thread"): its own fast core, no contention with EmuCPU
+  VRPacing,  // OpenXR frame-pacing thread
+  VRSubmit,  // Vulkan async command-submit worker
+};
+
+// Android only: pin the calling thread to one of the device's performance (highest
+// max-frequency) cores, chosen per role so these threads land on distinct fast cores
+// and don't migrate across the big.LITTLE boundary. Cores are classified from
+// cpufreq at runtime (correct on any Quest). Returns the pinned CPU index, or -1 if
+// unavailable (non-Android, topology unreadable, or the syscall failed).
+int PinCurrentThreadToPerformanceCore(ThreadCoreRole role);
+
 void SleepCurrentThread(int ms);
 void SwitchCurrentThread();  // On Linux, this is equal to sleep 1ms
 
