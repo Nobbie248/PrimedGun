@@ -47,6 +47,7 @@
 #include "Core/Host.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/PowerPC.h"
+#include "Core/PrimedGun/Settings.h"
 #include "Core/State.h"
 #include "Core/System.h"
 
@@ -579,6 +580,10 @@ JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_NativeLibrary_Initialize(J
   WiimoteReal::InitAdapterClass();
   UICommon::Init();
   UICommon::InitControllers(WindowSystemInfo(WindowSystemType::Android, nullptr, nullptr, nullptr));
+
+  // There is no settings UI here to load these on our behalf, so restore what the in-headset
+  // menu saved before the first boot can read them.
+  PrimedGun::LoadRuntimeSettings();
 
   AchievementManager::GetInstance().Init(nullptr);
 }

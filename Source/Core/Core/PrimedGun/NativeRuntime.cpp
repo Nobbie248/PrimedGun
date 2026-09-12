@@ -35,6 +35,7 @@
 #include "Core/Core.h"
 #include "Core/HW/CPU.h"
 #include "Core/PrimedGun/FrameCompletionWatchdog.h"
+#include "Core/PrimedGun/Settings.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/System.h"
@@ -8215,6 +8216,14 @@ void UpdateSpringBallInput(const Core::CPUThreadGuard& guard, const RuntimeSetti
 void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
 {
   ++s_frame_counter;
+
+  // Covers frontends that have no settings UI of their own to load these at startup; a no-op
+  // once DolphinQt or the Android host has already loaded them.
+  EnsureRuntimeSettingsLoaded();
+
+  // Persist before the early returns below so a menu save still lands when the change being
+  // saved was to disable the mod, or when the game has already stopped.
+  ProcessPendingVrSettingsSave();
 
   const RuntimeSettings settings = GetRuntimeSettings();
   if (!settings.enabled)

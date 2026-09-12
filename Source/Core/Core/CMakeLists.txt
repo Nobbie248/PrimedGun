@@ -498,6 +498,8 @@ add_library(core
   PrimedGun/FrameCompletionWatchdog.h
   PrimedGun/PPCTrace.cpp
   PrimedGun/PPCTrace.h
+  PrimedGun/Settings.cpp
+  PrimedGun/Settings.h
   PowerPC/BreakPoints.cpp
   PowerPC/BreakPoints.h
   PowerPC/CachedInterpreter/CachedInterpreter_Disassembler.cpp
