@@ -15,6 +15,7 @@
 #include "Core/Core.h"
 #include "Core/HW/ProcessorInterface.h"
 #include "Core/HotkeyManager.h"
+#include "Core/PrimedGun/NativeRuntime.h"
 #include "Core/State.h"
 #include "Core/System.h"
 
@@ -89,6 +90,42 @@ void HotkeyDispatcher::Run()
 
     g_controller_interface.SetCurrentInputChannel(ciface::InputChannel::Host);
     g_controller_interface.UpdateInput();
+
+    // ---------- PrimedGun in-headset menu ----------
+
+    // The menu's Savestates tab raises these from the CPU thread; DolphinQt services them from
+    // its own timer, so this is the Android equivalent. Same HostThreadLock + State:: pattern as
+    // the savestate hotkeys below, but ahead of the hotkey gate because the menu is not a hotkey
+    // and has to keep working when hotkeys are disabled.
+    if (Core::IsRunning(system))
+    {
+      const int state_slot = PrimedGun::GetRuntimeSettings().vr_state_slot;
+
+      if (PrimedGun::ConsumeVrStateLoadRequest())
+      {
+        HostThreadLock guard;
+        State::Load(system, state_slot);
+      }
+      if (PrimedGun::ConsumeVrStateSaveRequest())
+      {
+        HostThreadLock guard;
+        State::Save(system, state_slot);
+      }
+      if (PrimedGun::ConsumeVrStateLoadNewestRequest())
+      {
+        HostThreadLock guard;
+        State::LoadLastSaved(system);
+      }
+      if (PrimedGun::ConsumeVrStateSaveOldestRequest())
+      {
+        HostThreadLock guard;
+        State::SaveFirstSaved(system);
+      }
+
+      // Nothing here mirrors a slot menu, but the request still has to be drained so a stale
+      // value can't be picked up later.
+      PrimedGun::ConsumeVrStateSlotSelectRequest();
+    }
 
     if (!HotkeyManagerEmu::IsEnabled())
       continue;

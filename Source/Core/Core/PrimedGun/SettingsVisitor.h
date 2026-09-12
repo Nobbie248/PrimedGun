@@ -67,5 +67,7 @@ void VisitPersistedSettings(RuntimeSettings& s, Visitor&& visit)
   visit("look_yaw_sensitivity", s.look_yaw_sensitivity);
   visit("snap_turn_enabled", s.snap_turn_enabled);
   visit("snap_turn_degrees", s.snap_turn_degrees);
+  visit("vr_state_slot", s.vr_state_slot);
+  visit("cannon_texture_slot", s.cannon_texture_slot);
 }
 }  // namespace PrimedGun

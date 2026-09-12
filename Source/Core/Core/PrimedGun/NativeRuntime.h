@@ -78,6 +78,10 @@ struct RuntimeSettings
   float look_yaw_sensitivity = 1.0f;
   bool snap_turn_enabled = false;
   int snap_turn_degrees = 45;
+  // Selections the in-headset menu owns. They live here rather than as loose statics so they
+  // persist with the rest of the settings.
+  int vr_state_slot = 1;
+  int cannon_texture_slot = 0;
 };
 
 RuntimeSettings GetRuntimeSettings();

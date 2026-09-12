@@ -293,6 +293,7 @@ constexpr u64 VR_MENU_STATE_CONFIRM_FRAMES = 360;
 constexpr u64 VR_MENU_RESET_CONFIRM_FRAMES = 360;
 constexpr u64 VR_MENU_LONG_PRESS_FRAMES = 60;
 constexpr u32 VR_MENU_STATE_SLOT_COUNT = 10;
+constexpr u32 VR_MENU_CANNON_SLOT_MAX = 5;
 constexpr u32 VR_MENU_STATE_ACTION_LOAD = 1;
 constexpr u32 VR_MENU_STATE_ACTION_SAVE = 2;
 constexpr u32 VR_MENU_STATE_ACTION_LOAD_NEWEST = 3;
@@ -485,7 +486,6 @@ u64 s_vr_menu_saved_notice_until_frame = 0;
 u64 s_vr_menu_input_suppress_until_frame = 0;
 u64 s_vr_menu_long_press_start_frame = 0;
 bool s_vr_menu_long_press_consumed = false;
-u32 s_vr_cannon_texture_slot = 0;
 u64 s_vr_cannon_texture_notice_until_frame = 0;
 bool s_vr_settings_save_requested = false;
 std::atomic_bool s_vr_state_load_requested{false};
@@ -494,7 +494,6 @@ std::atomic_bool s_vr_state_load_newest_requested{false};
 std::atomic_bool s_vr_state_save_oldest_requested{false};
 std::atomic_int s_vr_state_slot_select_requested{0};
 std::atomic_int s_vr_state_slot_from_ui{0};
-u32 s_vr_state_slot = 1;
 u32 s_vr_state_confirm_action = 0;
 u64 s_vr_state_confirm_until_frame = 0;
 u32 s_vr_reset_confirm_action = 0;
@@ -4964,17 +4963,17 @@ void ClearVrStateConfirmation()
   ++s_vr_menu_generation;
 }
 
-void ApplyPendingVrStateSlotFromUi()
+void ApplyPendingVrStateSlotFromUi(RuntimeSettings* settings)
 {
   const int requested_slot = s_vr_state_slot_from_ui.exchange(0, std::memory_order_acq_rel);
   if (requested_slot <= 0)
     return;
 
   const u32 slot = ClampVrStateSlot(requested_slot);
-  if (s_vr_state_slot == slot)
+  if (settings->vr_state_slot == static_cast<int>(slot))
     return;
 
-  s_vr_state_slot = slot;
+  settings->vr_state_slot = static_cast<int>(slot);
   ClearVrStateConfirmation();
   ++s_vr_menu_generation;
 }
@@ -5799,11 +5798,11 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
 
   if (s_vr_menu_tab == VR_MENU_CANNON_TAB)
   {
-    if (s_vr_menu_selected_index <= 5)
+    if (s_vr_menu_selected_index <= VR_MENU_CANNON_SLOT_MAX)
     {
       if (ApplyPrimedGunCannonTextureSlot(s_vr_menu_selected_index))
       {
-        s_vr_cannon_texture_slot = s_vr_menu_selected_index;
+        settings->cannon_texture_slot = static_cast<int>(s_vr_menu_selected_index);
         s_vr_cannon_texture_notice_until_frame = s_frame_counter + 180;
       }
       return;
@@ -5817,7 +5816,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       const u32 slot = s_vr_menu_selected_index - VR_MENU_STATE_ACTION_ROW_COUNT + 1;
       if (slot >= 1 && slot <= VR_MENU_STATE_SLOT_COUNT)
       {
-        s_vr_state_slot = slot;
+        settings->vr_state_slot = static_cast<int>(slot);
         s_vr_state_slot_select_requested.store(static_cast<int>(slot), std::memory_order_release);
         ClearVrStateConfirmation();
       }
@@ -5877,9 +5876,9 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.item_count = VrMenuItemCountForTab(s_vr_menu_tab);
   overlay.calibration_page = s_vr_menu_calibration_page;
   overlay.control_page = s_vr_menu_control_page;
-  overlay.cannon_texture_slot = s_vr_cannon_texture_slot;
+  overlay.cannon_texture_slot = static_cast<uint32_t>(settings.cannon_texture_slot);
   overlay.cannon_texture_notice = s_frame_counter < s_vr_cannon_texture_notice_until_frame;
-  overlay.state_slot = s_vr_state_slot;
+  overlay.state_slot = static_cast<uint32_t>(settings.vr_state_slot);
   overlay.state_confirm_action = s_vr_state_confirm_action;
   overlay.reset_confirm_action = s_vr_reset_confirm_action;
   overlay.weapon_panel_visible = settings.vr_overlays_enabled && previous.weapon_panel_visible;
@@ -5960,7 +5959,7 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
 void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettings* settings,
                   bool prompt_visible)
 {
-  ApplyPendingVrStateSlotFromUi();
+  ApplyPendingVrStateSlotFromUi(settings);
   const bool menu_was_visible = s_vr_menu_visible;
 
   if (!settings->vr_overlays_enabled)
@@ -8511,7 +8510,6 @@ void ResetNativeRuntime()
     patch.applied = false;
   s_vr_state_slot_select_requested.store(0, std::memory_order_release);
   s_vr_state_slot_from_ui.store(0, std::memory_order_release);
-  s_vr_state_slot = 1;
   s_vr_state_confirm_action = 0;
   s_vr_state_confirm_until_frame = 0;
   s_vr_reset_confirm_action = 0;
@@ -8607,6 +8605,10 @@ void SetRuntimeSettings(const RuntimeSettings& settings)
   s_settings.rumble_intensity =
       ClampFinite(s_settings.rumble_intensity, defaults.rumble_intensity, 0.0f, 1.0f);
   s_settings.rumble_hand_mode = std::clamp(s_settings.rumble_hand_mode, 0, 2);
+  // Both slots can arrive from a hand-edited INI, so keep them in range.
+  s_settings.vr_state_slot = static_cast<int>(ClampVrStateSlot(s_settings.vr_state_slot));
+  s_settings.cannon_texture_slot =
+      std::clamp(s_settings.cannon_texture_slot, 0, static_cast<int>(VR_MENU_CANNON_SLOT_MAX));
   s_settings.gun_targeting_distance =
       ClampFinite(s_settings.gun_targeting_distance, defaults.gun_targeting_distance, 1.0f, 500.0f);
   s_settings.gun_targeting_radius =
