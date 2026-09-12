@@ -486,7 +486,7 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   // VR perf diagnostics: once per ~5 s of presented frames, dump where the GPU thread's
   // CPU time went (this runs on the GPU thread only — the worker thread uses the inner
   // SubmitCommandBuffer overload directly).
-  if (has_present)
+  if (has_present || advance_to_next_frame)
   {
     static u64 s_perf_window_start_us = 0;
     static u32 s_perf_window_frames = 0;

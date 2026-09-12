@@ -1256,8 +1256,19 @@ void Presenter::Present(PresentInfo* present_info)
       VR::g_openxr && VR::g_openxr->IsFrameThreadActive();
 #endif
 
+#if defined(ANDROID) && defined(ENABLE_VR)
+  // The XR submission owns frame-resource recycling in direct mode. Presenting
+  // the Android window as well would advance the resource ring twice per frame.
+  const bool openxr_direct_to_hmd =
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_ActiveConfig.vr_android_direct_to_hmd &&
+      VR::g_openxr && VR::g_openxr->IsSessionRunning() && VR::g_openxr->GetSwapchain();
+#else
+  constexpr bool openxr_direct_to_hmd = false;
+#endif
+
   g_gfx->BeginUtilityDrawing();
-  const bool backbuffer_bound = g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
+  const bool backbuffer_bound =
+      !openxr_direct_to_hmd && g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
 
   // Render the XFB to the screen.
   if (backbuffer_bound && m_xfb_entry)
@@ -1299,19 +1310,22 @@ void Presenter::Present(PresentInfo* present_info)
       present_info->present_time_accuracy = PresentInfo::PresentTimeAccuracy::PresentInProgress;
     }
 
-    g_gfx->PresentBackbuffer();
+    if (!openxr_direct_to_hmd)
+      g_gfx->PresentBackbuffer();
   }
 
 #ifdef ENABLE_VR
   // Publish detached content, or end the successfully begun inline frame.
   if (vr_frame_started && !vr_skip_duplicate_publish)
   {
-    VR::OpenXRManager::ScopedVideoFrameHandoff handoff(
-        vr_pacing_active ? VR::g_openxr.get() : nullptr);
-    if (vr_pacing_active)
+    VR::OpenXRManager::ScopedVideoFrameHandoff handoff(vr_pacing_active ? VR::g_openxr.get() :
+                                                                          nullptr);
+    if (vr_pacing_active || openxr_direct_to_hmd)
     {
-      BlitCurrentSourceToOpenXREyes(m_xfb_entry ? m_xfb_entry->texture.get() : nullptr,
-                                    m_xfb_rect);
+      // Keep both stereo and Prime's cinematic eye blits inside the pose/content
+      // handoff. Direct mode also needs this blit with the inline frame loop,
+      // since RenderXFBToScreen was skipped along with the Android backbuffer.
+      BlitCurrentSourceToOpenXREyes(m_xfb_entry ? m_xfb_entry->texture.get() : nullptr, m_xfb_rect);
     }
     if (VR::IOpenXRSwapchain* sc = VR::g_openxr->GetSwapchain())
       sc->SubmitFrame();

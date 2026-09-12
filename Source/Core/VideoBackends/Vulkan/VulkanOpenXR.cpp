@@ -2152,7 +2152,13 @@ bool VulkanOpenXR::SubmitFrame()
 
   // Even an invalid pose must release every acquired image. An empty layer stack
   // clears stale content without taking ownership of the pacing frame protocol.
-  if (!has_acquired_images)
+#if defined(ANDROID)
+  const bool advance_to_next_frame =
+      g_ActiveConfig.vr_android_direct_to_hmd && VR::g_openxr->IsSessionRunning();
+#else
+  constexpr bool advance_to_next_frame = false;
+#endif
+  if (!has_acquired_images && !advance_to_next_frame)
   {
     FinalizePendingXRFrame(std::move(frame));
     return !m_async_frame_finalization_failed.exchange(false, std::memory_order_acq_rel);
@@ -2160,11 +2166,13 @@ bool VulkanOpenXR::SubmitFrame()
 
   StateTracker::GetInstance()->EndRenderPass();
 #if defined(ANDROID)
-  // Submit both eyes together and recycle resources on the direct-to-HMD path.
+  // Recycle once per frame: direct mode owns this here; the mirror path already
+  // advanced in PresentBackbuffer. Even when XR skips rendering, submit recorded
+  // game work in direct mode so command buffers and transient resources can retire.
   // The callback runs after vkQueueSubmit, without waiting for GPU completion.
   m_async_frame_finalization_in_flight.store(true, std::memory_order_release);
   g_command_buffer_mgr->SubmitCommandBuffer(
-      true, false, true, VK_NULL_HANDLE, 0xFFFFFFFF,
+      true, false, advance_to_next_frame, VK_NULL_HANDLE, 0xFFFFFFFF,
       [this, frame = std::move(frame)]() mutable { FinalizePendingXRFrame(std::move(frame)); });
   StateTracker::GetInstance()->InvalidateCachedState();
   return true;
