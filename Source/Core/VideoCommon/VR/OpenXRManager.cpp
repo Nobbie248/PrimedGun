@@ -12,17 +12,17 @@
 #ifndef XR_USE_TIMESPEC
 #define XR_USE_TIMESPEC
 #endif
-#include <ctime>
-#include <openxr/openxr_platform.h>
 #include <android/log.h>
+#include <ctime>
 #include <mutex>
+#include <openxr/openxr_platform.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -56,10 +56,9 @@ struct EulerDeg
 
 static XrQuaternionf MultiplyQuaternions(const XrQuaternionf& a, const XrQuaternionf& b)
 {
-  return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-          a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-          a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+  return {
+      a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+      a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
 }
 
 static EulerDeg QuaternionToEulerDeg(const XrQuaternionf& q)
@@ -70,8 +69,7 @@ static EulerDeg QuaternionToEulerDeg(const XrQuaternionf& q)
   const float roll = std::atan2(sinr_cosp, cosr_cosp);
 
   const float sinp = 2.0f * (q.w * q.y - q.z * q.x);
-  const float pitch = std::abs(sinp) >= 1.0f ? std::copysign(1.57079633f, sinp) :
-                                                std::asin(sinp);
+  const float pitch = std::abs(sinp) >= 1.0f ? std::copysign(1.57079633f, sinp) : std::asin(sinp);
 
   const float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
   const float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
@@ -191,8 +189,7 @@ bool HasAndroidThreadTypeFallback(OpenXRManager::AndroidThreadType type)
   return type == OpenXRManager::AndroidThreadType::RendererWorker;
 }
 
-OpenXRManager::AndroidThreadType
-GetAndroidThreadTypeFallback(OpenXRManager::AndroidThreadType type)
+OpenXRManager::AndroidThreadType GetAndroidThreadTypeFallback(OpenXRManager::AndroidThreadType type)
 {
   // Some Quest runtime builds advertise XR_KHR_android_thread_settings but reject
   // XR_ANDROID_THREAD_TYPE_RENDERER_WORKER_KHR. PrimedGun's pacing thread still does
@@ -229,8 +226,8 @@ bool TrySetAndroidApplicationThread(XrInstance instance, XrSession session,
   }
 
   INFO_LOG_FMT(OPENXR, "OpenXR: Registered Android {} thread '{}' (requested {}, tid={}{}).",
-               AndroidThreadTypeName(type), label, AndroidThreadTypeName(requested_type),
-               thread_id, fallback ? ", fallback" : "");
+               AndroidThreadTypeName(type), label, AndroidThreadTypeName(requested_type), thread_id,
+               fallback ? ", fallback" : "");
   __android_log_print(ANDROID_LOG_INFO, "PrimedGun",
                       "OpenXR: registered Android %s thread '%.*s' (requested %s, tid=%u%s)",
                       AndroidThreadTypeName(type), static_cast<int>(label.size()), label_data,
@@ -286,8 +283,8 @@ const char* PerfSettingsDomainName(XrPerfSettingsDomainEXT domain)
     {                                                                                              \
       char _buf[XR_MAX_RESULT_STRING_SIZE]{};                                                      \
       xrResultToString(m_instance, _r, _buf);                                                      \
-      ERROR_LOG_FMT(OPENXR, "OpenXR: {} failed: {}", #expr, _buf);                                  \
-      return false;                                                                                 \
+      ERROR_LOG_FMT(OPENXR, "OpenXR: {} failed: {}", #expr, _buf);                                 \
+      return false;                                                                                \
     }                                                                                              \
   } while (false)
 
@@ -511,8 +508,7 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
   XrResult result = xrCreateInstance(&create_info, &m_instance);
   if (result == XR_ERROR_API_VERSION_UNSUPPORTED && requested_api_version != XR_API_VERSION_1_0)
   {
-    WARN_LOG_FMT(OPENXR,
-                 "OpenXR: Runtime rejected API version {}.{}.{}; retrying with 1.0.",
+    WARN_LOG_FMT(OPENXR, "OpenXR: Runtime rejected API version {}.{}.{}; retrying with 1.0.",
                  XR_VERSION_MAJOR(requested_api_version), XR_VERSION_MINOR(requested_api_version),
                  XR_VERSION_PATCH(requested_api_version));
     app_info.apiVersion = XR_API_VERSION_1_0;
@@ -522,9 +518,7 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
 
   if (XR_FAILED(result))
   {
-    ERROR_LOG_FMT(OPENXR,
-                  "OpenXR: xrCreateInstance failed ({}).",
-                  static_cast<int>(result));
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrCreateInstance failed ({}).", static_cast<int>(result));
     return false;
   }
 
@@ -546,8 +540,8 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
       IsExtensionEnabled(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME))
   {
     const auto load_foveation_pfn = [this](const char* name, auto* out_pfn) {
-      const XrResult r = xrGetInstanceProcAddr(m_instance, name,
-                                               reinterpret_cast<PFN_xrVoidFunction*>(out_pfn));
+      const XrResult r =
+          xrGetInstanceProcAddr(m_instance, name, reinterpret_cast<PFN_xrVoidFunction*>(out_pfn));
       if (XR_FAILED(r) || *out_pfn == nullptr)
       {
         WARN_LOG_FMT(OPENXR, "OpenXR: XR_FB_foveation enabled but {} could not be loaded ({}).",
@@ -575,9 +569,8 @@ bool OpenXRManager::CreateInstance(const std::vector<const char*>& extra_extensi
 #if defined(ANDROID)
   if (IsExtensionEnabled(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
   {
-    const XrResult thread_settings_result =
-        xrGetInstanceProcAddr(m_instance, "xrSetAndroidApplicationThreadKHR",
-                              &m_xrSetAndroidApplicationThreadKHR);
+    const XrResult thread_settings_result = xrGetInstanceProcAddr(
+        m_instance, "xrSetAndroidApplicationThreadKHR", &m_xrSetAndroidApplicationThreadKHR);
     if (XR_FAILED(thread_settings_result) || m_xrSetAndroidApplicationThreadKHR == nullptr)
     {
       WARN_LOG_FMT(OPENXR,
@@ -697,8 +690,8 @@ bool OpenXRManager::RegisterCurrentAndroidThread(AndroidThreadType type, std::st
 
   const auto set_thread =
       reinterpret_cast<PFN_xrSetAndroidApplicationThreadKHR>(m_xrSetAndroidApplicationThreadKHR);
-  return SetAndroidApplicationThreadWithFallback(m_instance, m_session, set_thread, type,
-                                                 thread_id, label);
+  return SetAndroidApplicationThreadWithFallback(m_instance, m_session, set_thread, type, thread_id,
+                                                 label);
 }
 
 void OpenXRManager::FlushPendingAndroidThreadRegistrations()
@@ -770,8 +763,7 @@ bool OpenXRManager::InitializeSystem()
   const XrResult result = xrGetSystem(m_instance, &system_info, &m_system_id);
   if (XR_FAILED(result))
   {
-    ERROR_LOG_FMT(OPENXR,
-                  "OpenXR: xrGetSystem failed ({}). Is a headset connected?",
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrGetSystem failed ({}). Is a headset connected?",
                   static_cast<int>(result));
     return false;
   }
@@ -800,16 +792,37 @@ bool OpenXRManager::EnumerateViewConfigurations()
 
   m_view_config_views.fill({XR_TYPE_VIEW_CONFIGURATION_VIEW});
   XR_CHECK(xrEnumerateViewConfigurationViews(m_instance, m_system_id,
-                                             XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-                                             view_count, &view_count, m_view_config_views.data()));
+                                             XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, view_count,
+                                             &view_count, m_view_config_views.data()));
+
+  // Bake the user's resolution scale into the recommended sizes so every consumer
+  // (swapchain creation, per-eye blit rects, GetEyeWidth/Height) stays consistent.
+  // Read through Config::Get: this can run before g_ActiveConfig is populated.
+  const float configured_scale = Config::Get(Config::GFX_VR_RESOLUTION_SCALE);
+  const float resolution_scale =
+      std::clamp(std::isfinite(configured_scale) ? configured_scale : 1.0f,
+                 Config::GFX_VR_RESOLUTION_SCALE_MIN, Config::GFX_VR_RESOLUTION_SCALE_MAX);
 
   for (uint32_t i = 0; i < view_count; ++i)
   {
-    INFO_LOG_FMT(OPENXR, "OpenXR: Eye {} recommended {}x{} (max {}x{})", i,
-                 m_view_config_views[i].recommendedImageRectWidth,
-                 m_view_config_views[i].recommendedImageRectHeight,
-                 m_view_config_views[i].maxImageRectWidth,
-                 m_view_config_views[i].maxImageRectHeight);
+    auto& view = m_view_config_views[i];
+    const uint32_t recommended_w = view.recommendedImageRectWidth;
+    const uint32_t recommended_h = view.recommendedImageRectHeight;
+
+    if (std::abs(resolution_scale - 1.0f) > 0.001f)
+    {
+      // Round to a multiple of 4 and clamp to the runtime's limits.
+      const auto scale_dim = [resolution_scale](uint32_t dim, uint32_t max_dim) {
+        const auto scaled = static_cast<uint32_t>(std::lround(dim * resolution_scale / 4.0)) * 4;
+        return std::clamp<uint32_t>(scaled, std::min<uint32_t>(64, max_dim), max_dim);
+      };
+      view.recommendedImageRectWidth = scale_dim(recommended_w, view.maxImageRectWidth);
+      view.recommendedImageRectHeight = scale_dim(recommended_h, view.maxImageRectHeight);
+    }
+
+    INFO_LOG_FMT(OPENXR, "OpenXR: Eye {} recommended {}x{} (max {}x{}), using {}x{} (scale {})", i,
+                 recommended_w, recommended_h, view.maxImageRectWidth, view.maxImageRectHeight,
+                 view.recommendedImageRectWidth, view.recommendedImageRectHeight, resolution_scale);
   }
 
   return true;
@@ -900,9 +913,8 @@ void OpenXRManager::StopFrameThread()
   INFO_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing thread stopped.");
 }
 
-void OpenXRManager::PublishFrame(
-    const std::array<XrCompositionLayerProjectionView, 2>& views,
-    XrCompositionLayerFlags layer_flags)
+void OpenXRManager::PublishFrame(const std::array<XrCompositionLayerProjectionView, 2>& views,
+                                 XrCompositionLayerFlags layer_flags)
 {
   XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   projection.layerFlags = layer_flags;
@@ -914,8 +926,7 @@ void OpenXRManager::PublishFrame(
   PublishLayers(layers);
 }
 
-void OpenXRManager::PublishLayers(
-    const std::vector<XrCompositionLayerBaseHeader*>& layers)
+void OpenXRManager::PublishLayers(const std::vector<XrCompositionLayerBaseHeader*>& layers)
 {
   PublishedXRFrame frame;
   frame.layers.reserve(layers.size());
@@ -928,8 +939,7 @@ void OpenXRManager::PublishLayers(
     PublishedXRLayer layer;
     if (header->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION)
     {
-      const auto* projection =
-          reinterpret_cast<const XrCompositionLayerProjection*>(header);
+      const auto* projection = reinterpret_cast<const XrCompositionLayerProjection*>(header);
       if (projection->views == nullptr || projection->viewCount < 2)
         continue;
 
@@ -945,8 +955,7 @@ void OpenXRManager::PublishLayers(
       layer.kind = PublishedXRLayer::Kind::Projection;
       layer.layer_flags = projection->layerFlags;
       layer.space = projection->space;
-      std::copy_n(projection->views, layer.projection_views.size(),
-                  layer.projection_views.begin());
+      std::copy_n(projection->views, layer.projection_views.size(), layer.projection_views.begin());
     }
     else if (header->type == XR_TYPE_COMPOSITION_LAYER_QUAD)
     {
@@ -958,8 +967,7 @@ void OpenXRManager::PublishLayers(
       static std::atomic<bool> s_logged_unsupported_layer{false};
       if (!s_logged_unsupported_layer.exchange(true, std::memory_order_relaxed))
       {
-        WARN_LOG_FMT(OPENXR,
-                     "OpenXR: asynchronous pacing ignored unsupported layer type {}.",
+        WARN_LOG_FMT(OPENXR, "OpenXR: asynchronous pacing ignored unsupported layer type {}.",
                      static_cast<int>(header->type));
       }
       continue;
@@ -986,10 +994,9 @@ void OpenXRManager::RemovePublishedSwapchain(XrSwapchain swapchain)
     const auto removed = std::erase_if(m_published_frame.layers, [swapchain](const auto& layer) {
       if (layer.kind == PublishedXRLayer::Kind::Quad)
         return layer.quad.subImage.swapchain == swapchain;
-      return std::any_of(layer.projection_views.begin(), layer.projection_views.end(),
-                         [swapchain](const auto& view) {
-                           return view.subImage.swapchain == swapchain;
-                         });
+      return std::any_of(
+          layer.projection_views.begin(), layer.projection_views.end(),
+          [swapchain](const auto& view) { return view.subImage.swapchain == swapchain; });
     });
     if (removed == 0)
       return;
@@ -1059,19 +1066,17 @@ void OpenXRManager::FrameThreadLoop()
       continue;
 
     const bool should_render = m_should_render_snapshot.load(std::memory_order_acquire);
-    const int64_t period_ns =
-        m_predicted_display_period_snapshot.load(std::memory_order_acquire);
+    const int64_t period_ns = m_predicted_display_period_snapshot.load(std::memory_order_acquire);
     const uint64_t content_wait_start_us = Common::Timer::NowUs();
     bool fresh = false;
     if (should_render)
     {
       const int64_t since_wait_ns =
           static_cast<int64_t>(content_wait_start_us - wait_frame_return_us) * 1000;
-      int64_t budget_ns = period_ns - since_wait_ns -
-                          static_cast<int64_t>(end_frame_cost_us * 1000.0) - 1'000'000;
+      int64_t budget_ns =
+          period_ns - since_wait_ns - static_cast<int64_t>(end_frame_cost_us * 1000.0) - 1'000'000;
       budget_ns = std::clamp<int64_t>(budget_ns, 0, period_ns);
-      if (static_cast<int64_t>(previous_cycle_us) * 1000 >
-          period_ns + period_ns / 4)
+      if (static_cast<int64_t>(previous_cycle_us) * 1000 > period_ns + period_ns / 4)
       {
         budget_ns = 0;
       }
@@ -1095,8 +1100,7 @@ void OpenXRManager::FrameThreadLoop()
       }
     }
 
-    for (int spins = 0;
-         m_video_handoff_active.load(std::memory_order_acquire) > 0 && spins < 40;
+    for (int spins = 0; m_video_handoff_active.load(std::memory_order_acquire) > 0 && spins < 40;
          ++spins)
     {
       std::this_thread::sleep_for(std::chrono::microseconds(50));
@@ -1105,8 +1109,8 @@ void OpenXRManager::FrameThreadLoop()
     // The last released image is selected by xrEndFrame. Hold the backend queue
     // lock from this snapshot through submission so a release/publish transaction
     // cannot replace that image while we still hold its previous pose.
-    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
-                                   std::unique_lock<std::mutex>{};
+    auto queue_lock =
+        m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() : std::unique_lock<std::mutex>{};
     {
       std::lock_guard<std::mutex> lock(m_publish_mutex);
       if (m_publish_serial != consumed_serial)
@@ -1132,12 +1136,10 @@ void OpenXRManager::FrameThreadLoop()
       {
         if (published_layer.kind == PublishedXRLayer::Kind::Projection)
         {
-          XrCompositionLayerProjection projection{
-              XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+          XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
           projection.layerFlags = published_layer.layer_flags;
           projection.space = published_layer.space;
-          projection.viewCount =
-              static_cast<uint32_t>(published_layer.projection_views.size());
+          projection.viewCount = static_cast<uint32_t>(published_layer.projection_views.size());
           projection.views = published_layer.projection_views.data();
           projections.emplace_back(projection);
           submitted_layers.push_back(
@@ -1179,8 +1181,8 @@ void OpenXRManager::FrameThreadLoop()
       INFO_LOG_FMT(OPENXR,
                    "XRPacing: {:.1f} cycles/s (fresh={} repeat={} empty={} errors={}) | "
                    "xrWaitFrame={:.2f}ms content_wait={:.2f}ms xrEndFrame={:.2f}ms",
-                   stat_cycles / ((now_us - stats_start_us) / 1'000'000.0), stat_fresh,
-                   stat_repeat, stat_empty, stat_errors, stat_wait_ms / stat_cycles,
+                   stat_cycles / ((now_us - stats_start_us) / 1'000'000.0), stat_fresh, stat_repeat,
+                   stat_empty, stat_errors, stat_wait_ms / stat_cycles,
                    stat_content_wait_ms / stat_cycles, stat_end_ms / stat_cycles);
       stats_start_us = now_us;
       stat_cycles = stat_fresh = stat_repeat = stat_empty = stat_errors = 0;
@@ -1284,8 +1286,7 @@ bool OpenXRManager::InitializeInputActions()
                      XR_ACTION_TYPE_FLOAT_INPUT) ||
       !create_action(&m_action_aim_pose, "aim_pose", "Aim Pose", XR_ACTION_TYPE_POSE_INPUT) ||
       !create_action(&m_action_grip_pose, "grip_pose", "Grip Pose", XR_ACTION_TYPE_POSE_INPUT) ||
-      !create_action(&m_action_haptic, "haptic", "Haptic Output",
-                     XR_ACTION_TYPE_VIBRATION_OUTPUT))
+      !create_action(&m_action_haptic, "haptic", "Haptic Output", XR_ACTION_TYPE_VIBRATION_OUTPUT))
   {
     DestroyInputActions();
     return false;
@@ -1318,16 +1319,15 @@ bool OpenXRManager::InitializeInputActions()
     if (bindings.empty())
       return;
 
-    XrInteractionProfileSuggestedBinding suggested{
-        XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     suggested.interactionProfile = profile_path;
     suggested.countSuggestedBindings = static_cast<uint32_t>(bindings.size());
     suggested.suggestedBindings = bindings.data();
     const XrResult suggest_result = xrSuggestInteractionProfileBindings(m_instance, &suggested);
     if (XR_FAILED(suggest_result))
     {
-      WARN_LOG_FMT(OPENXR, "OpenXR: xrSuggestInteractionProfileBindings('{}') failed ({}).", profile,
-                   static_cast<int>(suggest_result));
+      WARN_LOG_FMT(OPENXR, "OpenXR: xrSuggestInteractionProfileBindings('{}') failed ({}).",
+                   profile, static_cast<int>(suggest_result));
     }
   };
 
@@ -1487,7 +1487,8 @@ bool OpenXRManager::InitializeInputActions()
   result = xrAttachSessionActionSets(m_session, &attach_info);
   if (XR_FAILED(result))
   {
-    ERROR_LOG_FMT(OPENXR, "OpenXR: xrAttachSessionActionSets failed ({}).", static_cast<int>(result));
+    ERROR_LOG_FMT(OPENXR, "OpenXR: xrAttachSessionActionSets failed ({}).",
+                  static_cast<int>(result));
     DestroyInputActions();
     return false;
   }
@@ -1512,8 +1513,7 @@ bool OpenXRManager::InitializeInputActions()
   for (size_t hand = 0; hand < m_input_hand_paths.size(); ++hand)
   {
     create_action_space(m_action_aim_pose, m_input_hand_paths[hand], &m_aim_spaces[hand], "aim");
-    create_action_space(m_action_grip_pose, m_input_hand_paths[hand], &m_grip_spaces[hand],
-                        "grip");
+    create_action_space(m_action_grip_pose, m_input_hand_paths[hand], &m_grip_spaces[hand], "grip");
   }
 
   return true;
@@ -1597,8 +1597,7 @@ void OpenXRManager::UpdateHaptics()
       continue;
 
     const float amplitude = std::clamp(haptics.amplitude[hand], 0.0f, 1.0f);
-    const bool pulse_on =
-        duty >= 0.99f || cycle_time_ms < static_cast<int>(pulse_cycle_ms * duty);
+    const bool pulse_on = duty >= 0.99f || cycle_time_ms < static_cast<int>(pulse_cycle_ms * duty);
 
     XrHapticActionInfo action_info{XR_TYPE_HAPTIC_ACTION_INFO};
     action_info.action = m_action_haptic;
@@ -1611,8 +1610,8 @@ void OpenXRManager::UpdateHaptics()
       vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
       vibration.duration = vibration_duration_ns;
 
-      xrApplyHapticFeedback(
-          m_session, &action_info, reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+      xrApplyHapticFeedback(m_session, &action_info,
+                            reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
       m_haptics_active[hand] = true;
     }
     else if (m_haptics_active[hand])
@@ -1656,8 +1655,7 @@ void OpenXRManager::UpdateInputActions()
       return std::string{};
 
     std::string result(count, '\0');
-    const XrResult string_result =
-        xrPathToString(m_instance, path, count, &count, result.data());
+    const XrResult string_result = xrPathToString(m_instance, path, count, &count, result.data());
     if (XR_FAILED(string_result) || count == 0)
       return std::string{};
 
@@ -1681,8 +1679,8 @@ void OpenXRManager::UpdateInputActions()
       return;
     }
 
-    constexpr XrSpaceLocationFlags required_flags = XR_SPACE_LOCATION_POSITION_VALID_BIT |
-                                                    XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    constexpr XrSpaceLocationFlags required_flags =
+        XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
     pose_state->valid = (location.locationFlags & required_flags) == required_flags;
     if (pose_state->valid)
     {
@@ -1740,8 +1738,8 @@ void OpenXRManager::UpdateInputActions()
       if (XR_FAILED(xrGetActionStateFloat(m_session, &get_info, &state)))
         return 0.0f;
       action_seen |= (state.isActive == XR_TRUE);
-      return state.isActive == XR_TRUE && std::isfinite(state.currentState) ?
-                 state.currentState : 0.0f;
+      return state.isActive == XR_TRUE && std::isfinite(state.currentState) ? state.currentState :
+                                                                              0.0f;
     };
 
     controller.primary_button = get_boolean(m_action_primary_click);
@@ -1827,7 +1825,7 @@ void OpenXRManager::UpdateInputActions()
   }
 
   const std::array<float, 3> tracking_origin_position{home_position.x, home_position.y,
-                                                     home_position.z};
+                                                      home_position.z};
   Common::VR::OpenXRInputState::SetInteractionProfiles(interaction_profiles);
   Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose,
                                                tracking_origin_position);
@@ -1857,7 +1855,8 @@ bool OpenXRManager::CreateReferenceSpace()
 
   char result_string[XR_MAX_RESULT_STRING_SIZE]{};
   xrResultToString(m_instance, result, result_string);
-  WARN_LOG_FMT(OPENXR, "OpenXR: Stage reference space unavailable ({}); falling back to local space.",
+  WARN_LOG_FMT(OPENXR,
+               "OpenXR: Stage reference space unavailable ({}); falling back to local space.",
                result_string);
 
   space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
@@ -1952,13 +1951,12 @@ bool OpenXRManager::WaitFrame()
                                           std::memory_order_release);
   m_predicted_display_period_snapshot.store(m_frame_state.predictedDisplayPeriod,
                                             std::memory_order_release);
-  m_should_render_snapshot.store(m_frame_state.shouldRender == XR_TRUE,
-                                 std::memory_order_release);
+  m_should_render_snapshot.store(m_frame_state.shouldRender == XR_TRUE, std::memory_order_release);
   if (m_frame_state.predictedDisplayPeriod > 0)
   {
-    m_native_display_period_ms.store(
-        static_cast<double>(m_frame_state.predictedDisplayPeriod) / 1'000'000.0,
-        std::memory_order_release);
+    m_native_display_period_ms.store(static_cast<double>(m_frame_state.predictedDisplayPeriod) /
+                                         1'000'000.0,
+                                     std::memory_order_release);
   }
   UpdateInputActions();
   return true;
@@ -2039,15 +2037,13 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 
 bool OpenXRManager::LocateViews()
 {
-  const XrTime snapshot_time =
-      m_predicted_display_time_snapshot.load(std::memory_order_acquire);
+  const XrTime snapshot_time = m_predicted_display_time_snapshot.load(std::memory_order_acquire);
   if (snapshot_time == 0)
     return false;
 
   const XrTime display_time =
       IsFrameThreadActive() ?
-          snapshot_time +
-              m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
+          snapshot_time + m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
           snapshot_time;
   XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
   locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2059,8 +2055,8 @@ bool OpenXRManager::LocateViews()
   m_views.fill({XR_TYPE_VIEW});
   m_eye_views_valid = false;
 
-  const XrResult locate_result = xrLocateViews(m_session, &locate_info, &view_state,
-                                              view_count, &view_count, m_views.data());
+  const XrResult locate_result =
+      xrLocateViews(m_session, &locate_info, &view_state, view_count, &view_count, m_views.data());
   if (XR_FAILED(locate_result))
   {
     std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
@@ -2070,13 +2066,16 @@ bool OpenXRManager::LocateViews()
 
   constexpr XrViewStateFlags required_flags =
       XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
-  m_eye_views_valid = view_count >= 2 && (view_state.viewStateFlags & required_flags) == required_flags;
+  m_eye_views_valid =
+      view_count >= 2 && (view_state.viewStateFlags & required_flags) == required_flags;
   if (!m_eye_views_valid)
   {
     std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
     m_input_eye_views_valid = false;
-    WARN_LOG_FMT(OPENXR, "OpenXR: Skipping projection layer because view pose is invalid (flags={:#x}, views={}).",
-                 static_cast<unsigned int>(view_state.viewStateFlags), view_count);
+    WARN_LOG_FMT(
+        OPENXR,
+        "OpenXR: Skipping projection layer because view pose is invalid (flags={:#x}, views={}).",
+        static_cast<unsigned int>(view_state.viewStateFlags), view_count);
     return true;
   }
 
@@ -2094,10 +2093,9 @@ bool OpenXRManager::LocateViews()
     }
     else
     {
-      m_home_position = {
-          0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x),
-          0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y),
-          0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z)};
+      m_home_position = {0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x),
+                         0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y),
+                         0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z)};
     }
     m_home_set = true;
   }
@@ -2106,8 +2104,10 @@ bool OpenXRManager::LocateViews()
   {
     const float center_x = 0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
     const float center_z = 0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
-    const float old_x = m_home_set ? m_home_position.x : (m_reference_space_is_stage ? 0.0f : center_x);
-    const float old_z = m_home_set ? m_home_position.z : (m_reference_space_is_stage ? 0.0f : center_z);
+    const float old_x =
+        m_home_set ? m_home_position.x : (m_reference_space_is_stage ? 0.0f : center_x);
+    const float old_z =
+        m_home_set ? m_home_position.z : (m_reference_space_is_stage ? 0.0f : center_z);
     m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
     m_home_position.x = old_x;
     m_home_position.z = old_z;
@@ -2224,13 +2224,11 @@ bool OpenXRManager::ShouldUseVulkanLegacyProjectionFallback() const
 bool OpenXRManager::IsQuestOrVirtualDesktopRuntime() const
 {
   std::string runtime = m_runtime_name;
-  std::transform(runtime.begin(), runtime.end(), runtime.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
+  std::transform(runtime.begin(), runtime.end(), runtime.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
   return runtime.find("quest") != std::string::npos ||
-         runtime.find("oculus") != std::string::npos ||
-         runtime.find("meta") != std::string::npos ||
+         runtime.find("oculus") != std::string::npos || runtime.find("meta") != std::string::npos ||
          runtime.find("virtual desktop") != std::string::npos;
 }
 
@@ -2239,10 +2237,9 @@ void OpenXRManager::RequestRecenter()
   m_recenter_requested.store(true, std::memory_order_release);
 }
 
-void OpenXRManager::GetEyeProjectionRows(
-    float units_per_meter,
-    std::array<std::array<float, 4>, 4>& out_proj_rows,
-    std::array<std::array<float, 4>, 2>& out_z_rows) const
+void OpenXRManager::GetEyeProjectionRows(float units_per_meter,
+                                         std::array<std::array<float, 4>, 4>& out_proj_rows,
+                                         std::array<std::array<float, 4>, 2>& out_z_rows) const
 {
   static uint64_t s_proj_log_counter = 0;
   ++s_proj_log_counter;
@@ -2262,16 +2259,13 @@ void OpenXRManager::GetEyeProjectionRows(
     }
     else
     {
-      m_home_position.x =
-          0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
-      m_home_position.y =
-          0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
-      m_home_position.z =
-          0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
+      m_home_position.x = 0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
+      m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
+      m_home_position.z = 0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
     }
     m_home_set = true;
-    INFO_LOG_FMT(OPENXR, "OpenXR: Home position set to ({:.4f},{:.4f},{:.4f})",
-                 m_home_position.x, m_home_position.y, m_home_position.z);
+    INFO_LOG_FMT(OPENXR, "OpenXR: Home position set to ({:.4f},{:.4f},{:.4f})", m_home_position.x,
+                 m_home_position.y, m_home_position.z);
   }
 
   for (uint32_t eye = 0; eye < 2; ++eye)
@@ -2283,8 +2277,7 @@ void OpenXRManager::GetEyeProjectionRows(
     if (lean_back_rad != 0.0f)
     {
       const float half_angle = 0.5f * lean_back_rad;
-      const XrQuaternionf lean_back_quat = {std::sin(half_angle), 0.0f, 0.0f,
-                                            std::cos(half_angle)};
+      const XrQuaternionf lean_back_quat = {std::sin(half_angle), 0.0f, 0.0f, std::cos(half_angle)};
       q = MultiplyQuaternions(q, lean_back_quat);
     }
 
@@ -2316,10 +2309,10 @@ void OpenXRManager::GetEyeProjectionRows(
     const float r20 = xz + wy, r21 = yz - wx, r22 = 1.0f - x2 - y2;
 
     // --- Asymmetric projection from FOV tangent angles ---
-    const float tanL = tanf(fov.angleLeft);   // negative
+    const float tanL = tanf(fov.angleLeft);       // negative
     const float tanR_val = tanf(fov.angleRight);  // positive
-    const float tanU = tanf(fov.angleUp);     // positive
-    const float tanD = tanf(fov.angleDown);   // negative
+    const float tanU = tanf(fov.angleUp);         // positive
+    const float tanD = tanf(fov.angleDown);       // negative
 
     const float inv_w = 1.0f / (tanR_val - tanL);
     const float inv_h = 1.0f / (tanU - tanD);
@@ -2373,18 +2366,18 @@ void OpenXRManager::GetEyeProjectionRows(
     {
       INFO_LOG_FMT(
           VIDEO,
-          "OpenXR DBG proj #{} eye{}: upm={:.3f} eye_pos_m=({:.4f},{:.4f},{:.4f}) eye_rel_u=({:.3f},"
+          "OpenXR DBG proj #{} eye{}: upm={:.3f} eye_pos_m=({:.4f},{:.4f},{:.4f}) "
+          "eye_rel_u=({:.3f},"
           "{:.3f},{:.3f}) row0=({:.5f},{:.5f},{:.5f},{:.5f}) row1=({:.5f},{:.5f},{:.5f},{:.5f}) "
           "zrow=({:.5f},{:.5f},{:.5f},{:.5f})",
-          s_proj_log_counter, eye, s, eye_pos_xr.x, eye_pos_xr.y, eye_pos_xr.z, ex, ey, ez,
-          c0x, c0y, c0z, c0w, c1x, c1y, c1z, c1w, r02, r12, r22, zw);
+          s_proj_log_counter, eye, s, eye_pos_xr.x, eye_pos_xr.y, eye_pos_xr.z, ex, ey, ez, c0x,
+          c0y, c0z, c0w, c1x, c1y, c1z, c1w, r02, r12, r22, zw);
     }
   }
 }
 
 void OpenXRManager::GetRawEyeProjectionRows(
-    float units_per_meter,
-    std::array<std::array<float, 4>, 4>& out_proj_rows) const
+    float units_per_meter, std::array<std::array<float, 4>, 4>& out_proj_rows) const
 {
   const float s = std::max(units_per_meter, 0.0001f);
 

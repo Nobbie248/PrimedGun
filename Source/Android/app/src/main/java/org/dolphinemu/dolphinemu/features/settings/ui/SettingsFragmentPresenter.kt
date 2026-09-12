@@ -1443,6 +1443,31 @@ class SettingsFragmentPresenter(
     }
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
+        if (QuestVrSettings.isQuestBuild()) {
+            sl.add(HeaderSetting(context, R.string.quest_rendering, 0))
+            sl.add(SwitchSetting(
+                context, QuestVrSettings.useVulkanMultiviewSetting(),
+                R.string.quest_multiview, R.string.quest_multiview_description
+            ))
+            sl.add(FloatSliderSetting(
+                context, QuestVrSettings.resolutionScaleSetting(),
+                R.string.quest_resolution_scale, R.string.quest_resolution_scale_description,
+                0.5f, 2.0f, "", 0.05f, true
+            ))
+            sl.add(SingleChoiceSetting(
+                context, QuestVrSettings.foveationLevelSetting(),
+                R.string.quest_foveation_level, R.string.quest_foveation_level_description,
+                R.array.questFoveationLevelEntries, R.array.questFoveationLevelValues
+            ))
+            sl.add(SwitchSetting(
+                context, QuestVrSettings.dynamicFoveationSetting(),
+                R.string.quest_dynamic_foveation, R.string.quest_dynamic_foveation_description
+            ))
+            sl.add(SwitchSetting(
+                context, QuestVrSettings.foveateEfbSetting(),
+                R.string.quest_foveate_efb, R.string.quest_foveate_efb_description
+            ))
+        }
         sl.add(HeaderSetting(context, R.string.graphics_general, 0))
         sl.add(
             StringSingleChoiceSetting(

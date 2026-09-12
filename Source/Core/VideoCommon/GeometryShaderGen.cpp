@@ -44,6 +44,231 @@ bool geometry_shader_uid_data::IsPassthrough() const
   return false;
 }
 
+// Shared by geometry and multiview vertex shaders to preserve PrimedGun's HUD and depth ordering.
+// The caller provides VS_OUTPUT f and int eye after the console viewport fixups.
+void GenerateVRProjection(ShaderCode& out, APIType api_type, const ShaderHostConfig& host_config,
+                          bool vertex_shader)
+{
+  // OpenXR head-tracked per-eye projection.
+  // cstereo.w is the perspective flag set by GeometryShaderManager:
+  //   1.0 = perspective draw - apply head-tracked per-eye HMD projection
+  //   0.25 = fullscreen mono override - leave f.pos from VS untouched
+  //   0.0 = orthographic/fullscreen draw - leave f.pos from VS untouched
+  //
+  // ceye_proj has head rotation and eye position baked in:
+  //   x_clip = dot(ceye_proj[eye*2],   viewPos)
+  //   y_clip = dot(ceye_proj[eye*2+1], viewPos)
+  //
+  // cvr_eye_z gives eye-space depth for correct perspective divide and depth:
+  //   z_eye = dot(cvr_eye_z[eye], viewPos)
+  //   f.pos.w = -z_eye,  f.pos.z = P[2][2]*z_eye + P[2][3]
+  out.Write("\tif (" I_STEREOPARAMS ".w > 0.5f)\n");
+  out.Write("\t{{\n");
+  if (api_type == APIType::Vulkan)
+  {
+    out.Write("\t\tif (" I_STEREOPARAMS ".y > 0.5f)\n");
+    out.Write("\t\t{{\n");
+    out.Write("\t\t\tfloat4 eye_proj_x = " I_LEGACY_EYE_PROJ_X "[eye];\n");
+    out.Write("\t\t\tfloat4 eye_proj_y = " I_LEGACY_EYE_PROJ_Y "[eye];\n");
+    out.Write("\t\t\tf.pos.x = eye_proj_x.z * f.pos.x + eye_proj_x.x - eye_proj_x.y * f.pos.w;\n");
+    out.Write("\t\t\tf.pos.y = eye_proj_y.z * f.pos.y + eye_proj_y.x - eye_proj_y.y * f.pos.w;\n");
+    if (!host_config.fast_depth_calc)
+    {
+      out.Write("\t\t\tf.clipPos.x = eye_proj_x.z * f.clipPos.x + eye_proj_x.x - eye_proj_x.y * "
+                "f.clipPos.w;\n");
+      out.Write("\t\t\tf.clipPos.y = eye_proj_y.z * f.clipPos.y + eye_proj_y.x - eye_proj_y.y * "
+                "f.clipPos.w;\n");
+    }
+    out.Write("\t\t}}\n");
+    out.Write("\t\telse\n");
+    out.Write("\t\t{{\n");
+  }
+  out.Write("\t\tfloat4 row0 = " I_EYE_PROJ "[eye * 2 + 0];\n");
+  out.Write("\t\tfloat4 row1 = " I_EYE_PROJ "[eye * 2 + 1];\n");
+  out.Write("\t\tfloat4 zrow = " I_VR_EYE_Z "[eye];\n");
+  // Mirror the world X when the game's projection flips X (stereoparams.x = -1).
+  // This must happen BEFORE the VR projection so the per-eye IPD offset (baked
+  // into the projection rows' w component) is not affected — only the world
+  // geometry is mirrored.  This preserves correct stereo while reversing the
+  // triangle winding to match the game's adjusted cull mode.
+  out.Write("\t\tfloat4 vp = f.viewPos;\n");
+  out.Write("\t\tvp.x *= " I_STEREOPARAMS ".x;\n");
+  out.Write("\t\tvp.w *= " I_STEREOPARAMS ".z;\n");
+  out.Write("\t\tfloat z_eye = dot(zrow, vp);\n");
+  out.Write("\t\tfloat clip_x = dot(row0, vp);\n");
+  out.Write("\t\tfloat clip_y = dot(row1, vp);\n");
+  out.Write("\t\tfloat clip_w = -z_eye;\n");
+  out.Write("\t\tfloat clip_z = " I_VR_DEPTH ".x * z_eye + " I_VR_DEPTH ".y;\n");
+  if (!host_config.fast_depth_calc)
+    out.Write("\t\tf.clipPos = float4(clip_x, clip_y, clip_z, clip_w);\n");
+  out.Write("\t\tf.pos = float4(clip_x, clip_y, clip_z, clip_w);\n");
+  out.Write("\t\tf.pos.z = f.pos.w * " I_VR_DEPTH ".w - f.pos.z * " I_VR_DEPTH ".z;\n");
+  if (!host_config.backend_clip_control)
+    out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
+  out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
+  out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+  // VR replaces pos entirely — recalculate clip distances for the new position.
+  if (host_config.backend_depth_clamp)
+  {
+    if (api_type == APIType::Vulkan)
+      out.Write("\t\t{0}clipDist0 = 1.0;\n\t\t{0}clipDist1 = 1.0;\n", vertex_shader ? "" : "f.");
+    else
+      out.Write("\t\t{0}clipDist0 = f.pos.z + f.pos.w;\n\t\t{0}clipDist1 = -f.pos.z;\n",
+                vertex_shader ? "" : "f.");
+  }
+  if (api_type == APIType::Vulkan)
+    out.Write("\t\t}}\n");
+  out.Write("\t}}\n");
+
+  // Head-locked perspective HUD: preserve the game's original perspective GUI/model
+  // geometry, then place the transformed object in head-locked HMD space.
+  out.Write("\telse if (" I_STEREOPARAMS ".w < -2.5f)\n");
+  out.Write("\t{{\n");
+  out.Write("\t\tfloat hud_game_w = (abs(f.pos.w) > 1.0e-6) ? f.pos.w : 1.0e-6;\n");
+  out.Write("\t\tfloat hud_game_ndc_z = clamp(f.pos.z / hud_game_w, -1.0, 1.0);\n");
+  out.Write("\t\tfloat4 hudPos = float4(\n");
+  out.Write("\t\t\tf.viewPos.x * " I_HEAD_PARAMS ".y + " I_VR_SCREEN ".x,\n");
+  out.Write("\t\t\tf.viewPos.y * " I_HEAD_PARAMS ".z + " I_VR_SCREEN ".y,\n");
+  out.Write("\t\t\tf.viewPos.z * " I_HEAD_PARAMS ".w + " I_VR_SCREEN ".z,\n");
+  out.Write("\t\t\t1.0);\n");
+  out.Write("\t\thudPos.z = min(hudPos.z, -0.1 * max(" I_VR_DEPTH ".w, 0.001));\n");
+  out.Write("\t\tfloat4 row0 = " I_HEAD_PROJ "[eye * 2 + 0];\n");
+  out.Write("\t\tfloat4 row1 = " I_HEAD_PROJ "[eye * 2 + 1];\n");
+  out.Write("\t\tf.pos.x = dot(row0, hudPos);\n");
+  out.Write("\t\tf.pos.y = dot(row1, hudPos);\n");
+  out.Write("\t\tf.pos.w = max(-hudPos.z, 0.001);\n");
+  out.Write("\t\tf.pos.z = hud_game_ndc_z * f.pos.w;\n");
+  if (!host_config.fast_depth_calc)
+    out.Write("\t\tf.clipPos = f.pos;\n");
+  out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
+  out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+  if (host_config.backend_depth_clamp)
+  {
+    if (api_type == APIType::Vulkan || api_type == APIType::OpenGL)
+      out.Write("\t\t{0}clipDist0 = 1.0;\n\t\t{0}clipDist1 = 1.0;\n", vertex_shader ? "" : "f.");
+    else
+      out.Write("\t\t{0}clipDist0 = f.pos.z + f.pos.w;\n\t\t{0}clipDist1 = -f.pos.z;\n",
+                vertex_shader ? "" : "f.");
+  }
+  out.Write("\t}}\n");
+
+  // Head-locked VR: 2D content on a virtual screen that follows head movements.
+  // cstereo.w == -2.0 signals head-locked draw.
+  // Uses unrotated (raw) per-eye projection — no head rotation baked in.
+  out.Write("\telse if (" I_STEREOPARAMS ".w < -1.5f)\n");
+  out.Write("\t{{\n");
+  if (api_type == APIType::Vulkan)
+  {
+    out.Write("\t\tfloat safe_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
+              "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
+    out.Write("\t\tfloat ndc_x = clamp(f.pos.x / safe_w, -1.0, 1.0);\n");
+    out.Write("\t\tfloat ndc_y = clamp(f.pos.y / safe_w, -1.0, 1.0);\n");
+    out.Write("\t\tfloat ndc_z = clamp(f.pos.z / safe_w, -1.0, 1.0);\n");
+  }
+  else
+  {
+    out.Write("\t\tfloat ndc_x = f.pos.x / f.pos.w;\n");
+    out.Write("\t\tfloat ndc_y = f.pos.y / f.pos.w;\n");
+    out.Write("\t\tfloat ndc_z = f.pos.z / f.pos.w;\n");
+  }
+  out.Write("\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
+  out.Write("\t\tfloat4 screenPos = float4(\n");
+  out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x,\n");
+  out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y,\n");
+  out.Write("\t\t\t-" I_VR_SCREEN ".z + ndc_z_clamped * " I_VR_DEPTH ".z,\n");
+  out.Write("\t\t\t1.0);\n");
+  out.Write("\t\tfloat curve = max(" I_HEAD_PARAMS ".x, 0.0);\n");
+  out.Write("\t\tfloat horizontal = 0.5 * (ndc_x * ndc_x);\n");
+  out.Write("\t\tfloat curve_push = curve * horizontal * " I_VR_SCREEN ".z * 0.25;\n");
+  out.Write("\t\tcurve_push = min(curve_push, " I_VR_SCREEN ".z * 0.8);\n");
+  out.Write("\t\tscreenPos.z += curve_push;\n");
+  out.Write("\t\tfloat4 row0 = " I_HEAD_PROJ "[eye * 2 + 0];\n");
+  out.Write("\t\tfloat4 row1 = " I_HEAD_PROJ "[eye * 2 + 1];\n");
+  out.Write("\t\tf.pos.x = dot(row0, screenPos);\n");
+  out.Write("\t\tf.pos.y = dot(row1, screenPos);\n");
+  out.Write("\t\tf.pos.w = max(-screenPos.z, 0.001);\n");
+  out.Write("\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n");
+  out.Write("\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n");
+  out.Write("\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n");
+  out.Write("\t\tlayer_step = min(layer_step, max_safe_step);\n");
+  out.Write("\t\tf.pos.z = f.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * 0.0001);\n");
+  if (!host_config.fast_depth_calc)
+    out.Write("\t\tf.clipPos = f.pos;\n");
+  if (!host_config.backend_clip_control)
+    out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
+  out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
+  out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+  if (host_config.backend_depth_clamp)
+  {
+    if (api_type == APIType::Vulkan)
+      out.Write("\t\t{0}clipDist0 = 1.0;\n\t\t{0}clipDist1 = 1.0;\n", vertex_shader ? "" : "f.");
+    else
+      out.Write("\t\t{0}clipDist0 = f.pos.z + f.pos.w;\n\t\t{0}clipDist1 = -f.pos.z;\n",
+                vertex_shader ? "" : "f.");
+  }
+  out.Write("\t}}\n");
+
+  // Orthographic VR: place 2D content (menus, FMV, HUD) on a virtual screen plane.
+  // cstereo.w == -1.0 signals orthographic draw with VR active.
+  // Map NDC from the ortho projection to a 3D position on the virtual screen,
+  // then re-project through the per-eye HMD projection (world-fixed).
+  out.Write("\telse if (" I_STEREOPARAMS ".w < -0.5f)\n");
+  out.Write("\t{{\n");
+  if (api_type == APIType::Vulkan)
+  {
+    out.Write("\t\tfloat safe_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
+              "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
+    out.Write("\t\tfloat ndc_x = clamp(f.pos.x / safe_w, -1.0, 1.0);\n");
+    out.Write("\t\tfloat ndc_y = clamp(f.pos.y / safe_w, -1.0, 1.0);\n");
+    out.Write("\t\tfloat ndc_z = clamp(f.pos.z / safe_w, -1.0, 1.0);\n");
+  }
+  else
+  {
+    out.Write("\t\tfloat ndc_x = f.pos.x / f.pos.w;\n");
+    out.Write("\t\tfloat ndc_y = f.pos.y / f.pos.w;\n");
+    out.Write("\t\tfloat ndc_z = f.pos.z / f.pos.w;\n");
+  }
+  out.Write("\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
+  // cvr_screen = {half_w, half_h, distance, ortho_layer}
+  out.Write("\t\tfloat4 screenPos = float4(\n");
+  out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x,\n");
+  out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y,\n");
+  out.Write("\t\t\t-" I_VR_SCREEN ".z + ndc_z_clamped * " I_VR_DEPTH ".z,\n");
+  out.Write("\t\t\t1.0);\n");
+  out.Write("\t\tfloat4 row0 = " I_EYE_PROJ "[eye * 2 + 0];\n");
+  out.Write("\t\tfloat4 row1 = " I_EYE_PROJ "[eye * 2 + 1];\n");
+  out.Write("\t\tfloat4 zrow = " I_VR_EYE_Z "[eye];\n");
+  out.Write("\t\tfloat z_eye = dot(zrow, screenPos);\n");
+  out.Write("\t\tfloat clip_x = dot(row0, screenPos);\n");
+  out.Write("\t\tfloat clip_y = dot(row1, screenPos);\n");
+  out.Write("\t\tfloat clip_w = -z_eye;\n");
+  if (!host_config.fast_depth_calc)
+    out.Write("\t\tf.clipPos = float4(clip_x, clip_y, 0.0, clip_w);\n");
+  out.Write("\t\tf.pos = float4(clip_x, clip_y, 0.0, clip_w);\n");
+  // Depth: use per-draw layer counter to spread ortho elements apart.
+  // Later draws (higher layer index) get smaller z = closer to camera.
+  // cvr_depth.x = layer offset (between draws); cvr_depth.y = element depth (within draw).
+  out.Write("\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n");
+  out.Write("\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n");
+  out.Write("\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n");
+  out.Write("\t\tlayer_step = min(layer_step, max_safe_step);\n");
+  out.Write("\t\tf.pos.z = f.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * " I_VR_DEPTH
+            ".y);\n");
+  if (!host_config.backend_clip_control)
+    out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
+  out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
+  out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
+  if (host_config.backend_depth_clamp)
+  {
+    if (api_type == APIType::Vulkan)
+      out.Write("\t\t{0}clipDist0 = 1.0;\n\t\t{0}clipDist1 = 1.0;\n", vertex_shader ? "" : "f.");
+    else
+      out.Write("\t\t{0}clipDist0 = f.pos.z + f.pos.w;\n\t\t{0}clipDist1 = -f.pos.z;\n",
+                vertex_shader ? "" : "f.");
+  }
+  out.Write("\t}}\n");
+}
+
 GeometryShaderUid GetGeometryShaderUid(PrimitiveType primitive_type)
 {
   GeometryShaderUid out;
@@ -256,229 +481,7 @@ ShaderCode GenerateGeometryShaderCode(APIType api_type, const ShaderHostConfig& 
   {
     if (host_config.vr_stereo)
     {
-      // OpenXR head-tracked per-eye projection.
-      // cstereo.w is the perspective flag set by GeometryShaderManager:
-      //   1.0 = perspective draw - apply head-tracked per-eye HMD projection
-      //   0.25 = fullscreen mono override - leave f.pos from VS untouched
-      //   0.0 = orthographic/fullscreen draw - leave f.pos from VS untouched
-      //
-      // ceye_proj has head rotation and eye position baked in:
-      //   x_clip = dot(ceye_proj[eye*2],   viewPos)
-      //   y_clip = dot(ceye_proj[eye*2+1], viewPos)
-      //
-      // cvr_eye_z gives eye-space depth for correct perspective divide and depth:
-      //   z_eye = dot(cvr_eye_z[eye], viewPos)
-      //   f.pos.w = -z_eye,  f.pos.z = P[2][2]*z_eye + P[2][3]
-      out.Write("\tif (" I_STEREOPARAMS ".w > 0.5f)\n");
-      out.Write("\t{{\n");
-      if (api_type == APIType::Vulkan)
-      {
-        out.Write("\t\tif (" I_STEREOPARAMS ".y > 0.5f)\n");
-        out.Write("\t\t{{\n");
-        out.Write("\t\t\tfloat4 eye_proj_x = " I_LEGACY_EYE_PROJ_X "[eye];\n");
-        out.Write("\t\t\tfloat4 eye_proj_y = " I_LEGACY_EYE_PROJ_Y "[eye];\n");
-        out.Write(
-            "\t\t\tf.pos.x = eye_proj_x.z * f.pos.x + eye_proj_x.x - eye_proj_x.y * f.pos.w;\n");
-        out.Write(
-            "\t\t\tf.pos.y = eye_proj_y.z * f.pos.y + eye_proj_y.x - eye_proj_y.y * f.pos.w;\n");
-        if (!host_config.fast_depth_calc)
-        {
-          out.Write(
-              "\t\t\tf.clipPos.x = eye_proj_x.z * f.clipPos.x + eye_proj_x.x - eye_proj_x.y * "
-              "f.clipPos.w;\n");
-          out.Write(
-              "\t\t\tf.clipPos.y = eye_proj_y.z * f.clipPos.y + eye_proj_y.x - eye_proj_y.y * "
-              "f.clipPos.w;\n");
-        }
-        out.Write("\t\t}}\n");
-        out.Write("\t\telse\n");
-        out.Write("\t\t{{\n");
-      }
-      out.Write("\t\tfloat4 row0 = " I_EYE_PROJ "[eye * 2 + 0];\n");
-      out.Write("\t\tfloat4 row1 = " I_EYE_PROJ "[eye * 2 + 1];\n");
-      out.Write("\t\tfloat4 zrow = " I_VR_EYE_Z "[eye];\n");
-      // Mirror the world X when the game's projection flips X (stereoparams.x = -1).
-      // This must happen BEFORE the VR projection so the per-eye IPD offset (baked
-      // into the projection rows' w component) is not affected — only the world
-      // geometry is mirrored.  This preserves correct stereo while reversing the
-      // triangle winding to match the game's adjusted cull mode.
-      out.Write("\t\tfloat4 vp = f.viewPos;\n");
-      out.Write("\t\tvp.x *= " I_STEREOPARAMS ".x;\n");
-      out.Write("\t\tvp.w *= " I_STEREOPARAMS ".z;\n");
-      out.Write("\t\tfloat z_eye = dot(zrow, vp);\n");
-      out.Write("\t\tfloat clip_x = dot(row0, vp);\n");
-      out.Write("\t\tfloat clip_y = dot(row1, vp);\n");
-      out.Write("\t\tfloat clip_w = -z_eye;\n");
-      out.Write("\t\tfloat clip_z = " I_VR_DEPTH ".x * z_eye + " I_VR_DEPTH ".y;\n");
-      if (!host_config.fast_depth_calc)
-        out.Write("\t\tf.clipPos = float4(clip_x, clip_y, clip_z, clip_w);\n");
-      out.Write("\t\tf.pos = float4(clip_x, clip_y, clip_z, clip_w);\n");
-      out.Write("\t\tf.pos.z = f.pos.w * " I_VR_DEPTH ".w - f.pos.z * " I_VR_DEPTH ".z;\n");
-      if (!host_config.backend_clip_control)
-        out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
-      out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
-      out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
-      // VR replaces pos entirely — recalculate clip distances for the new position.
-      if (host_config.backend_depth_clamp)
-      {
-        if (api_type == APIType::Vulkan)
-          out.Write("\t\tf.clipDist0 = 1.0;\n\t\tf.clipDist1 = 1.0;\n");
-        else
-          out.Write("\t\tf.clipDist0 = f.pos.z + f.pos.w;\n\t\tf.clipDist1 = -f.pos.z;\n");
-      }
-      if (api_type == APIType::Vulkan)
-        out.Write("\t\t}}\n");
-      out.Write("\t}}\n");
-
-      // Head-locked perspective HUD: preserve the game's original perspective GUI/model
-      // geometry, then place the transformed object in head-locked HMD space.
-      out.Write("\telse if (" I_STEREOPARAMS ".w < -2.5f)\n");
-      out.Write("\t{{\n");
-      out.Write("\t\tfloat hud_game_w = (abs(f.pos.w) > 1.0e-6) ? f.pos.w : 1.0e-6;\n");
-      out.Write("\t\tfloat hud_game_ndc_z = clamp(f.pos.z / hud_game_w, -1.0, 1.0);\n");
-      out.Write("\t\tfloat4 hudPos = float4(\n");
-      out.Write("\t\t\tf.viewPos.x * " I_HEAD_PARAMS ".y + " I_VR_SCREEN ".x,\n");
-      out.Write("\t\t\tf.viewPos.y * " I_HEAD_PARAMS ".z + " I_VR_SCREEN ".y,\n");
-      out.Write("\t\t\tf.viewPos.z * " I_HEAD_PARAMS ".w + " I_VR_SCREEN ".z,\n");
-      out.Write("\t\t\t1.0);\n");
-      out.Write("\t\thudPos.z = min(hudPos.z, -0.1 * max(" I_VR_DEPTH ".w, 0.001));\n");
-      out.Write("\t\tfloat4 row0 = " I_HEAD_PROJ "[eye * 2 + 0];\n");
-      out.Write("\t\tfloat4 row1 = " I_HEAD_PROJ "[eye * 2 + 1];\n");
-      out.Write("\t\tf.pos.x = dot(row0, hudPos);\n");
-      out.Write("\t\tf.pos.y = dot(row1, hudPos);\n");
-      out.Write("\t\tf.pos.w = max(-hudPos.z, 0.001);\n");
-      out.Write("\t\tf.pos.z = hud_game_ndc_z * f.pos.w;\n");
-      if (!host_config.fast_depth_calc)
-        out.Write("\t\tf.clipPos = f.pos;\n");
-      out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
-      out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
-      if (host_config.backend_depth_clamp)
-      {
-        if (api_type == APIType::Vulkan || api_type == APIType::OpenGL)
-          out.Write("\t\tf.clipDist0 = 1.0;\n\t\tf.clipDist1 = 1.0;\n");
-        else
-          out.Write("\t\tf.clipDist0 = f.pos.z + f.pos.w;\n\t\tf.clipDist1 = -f.pos.z;\n");
-      }
-      out.Write("\t}}\n");
-
-      // Head-locked VR: 2D content on a virtual screen that follows head movements.
-      // cstereo.w == -2.0 signals head-locked draw.
-      // Uses unrotated (raw) per-eye projection — no head rotation baked in.
-      out.Write("\telse if (" I_STEREOPARAMS ".w < -1.5f)\n");
-      out.Write("\t{{\n");
-      if (api_type == APIType::Vulkan)
-      {
-        out.Write("\t\tfloat safe_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
-                  "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
-        out.Write("\t\tfloat ndc_x = clamp(f.pos.x / safe_w, -1.0, 1.0);\n");
-        out.Write("\t\tfloat ndc_y = clamp(f.pos.y / safe_w, -1.0, 1.0);\n");
-        out.Write("\t\tfloat ndc_z = clamp(f.pos.z / safe_w, -1.0, 1.0);\n");
-      }
-      else
-      {
-        out.Write("\t\tfloat ndc_x = f.pos.x / f.pos.w;\n");
-        out.Write("\t\tfloat ndc_y = f.pos.y / f.pos.w;\n");
-        out.Write("\t\tfloat ndc_z = f.pos.z / f.pos.w;\n");
-      }
-      out.Write("\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
-      out.Write("\t\tfloat4 screenPos = float4(\n");
-      out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x,\n");
-      out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y,\n");
-      out.Write("\t\t\t-" I_VR_SCREEN ".z + ndc_z_clamped * " I_VR_DEPTH ".z,\n");
-      out.Write("\t\t\t1.0);\n");
-      out.Write("\t\tfloat curve = max(" I_HEAD_PARAMS ".x, 0.0);\n");
-      out.Write("\t\tfloat horizontal = 0.5 * (ndc_x * ndc_x);\n");
-      out.Write("\t\tfloat curve_push = curve * horizontal * " I_VR_SCREEN ".z * 0.25;\n");
-      out.Write("\t\tcurve_push = min(curve_push, " I_VR_SCREEN ".z * 0.8);\n");
-      out.Write("\t\tscreenPos.z += curve_push;\n");
-      out.Write("\t\tfloat4 row0 = " I_HEAD_PROJ "[eye * 2 + 0];\n");
-      out.Write("\t\tfloat4 row1 = " I_HEAD_PROJ "[eye * 2 + 1];\n");
-      out.Write("\t\tf.pos.x = dot(row0, screenPos);\n");
-      out.Write("\t\tf.pos.y = dot(row1, screenPos);\n");
-      out.Write("\t\tf.pos.w = max(-screenPos.z, 0.001);\n");
-      out.Write("\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n");
-      out.Write("\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n");
-      out.Write(
-          "\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n");
-      out.Write("\t\tlayer_step = min(layer_step, max_safe_step);\n");
-      out.Write(
-          "\t\tf.pos.z = f.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * 0.0001);\n");
-      if (!host_config.fast_depth_calc)
-        out.Write("\t\tf.clipPos = f.pos;\n");
-      if (!host_config.backend_clip_control)
-        out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
-      out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
-      out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
-      if (host_config.backend_depth_clamp)
-      {
-        if (api_type == APIType::Vulkan)
-          out.Write("\t\tf.clipDist0 = 1.0;\n\t\tf.clipDist1 = 1.0;\n");
-        else
-          out.Write("\t\tf.clipDist0 = f.pos.z + f.pos.w;\n\t\tf.clipDist1 = -f.pos.z;\n");
-      }
-      out.Write("\t}}\n");
-
-      // Orthographic VR: place 2D content (menus, FMV, HUD) on a virtual screen plane.
-      // cstereo.w == -1.0 signals orthographic draw with VR active.
-      // Map NDC from the ortho projection to a 3D position on the virtual screen,
-      // then re-project through the per-eye HMD projection (world-fixed).
-      out.Write("\telse if (" I_STEREOPARAMS ".w < -0.5f)\n");
-      out.Write("\t{{\n");
-      if (api_type == APIType::Vulkan)
-      {
-        out.Write("\t\tfloat safe_w = (abs(f.pos.w) > 1.0e-5) ? f.pos.w : "
-                  "((f.pos.w < 0.0) ? -1.0e-5 : 1.0e-5);\n");
-        out.Write("\t\tfloat ndc_x = clamp(f.pos.x / safe_w, -1.0, 1.0);\n");
-        out.Write("\t\tfloat ndc_y = clamp(f.pos.y / safe_w, -1.0, 1.0);\n");
-        out.Write("\t\tfloat ndc_z = clamp(f.pos.z / safe_w, -1.0, 1.0);\n");
-      }
-      else
-      {
-        out.Write("\t\tfloat ndc_x = f.pos.x / f.pos.w;\n");
-        out.Write("\t\tfloat ndc_y = f.pos.y / f.pos.w;\n");
-        out.Write("\t\tfloat ndc_z = f.pos.z / f.pos.w;\n");
-      }
-      out.Write("\t\tfloat ndc_z_clamped = clamp(ndc_z, -1.0, 1.0);\n");
-      // cvr_screen = {half_w, half_h, distance, ortho_layer}
-      out.Write("\t\tfloat4 screenPos = float4(\n");
-      out.Write("\t\t\tndc_x * " I_VR_SCREEN ".x,\n");
-      out.Write("\t\t\tndc_y * " I_VR_SCREEN ".y,\n");
-      out.Write("\t\t\t-" I_VR_SCREEN ".z + ndc_z_clamped * " I_VR_DEPTH ".z,\n");
-      out.Write("\t\t\t1.0);\n");
-      out.Write("\t\tfloat4 row0 = " I_EYE_PROJ "[eye * 2 + 0];\n");
-      out.Write("\t\tfloat4 row1 = " I_EYE_PROJ "[eye * 2 + 1];\n");
-      out.Write("\t\tfloat4 zrow = " I_VR_EYE_Z "[eye];\n");
-      out.Write("\t\tfloat z_eye = dot(zrow, screenPos);\n");
-      out.Write("\t\tfloat clip_x = dot(row0, screenPos);\n");
-      out.Write("\t\tfloat clip_y = dot(row1, screenPos);\n");
-      out.Write("\t\tfloat clip_w = -z_eye;\n");
-      if (!host_config.fast_depth_calc)
-        out.Write("\t\tf.clipPos = float4(clip_x, clip_y, 0.0, clip_w);\n");
-      out.Write("\t\tf.pos = float4(clip_x, clip_y, 0.0, clip_w);\n");
-      // Depth: use per-draw layer counter to spread ortho elements apart.
-      // Later draws (higher layer index) get smaller z = closer to camera.
-      // cvr_depth.x = layer offset (between draws); cvr_depth.y = element depth (within draw).
-      out.Write("\t\tfloat layer_idx = max(" I_VR_SCREEN ".w, 0.0);\n");
-      out.Write("\t\tfloat layer_step = max(" I_VR_DEPTH ".x, 0.0);\n");
-      out.Write(
-          "\t\tfloat max_safe_step = 0.49 / max(layer_idx + 1.0, 1.0);\n");
-      out.Write("\t\tlayer_step = min(layer_step, max_safe_step);\n");
-      out.Write(
-          "\t\tf.pos.z = f.pos.w * (0.5 - layer_idx * layer_step + ndc_z_clamped * " I_VR_DEPTH
-          ".y);\n");
-      if (!host_config.backend_clip_control)
-        out.Write("\t\tf.pos.z = f.pos.z * 2.0 - f.pos.w;\n");
-      out.Write("\t\tf.pos.xy *= sign(" I_VR_PIXELCENTER ".xy * float2(1.0, -1.0));\n");
-      out.Write("\t\tf.pos.xy = f.pos.xy - f.pos.w * " I_VR_PIXELCENTER ".xy;\n");
-      if (host_config.backend_depth_clamp)
-      {
-        if (api_type == APIType::Vulkan)
-          out.Write("\t\tf.clipDist0 = 1.0;\n\t\tf.clipDist1 = 1.0;\n");
-        else
-          out.Write("\t\tf.clipDist0 = f.pos.z + f.pos.w;\n\t\tf.clipDist1 = -f.pos.z;\n");
-      }
-      out.Write("\t}}\n");
-
+      GenerateVRProjection(out, api_type, host_config, false);
     }
     else
     {

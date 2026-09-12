@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "VideoCommon/ConstantManager.h"
+#include "VideoCommon/GeometryShaderGen.h"
 #include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/UberShaderCommon.h"
 #include "VideoCommon/VertexShaderGen.h"
@@ -14,7 +15,7 @@
 
 namespace UberShader
 {
-static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 1;
+static constexpr u32 UBER_VERTEX_SHADER_CODE_VERSION = 2;
 
 VertexShaderUid GetVertexShaderUid()
 {
@@ -44,6 +45,10 @@ ShaderCode GenVertexShader(APIType api_type, const ShaderHostConfig& host_config
       host_config.backend_dynamic_vertex_loader || host_config.backend_vs_point_line_expand;
   const u32 num_texgen = uid_data->num_texgens;
   ShaderCode out;
+  const bool vr_multiview_vs =
+      api_type == APIType::Vulkan && host_config.vr_stereo && host_config.vk_multiview;
+  if (vr_multiview_vs)
+    out.Write("#extension GL_EXT_multiview : require\n");
 
   out.Write("// {}\n\n", *uid_data);
   out.Write("{}", s_lighting_struct);
@@ -53,7 +58,7 @@ ShaderCode GenVertexShader(APIType api_type, const ShaderHostConfig& host_config
   out.Write("{}", s_shader_uniforms);
   out.Write("}};\n");
 
-  if (vertex_loader)
+  if (vertex_loader || vr_multiview_vs)
   {
     out.Write("UBO_BINDING(std140, 4) uniform GSBlock {{\n");
     out.Write("{}", s_geometry_shader_uniforms);
@@ -348,6 +353,9 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   if (num_texgen > 0)
     GenVertexShaderTexGens(api_type, host_config, num_texgen, out);
 
+  if (vr_multiview_vs)
+    out.Write("float4 vr_unexpanded_pos = o.pos;\n");
+
   if (host_config.backend_vs_point_line_expand)
   {
     out.Write("if (vs_expand == {}u) {{ // Line\n", std::to_underlying(VSExpand::Line));
@@ -381,6 +389,10 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
     GenerateVSPointExpansion(out, "  ", num_texgen);
     out.Write("}}\n");
   }
+
+  if (vr_multiview_vs)
+    out.Write("float2 vr_expand_offset = (o.pos.xy - vr_unexpanded_pos.xy) / "
+              "max(abs(vr_unexpanded_pos.w), 1.0e-6);\n");
 
   if (per_pixel_lighting)
   {
@@ -475,6 +487,19 @@ float3 load_input_float3_rawtex(uint vtx_offset, uint attr_offset) {{
   // Hence, we compensate for this pixel center difference so that primitives
   // get rasterized correctly.
   out.Write("o.pos.xy = o.pos.xy - o.pos.w * " I_PIXELCENTERCORRECTION ".xy;\n");
+
+  if (vr_multiview_vs)
+  {
+    out.Write("{{\nint eye = int(gl_ViewIndex);\nVS_OUTPUT f = o;\n");
+    GenerateVRProjection(out, api_type, host_config, true);
+    // World and perspective HUD projection replace the expanded position from view space.
+    // Restore point/line width; NDC screen paths already include the expansion.
+    out.Write("if ((" I_STEREOPARAMS ".w > 0.5 && " I_STEREOPARAMS ".y <= 0.5) || " I_STEREOPARAMS
+              ".w < -2.5)\n"
+              "  f.pos.xy += vr_expand_offset * f.pos.w * "
+              "sign(" I_PIXELCENTERCORRECTION ".xy * float2(1.0, -1.0));\n");
+    out.Write("o = f;\n}}\n");
+  }
 
   if (vertex_rounding && !host_config.vr_stereo)
   {

@@ -204,18 +204,17 @@ const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShade
 const Info<bool> GFX_VR_ENABLE_OPENXR_CONFIG_SCENE{{System::GFX, "VR", "EnableOpenXRConfigScene"},
                                                    true};
 const Info<bool> GFX_VR_DISABLE_CPU_CULL{{System::GFX, "VR", "DisableCPUCull"}, true};
-const Info<OpenXROpcodeReplayMode> GFX_VR_OPCODE_REPLAY{
-    {System::GFX, "VR", "OpcodeReplay"}, OpenXROpcodeReplayMode::Off};
+const Info<OpenXROpcodeReplayMode> GFX_VR_OPCODE_REPLAY{{System::GFX, "VR", "OpcodeReplay"},
+                                                        OpenXROpcodeReplayMode::Off};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},
                                                 OpenXRMirrorView::BothEyes};
-const Info<float> GFX_VR_MIRROR_JOIN_SEPARATION{{System::GFX, "VR", "MirrorJoinSeparation"},
-                                                0.0f};
-const Info<float> GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET{
-    {System::GFX, "VR", "MirrorJoinLeftEyeOffset"}, 0.0f};
+const Info<float> GFX_VR_MIRROR_JOIN_SEPARATION{{System::GFX, "VR", "MirrorJoinSeparation"}, 0.0f};
+const Info<float> GFX_VR_MIRROR_JOIN_LEFT_EYE_OFFSET{{System::GFX, "VR", "MirrorJoinLeftEyeOffset"},
+                                                     0.0f};
 const Info<float> GFX_VR_MIRROR_JOIN_RIGHT_EYE_OFFSET{
     {System::GFX, "VR", "MirrorJoinRightEyeOffset"}, 0.0f};
-const Info<float> GFX_VR_MIRROR_JOIN_BLEND_WIDTH{
-    {System::GFX, "VR", "MirrorJoinBlendWidth"}, 0.10f};
+const Info<float> GFX_VR_MIRROR_JOIN_BLEND_WIDTH{{System::GFX, "VR", "MirrorJoinBlendWidth"},
+                                                 0.10f};
 const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE{
     {System::GFX, "VR", "ReferenceSpaceMode"}, OpenXRReferenceSpaceMode::StageHeight};
 const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE{{System::GFX, "VR", "TrackingMode"},
@@ -258,8 +257,7 @@ const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0
 const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, false};
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
-const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"},
-                                               false};
+const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"}, false};
 #if defined(__ANDROID__)
 constexpr bool DEFAULT_VR_PIN_EMULATION_CORES = true;
 #else
@@ -269,10 +267,14 @@ const Info<bool> GFX_VR_PIN_EMULATION_CORES{{System::GFX, "VR", "PinEmulationCor
                                             DEFAULT_VR_PIN_EMULATION_CORES};
 
 #if defined(__ANDROID__)
+constexpr float DEFAULT_VR_RESOLUTION_SCALE = 0.85f;
 constexpr int DEFAULT_VR_FOVEATION_LEVEL = 2;  // Medium fixed foveated rendering
 #else
+constexpr float DEFAULT_VR_RESOLUTION_SCALE = 1.0f;
 constexpr int DEFAULT_VR_FOVEATION_LEVEL = 0;  // Off; few PC runtimes expose XR_FB_foveation
 #endif
+const Info<float> GFX_VR_RESOLUTION_SCALE{{System::GFX, "VR", "ResolutionScale"},
+                                          DEFAULT_VR_RESOLUTION_SCALE};
 const Info<int> GFX_VR_FOVEATION_LEVEL{{System::GFX, "VR", "FoveationLevel"},
                                        DEFAULT_VR_FOVEATION_LEVEL};
 const Info<bool> GFX_VR_FOVEATION_DYNAMIC{{System::GFX, "VR", "DynamicFoveation"}, true};

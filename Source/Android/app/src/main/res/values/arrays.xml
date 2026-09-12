@@ -759,4 +759,16 @@
         <item>1</item>
         <item>2</item>
     </integer-array>
+    <string-array name="questFoveationLevelEntries">
+        <item>Off</item>
+        <item>Low</item>
+        <item>Medium</item>
+        <item>High</item>
+    </string-array>
+    <integer-array name="questFoveationLevelValues">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </integer-array>
 </resources>

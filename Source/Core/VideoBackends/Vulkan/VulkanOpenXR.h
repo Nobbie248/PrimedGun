@@ -5,8 +5,8 @@
 
 #ifdef ENABLE_VR
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -51,6 +51,7 @@ struct XRVkEyeSwapchain
   // One entry per swapchain image.
   std::vector<std::unique_ptr<VKTexture>> textures;
   std::vector<std::unique_ptr<VKFramebuffer>> framebuffers;
+  std::vector<VkImageView> fdm_views;
 };
 
 struct XRVkLayeredSwapchain
@@ -69,6 +70,7 @@ struct XRVkLayeredSwapchain
 
   std::vector<std::unique_ptr<VKTexture>> textures;
   std::vector<std::unique_ptr<VKFramebuffer>> framebuffers;
+  std::vector<VkImageView> fdm_views;
 };
 
 struct XRPrimedGunVkOverlaySwapchain
@@ -149,6 +151,7 @@ public:
   // Release the current swapchain image back to the runtime.
   void ReleaseEyeTexture(uint32_t eye_index) override;
 
+  bool HasFoveatedFramebuffers() const override { return m_foveated; }
   bool SupportsLayeredRendering() const override { return m_use_layered_swapchain; }
   AbstractFramebuffer* AcquireLayeredFramebuffer() override;
   void ReleaseLayeredTexture() override;
@@ -196,13 +199,16 @@ private:
 
   // Allocates m_eye_swapchains and wraps images as VKTexture / VKFramebuffer.
   bool CreateSwapchains();
-  bool CreateLayeredSwapchain(int64_t swapchain_format);
+  bool ShouldUseFoveation() const;
+  static bool PrepareFoveationImages(const std::vector<XrSwapchainImageFoveationVulkanFB>& images,
+                                     std::vector<VkImageView>* out_views);
+  bool CreateLayeredSwapchain(int64_t swapchain_format, bool allow_foveation = true);
   bool CreateEyeSwapchains(int64_t swapchain_format);
 
   void DestroySwapchains();
   bool EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain* overlay,
-                                      uint32_t content_kind, uint32_t generation, uint32_t width,
-                                      uint32_t height, const std::vector<uint32_t>& pixels);
+                                       uint32_t content_kind, uint32_t generation, uint32_t width,
+                                       uint32_t height, const std::vector<uint32_t>& pixels);
   void DestroyPrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain* overlay);
   bool EnsurePrimedGunLaserSwapchain();
   void DestroyPrimedGunLaserSwapchain();
@@ -221,6 +227,7 @@ private:
   uint32_t m_acquired_layered_image_index = 0;
   bool m_layered_image_acquired = false;
   bool m_use_layered_swapchain = false;
+  bool m_foveated = false;
   bool m_frame_uses_layered_swapchain = false;
 
   // Reused per-frame composition data (avoids per-frame heap allocation).

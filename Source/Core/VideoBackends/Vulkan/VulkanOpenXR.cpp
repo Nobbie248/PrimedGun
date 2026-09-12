@@ -28,10 +28,11 @@
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/TextureConfig.h"
-#include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/PrimedGunOverlayCommon.h"
+#include "VideoCommon/VideoConfig.h"
 
 #ifdef _WIN32
 #include <windows.h>  // for SEH __try/__except
@@ -138,7 +139,8 @@ bool SelectPrimedGunOverlaySwapchainFormat(XrSession session, int64_t* out_forma
   }
 
   std::vector<int64_t> runtime_formats(format_count);
-  result = xrEnumerateSwapchainFormats(session, format_count, &format_count, runtime_formats.data());
+  result =
+      xrEnumerateSwapchainFormats(session, format_count, &format_count, runtime_formats.data());
   if (XR_FAILED(result))
   {
     ERROR_LOG_FMT(VIDEO, "OpenXR: xrEnumerateSwapchainFormats for PrimedGun overlay failed ({}).",
@@ -173,8 +175,7 @@ bool PrimedGunOverlayFormatIsBgra(VkFormat format)
 }
 
 std::vector<uint32_t> ConvertPrimedGunOverlayPixelsForVkFormat(const uint32_t* pixels,
-                                                              size_t pixel_count,
-                                                              VkFormat format)
+                                                               size_t pixel_count, VkFormat format)
 {
   std::vector<uint32_t> converted(pixel_count);
   if (!PrimedGunOverlayFormatIsBgra(format))
@@ -203,6 +204,41 @@ uint64_t ElapsedUs(uint64_t start_us, uint64_t end_us)
   return end_us - start_us;
 }
 
+template <typename T>
+void DestroySwapchainVulkanObjects(T& swapchain)
+{
+  const VkDevice device = g_vulkan_context->GetDevice();
+
+  // VKFramebuffer/VKTexture normally defer destruction until a command buffer is recycled.
+  // OpenXR owns the VkImages, however, and xrDestroySwapchain may destroy them immediately.
+  // Destroy our dependent Vulkan objects synchronously before returning ownership to OpenXR.
+  for (auto& framebuffer : swapchain.framebuffers)
+  {
+    if (framebuffer)
+    {
+      const VkFramebuffer handle = framebuffer->ReleaseHandle();
+      if (handle != VK_NULL_HANDLE)
+        vkDestroyFramebuffer(device, handle, nullptr);
+    }
+  }
+  swapchain.framebuffers.clear();
+
+  for (auto& texture : swapchain.textures)
+  {
+    if (texture)
+    {
+      const VkImageView view = texture->ReleaseView();
+      if (view != VK_NULL_HANDLE)
+        vkDestroyImageView(device, view, nullptr);
+    }
+  }
+  swapchain.textures.clear();
+
+  for (VkImageView view : swapchain.fdm_views)
+    vkDestroyImageView(device, view, nullptr);
+  swapchain.fdm_views.clear();
+}
+
 static void AppendOptionalOpenXRExtensions(std::vector<const char*>* extensions)
 {
   if (VR::OpenXRManager::IsRuntimeExtensionSupported(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME))
@@ -210,14 +246,23 @@ static void AppendOptionalOpenXRExtensions(std::vector<const char*>* extensions)
     extensions->push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     INFO_LOG_FMT(VIDEO, "OpenXR: Enabling XR_FB_display_refresh_rate.");
   }
+
+  // Fixed foveated rendering: on Vulkan the runtime hands us fragment density map images
+  // (XR_FB_foveation_vulkan) that our swapchain render passes read.
+  const auto foveation_exts = VR::OpenXRManager::GetAvailableFoveationExtensions(true);
+  if (!foveation_exts.empty())
+  {
+    extensions->insert(extensions->end(), foveation_exts.begin(), foveation_exts.end());
+    INFO_LOG_FMT(VIDEO, "OpenXR: Enabling XR_FB_foveation (+configuration, vulkan, "
+                        "swapchain_update_state).");
+  }
 }
 }  // namespace
 
 #if defined(ANDROID)
 static void AppendOptionalAndroidOpenXRExtensions(std::vector<const char*>* extensions)
 {
-  if (VR::OpenXRManager::IsRuntimeExtensionSupported(
-          XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
+  if (VR::OpenXRManager::IsRuntimeExtensionSupported(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME))
   {
     extensions->push_back(XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME);
     INFO_LOG_FMT(VIDEO, "OpenXR: Enabling XR_KHR_android_thread_settings.");
@@ -244,15 +289,15 @@ XRPrimedGunVkOverlaySwapchain::XRPrimedGunVkOverlaySwapchain() = default;
 XRPrimedGunVkOverlaySwapchain::~XRPrimedGunVkOverlaySwapchain() = default;
 XRPrimedGunVkOverlaySwapchain::XRPrimedGunVkOverlaySwapchain(
     XRPrimedGunVkOverlaySwapchain&&) noexcept = default;
-XRPrimedGunVkOverlaySwapchain& XRPrimedGunVkOverlaySwapchain::operator=(
-    XRPrimedGunVkOverlaySwapchain&&) noexcept = default;
+XRPrimedGunVkOverlaySwapchain&
+XRPrimedGunVkOverlaySwapchain::operator=(XRPrimedGunVkOverlaySwapchain&&) noexcept = default;
 
 XRPrimedGunVkLaserSwapchain::XRPrimedGunVkLaserSwapchain() = default;
 XRPrimedGunVkLaserSwapchain::~XRPrimedGunVkLaserSwapchain() = default;
-XRPrimedGunVkLaserSwapchain::XRPrimedGunVkLaserSwapchain(
-    XRPrimedGunVkLaserSwapchain&&) noexcept = default;
-XRPrimedGunVkLaserSwapchain& XRPrimedGunVkLaserSwapchain::operator=(
-    XRPrimedGunVkLaserSwapchain&&) noexcept = default;
+XRPrimedGunVkLaserSwapchain::XRPrimedGunVkLaserSwapchain(XRPrimedGunVkLaserSwapchain&&) noexcept =
+    default;
+XRPrimedGunVkLaserSwapchain&
+XRPrimedGunVkLaserSwapchain::operator=(XRPrimedGunVkLaserSwapchain&&) noexcept = default;
 
 static const char* VkFormatToString(int64_t format)
 {
@@ -306,7 +351,8 @@ static bool SelectSwapchainFormat(XrSession session, int64_t* out_format)
   }
 
   std::vector<int64_t> runtime_formats(format_count);
-  result = xrEnumerateSwapchainFormats(session, format_count, &format_count, runtime_formats.data());
+  result =
+      xrEnumerateSwapchainFormats(session, format_count, &format_count, runtime_formats.data());
   if (XR_FAILED(result))
   {
     ERROR_LOG_FMT(VIDEO, "OpenXR: xrEnumerateSwapchainFormats failed ({}).",
@@ -323,16 +369,20 @@ static bool SelectSwapchainFormat(XrSession session, int64_t* out_format)
 #if defined(ANDROID)
   // Quest's compositor expects sRGB swapchains for Dolphin's gamma-encoded XFB. We render through
   // a UNORM view alias below to avoid a double gamma encode.
-  static constexpr std::array<VkFormat, 6> preferred_formats = {
-      VK_FORMAT_R8G8B8A8_SRGB,            VK_FORMAT_B8G8R8A8_SRGB,
-      VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
-      VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
+  static constexpr std::array<VkFormat, 6> preferred_formats = {VK_FORMAT_R8G8B8A8_SRGB,
+                                                                VK_FORMAT_B8G8R8A8_SRGB,
+                                                                VK_FORMAT_R8G8B8A8_UNORM,
+                                                                VK_FORMAT_B8G8R8A8_UNORM,
+                                                                VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+                                                                VK_FORMAT_R16G16B16A16_SFLOAT};
 #else
   // Prefer sRGB on PC so the OpenXR compositor decodes Dolphin's gamma-encoded XFB correctly.
-  static constexpr std::array<VkFormat, 6> preferred_formats = {
-      VK_FORMAT_R8G8B8A8_SRGB,            VK_FORMAT_B8G8R8A8_SRGB,
-      VK_FORMAT_R8G8B8A8_UNORM,           VK_FORMAT_B8G8R8A8_UNORM,
-      VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_R16G16B16A16_SFLOAT};
+  static constexpr std::array<VkFormat, 6> preferred_formats = {VK_FORMAT_R8G8B8A8_SRGB,
+                                                                VK_FORMAT_B8G8R8A8_SRGB,
+                                                                VK_FORMAT_R8G8B8A8_UNORM,
+                                                                VK_FORMAT_B8G8R8A8_UNORM,
+                                                                VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+                                                                VK_FORMAT_R16G16B16A16_SFLOAT};
 #endif
 
   for (const VkFormat preferred : preferred_formats)
@@ -359,7 +409,7 @@ static bool SelectSwapchainFormat(XrSession session, int64_t* out_format)
 // that have C++ objects requiring unwinding.
 #ifdef _WIN32
 static XrResult SafeCreateSession(XrInstance instance, const XrSessionCreateInfo* info,
-                                   XrSession* session)
+                                  XrSession* session)
 {
   __try
   {
@@ -377,7 +427,7 @@ static XrResult SafeCreateSession(XrInstance instance, const XrSessionCreateInfo
 }
 #else
 static XrResult SafeCreateSession(XrInstance instance, const XrSessionCreateInfo* info,
-                                   XrSession* session)
+                                  XrSession* session)
 {
   return xrCreateSession(instance, info, session);
 }
@@ -417,15 +467,14 @@ bool VulkanOpenXR::WaitForPendingFrameFinalization(std::string_view reason)
     const uint64_t wait_us = ElapsedUs(wait_start_us, Common::Timer::NowUs());
     if (s_async_wait_log_count < 20 || wait_us >= 500)
     {
-      INFO_LOG_FMT(VIDEO,
-                   "OpenXR Vulkan: waited {} us for pending async final XR submit ({}).",
+      INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: waited {} us for pending async final XR submit ({}).",
                    wait_us, reason.empty() ? "frame loop" : reason);
-      __android_log_print(ANDROID_LOG_INFO, "DolphinXR",
-                          "OpenXR Vulkan: waited %llu us for pending async final XR submit (%.*s)",
-                          static_cast<unsigned long long>(wait_us),
-                          static_cast<int>(reason.empty() ? std::string_view{"frame loop"}.size() :
-                                                            reason.size()),
-                          reason.empty() ? "frame loop" : reason.data());
+      __android_log_print(
+          ANDROID_LOG_INFO, "DolphinXR",
+          "OpenXR Vulkan: waited %llu us for pending async final XR submit (%.*s)",
+          static_cast<unsigned long long>(wait_us),
+          static_cast<int>(reason.empty() ? std::string_view{"frame loop"}.size() : reason.size()),
+          reason.empty() ? "frame loop" : reason.data());
       s_async_wait_log_count++;
     }
   }
@@ -501,7 +550,7 @@ void VulkanOpenXR::FinalizePendingXRFrame(PendingXRFrame frame)
     VR::g_openxr->PublishLayers(success ? layers : std::vector<XrCompositionLayerBaseHeader*>{});
   }
   else if (!VR::g_openxr->EndFrameDetached(frame.display_time, frame.environment_blend_mode,
-                                         frame.should_render && success, layers, false))
+                                           frame.should_render && success, layers, false))
   {
     success = false;
   }
@@ -597,9 +646,8 @@ bool VulkanOpenXR::PreQueryVulkanExtensions(VulkanExtensionRequirements& out)
       // Treat 1.0.0 as "unknown" so Dolphin keeps its negotiated 1.1/1.2 instance.
       if (reported_max <= VK_API_VERSION_1_0)
       {
-        WARN_LOG_FMT(VIDEO,
-                     "OpenXR: Runtime reported max Vulkan 1.0.0 (v1 extension quirk); "
-                     "ignoring and using Dolphin's instance version.");
+        WARN_LOG_FMT(VIDEO, "OpenXR: Runtime reported max Vulkan 1.0.0 (v1 extension quirk); "
+                            "ignoring and using Dolphin's instance version.");
         out.max_api_version = 0;
       }
       else
@@ -752,9 +800,9 @@ bool VulkanOpenXR::CreateSessionVulkan()
   // --- Query Vulkan graphics requirements (mandatory before session creation) ---
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Querying graphics requirements...");
   PFN_xrGetVulkanGraphicsRequirementsKHR pfnGetVulkanRequirements = nullptr;
-  XrResult result = xrGetInstanceProcAddr(
-      xr_instance, "xrGetVulkanGraphicsRequirementsKHR",
-      reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanRequirements));
+  XrResult result =
+      xrGetInstanceProcAddr(xr_instance, "xrGetVulkanGraphicsRequirementsKHR",
+                            reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanRequirements));
 
   if (XR_FAILED(result) || pfnGetVulkanRequirements == nullptr)
   {
@@ -835,8 +883,8 @@ bool VulkanOpenXR::CreateSessionVulkan()
   if (XR_SUCCEEDED(result) && pfnGetVulkanDevice != nullptr)
   {
     VkPhysicalDevice xr_physical_device = VK_NULL_HANDLE;
-    result = pfnGetVulkanDevice(xr_instance, xr_system,
-                                g_vulkan_context->GetVulkanInstance(), &xr_physical_device);
+    result = pfnGetVulkanDevice(xr_instance, xr_system, g_vulkan_context->GetVulkanInstance(),
+                                &xr_physical_device);
     if (XR_SUCCEEDED(result))
     {
       if (xr_physical_device != g_vulkan_context->GetPhysicalDevice())
@@ -854,8 +902,9 @@ bool VulkanOpenXR::CreateSessionVulkan()
 
   // --- Create XrSession bound to the active Vulkan device ---
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Creating XrSession with Vulkan binding...");
-  INFO_LOG_FMT(VIDEO, "  VkInstance={}, VkPhysicalDevice={}, VkDevice={}, queueFamily={}, "
-                       "queueIndex=0",
+  INFO_LOG_FMT(VIDEO,
+               "  VkInstance={}, VkPhysicalDevice={}, VkDevice={}, queueFamily={}, "
+               "queueIndex=0",
                reinterpret_cast<void*>(g_vulkan_context->GetVulkanInstance()),
                reinterpret_cast<void*>(g_vulkan_context->GetPhysicalDevice()),
                reinterpret_cast<void*>(g_vulkan_context->GetDevice()),
@@ -886,6 +935,61 @@ bool VulkanOpenXR::CreateSessionVulkan()
   return true;
 }
 
+bool VulkanOpenXR::ShouldUseFoveation() const
+{
+  // Foveate only the stereo projection path: the flat panel reuses eye swapchain #0,
+  // and foveating a world-locked quad would just blur its edges for no gain.
+  return g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+         VR::g_openxr->IsFoveationUsable() && g_vulkan_context->SupportsFragmentDensityMap();
+}
+
+// static
+bool VulkanOpenXR::PrepareFoveationImages(
+    const std::vector<XrSwapchainImageFoveationVulkanFB>& fdm_images,
+    std::vector<VkImageView>* out_views)
+{
+  out_views->clear();
+  out_views->reserve(fdm_images.size());
+
+  const auto cleanup = [out_views]() {
+    for (VkImageView view : *out_views)
+      vkDestroyImageView(g_vulkan_context->GetDevice(), view, nullptr);
+    out_views->clear();
+  };
+
+  for (const auto& fdm : fdm_images)
+  {
+    if (fdm.image == VK_NULL_HANDLE)
+    {
+      WARN_LOG_FMT(VIDEO, "OpenXR: Runtime returned no fragment density map image.");
+      cleanup();
+      return false;
+    }
+
+    VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view_info.image = fdm.image;
+    // 2D_ARRAY covers both per-eye (1 layer) and multiview (2 layer) density maps.
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    view_info.format = VK_FORMAT_R8G8_UNORM;
+    view_info.components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
+
+    VkImageView view = VK_NULL_HANDLE;
+    const VkResult res =
+        vkCreateImageView(g_vulkan_context->GetDevice(), &view_info, nullptr, &view);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkCreateImageView (fragment density map) failed: ");
+      cleanup();
+      return false;
+    }
+    out_views->push_back(view);
+  }
+
+  return true;
+}
+
 bool VulkanOpenXR::CreateSwapchains()
 {
   ASSERT(VR::g_openxr != nullptr);
@@ -913,9 +1017,8 @@ bool VulkanOpenXR::CreateSwapchains()
       }
       else
       {
-        WARN_LOG_FMT(VIDEO,
-                     "OpenXR: Layered Vulkan swapchain creation failed; falling back to "
-                     "two per-eye swapchains.");
+        WARN_LOG_FMT(VIDEO, "OpenXR: Layered Vulkan swapchain creation failed; falling back to "
+                            "two per-eye swapchains.");
       }
     }
     else
@@ -923,10 +1026,8 @@ bool VulkanOpenXR::CreateSwapchains()
       WARN_LOG_FMT(VIDEO,
                    "OpenXR: Layered Vulkan swapchain disabled because eye sizes differ "
                    "({}x{} vs {}x{}).",
-                   view_cfgs[0].recommendedImageRectWidth,
-                   view_cfgs[0].recommendedImageRectHeight,
-                   view_cfgs[1].recommendedImageRectWidth,
-                   view_cfgs[1].recommendedImageRectHeight);
+                   view_cfgs[0].recommendedImageRectWidth, view_cfgs[0].recommendedImageRectHeight,
+                   view_cfgs[1].recommendedImageRectWidth, view_cfgs[1].recommendedImageRectHeight);
     }
   }
 #endif
@@ -940,7 +1041,7 @@ bool VulkanOpenXR::CreateSwapchains()
   return true;
 }
 
-bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
+bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format, bool allow_foveation)
 {
   ASSERT(VR::g_openxr != nullptr);
 
@@ -953,8 +1054,7 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
   sc.height = view_cfgs[0].recommendedImageRectHeight;
 
   auto cleanup = [&sc]() {
-    sc.framebuffers.clear();
-    sc.textures.clear();
+    DestroySwapchainVulkanObjects(sc);
     if (sc.swapchain != XR_NULL_HANDLE)
     {
       xrDestroySwapchain(sc.swapchain);
@@ -991,13 +1091,34 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
     }
   }
 
+  // Fixed foveated rendering: ask the runtime to allocate fragment density maps.
+  XrSwapchainCreateInfoFoveationFB foveation_info{XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+  bool foveated = allow_foveation && ShouldUseFoveation();
+  if (foveated)
+  {
+    foveation_info.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+    // XrSwapchainCreateInfoFoveationFB::next is (non-const) void*.
+    foveation_info.next = const_cast<void*>(info.next);
+    info.next = &foveation_info;
+  }
+
   XrResult result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
+  if (XR_FAILED(result) && foveated)
+  {
+    WARN_LOG_FMT(VIDEO,
+                 "OpenXR: Foveated layered swapchain creation failed ({}); retrying without "
+                 "foveation.",
+                 static_cast<int>(result));
+    info.next = foveation_info.next;
+    foveated = false;
+    result = xrCreateSwapchain(VR::g_openxr->GetSession(), &info, &sc.swapchain);
+  }
   if (XR_FAILED(result))
   {
     WARN_LOG_FMT(VIDEO, "OpenXR: xrCreateSwapchain failed for layered Vulkan swapchain ({}).",
                  static_cast<int>(result));
     cleanup();
-    return false;
+    return foveated ? CreateLayeredSwapchain(swapchain_format, false) : false;
   }
 
   uint32_t image_count = 0;
@@ -1008,14 +1129,19 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
                  "OpenXR: xrEnumerateSwapchainImages failed for layered Vulkan swapchain ({}).",
                  static_cast<int>(result));
     cleanup();
-    return false;
+    return foveated ? CreateLayeredSwapchain(swapchain_format, false) : false;
   }
 
-  std::vector<XrSwapchainImageVulkanKHR> images(image_count,
-                                                 {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
-  result = xrEnumerateSwapchainImages(
-      sc.swapchain, image_count, &image_count,
-      reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
+  std::vector<XrSwapchainImageVulkanKHR> images(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+  std::vector<XrSwapchainImageFoveationVulkanFB> fdm_images;
+  if (foveated)
+  {
+    fdm_images.resize(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+    for (uint32_t i = 0; i < image_count; ++i)
+      images[i].next = &fdm_images[i];
+  }
+  result = xrEnumerateSwapchainImages(sc.swapchain, image_count, &image_count,
+                                      reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
   if (XR_FAILED(result))
   {
     WARN_LOG_FMT(VIDEO,
@@ -1023,7 +1149,14 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
                  "({}).",
                  static_cast<int>(result));
     cleanup();
-    return false;
+    return foveated ? CreateLayeredSwapchain(swapchain_format, false) : false;
+  }
+
+  if (foveated && !PrepareFoveationImages(fdm_images, &sc.fdm_views))
+  {
+    WARN_LOG_FMT(VIDEO, "OpenXR: Retrying layered swapchain without foveation.");
+    cleanup();
+    return CreateLayeredSwapchain(swapchain_format, false);
   }
 
   sc.textures.resize(image_count);
@@ -1035,30 +1168,58 @@ bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format)
                              abstract_format, AbstractTextureFlag_RenderTarget,
                              AbstractTextureType::Texture_2DArray);
 
-    sc.textures[i] = VKTexture::CreateAdopted(tex_config, images[i].image,
-                                              VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                                              VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
+    sc.textures[i] =
+        VKTexture::CreateAdopted(tex_config, images[i].image, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                 VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
     if (!sc.textures[i])
     {
-      WARN_LOG_FMT(VIDEO,
-                   "OpenXR: VKTexture::CreateAdopted failed for layered Vulkan image {}.", i);
+      WARN_LOG_FMT(VIDEO, "OpenXR: VKTexture::CreateAdopted failed for layered Vulkan image {}.",
+                   i);
       cleanup();
-      return false;
+      return foveated ? CreateLayeredSwapchain(swapchain_format, false) : false;
     }
 
-    sc.framebuffers[i] = VKFramebuffer::CreateMultiview(sc.textures[i].get(), nullptr, {});
+    sc.framebuffers[i] = VKFramebuffer::CreateMultiview(
+        sc.textures[i].get(), nullptr, {}, foveated ? sc.fdm_views[i] : VK_NULL_HANDLE);
     if (!sc.framebuffers[i])
     {
       WARN_LOG_FMT(VIDEO,
-                   "OpenXR: VKFramebuffer::CreateMultiview failed for layered Vulkan image {}.",
-                   i);
+                   "OpenXR: VKFramebuffer::CreateMultiview failed for layered Vulkan image {}.", i);
       cleanup();
-      return false;
+      return foveated ? CreateLayeredSwapchain(swapchain_format, false) : false;
     }
   }
 
-  INFO_LOG_FMT(VIDEO, "OpenXR: Layered Vulkan swapchain ready: {}x{}, {} images, arraySize=2.",
-               sc.width, sc.height, image_count);
+  if (foveated)
+  {
+    if (!VR::g_openxr->ApplyFoveationToSwapchain(sc.swapchain))
+    {
+      cleanup();
+      return CreateLayeredSwapchain(swapchain_format, false);
+    }
+    for (const auto& fdm : fdm_images)
+    {
+      // Record transitions only after setup succeeds, so failure cleanup cannot leave
+      // command buffers referencing destroyed runtime images.
+      VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+      barrier.srcAccessMask = 0;
+      barrier.dstAccessMask = VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT;
+      barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      barrier.newLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+      barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.image = fdm.image;
+      barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
+      vkCmdPipelineBarrier(g_command_buffer_mgr->GetCurrentInitCommandBuffer(),
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT, 0, 0, nullptr, 0,
+                           nullptr, 1, &barrier);
+    }
+    m_foveated = true;
+  }
+
+  INFO_LOG_FMT(VIDEO, "OpenXR: Layered Vulkan swapchain ready: {}x{}, {} images, arraySize=2{}.",
+               sc.width, sc.height, image_count, foveated ? ", foveated" : "");
   return true;
 }
 
@@ -1085,8 +1246,7 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
     info.mipCount = 1;
     info.faceCount = 1;
     info.sampleCount = 1;
-    info.usageFlags =
-        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+    info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
 
     const VkFormat vk_sc_format = static_cast<VkFormat>(swapchain_format);
     const VkFormat vk_view_format = VKTexture::GetLinearFormat(vk_sc_format);
@@ -1118,7 +1278,7 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
     xrEnumerateSwapchainImages(sc.swapchain, 0, &image_count, nullptr);
 
     std::vector<XrSwapchainImageVulkanKHR> images(image_count,
-                                                   {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+                                                  {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
     xrEnumerateSwapchainImages(sc.swapchain, image_count, &image_count,
                                reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data()));
 
@@ -1134,9 +1294,8 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
 
       // Adopt the runtime-owned VkImage. For sRGB swapchains, use a UNORM view alias so
       // BlitFromTexture writes raw sRGB-encoded bytes without a second sRGB encode.
-      sc.textures[i] =
-          VKTexture::CreateAdopted(tex_config, images[i].image, VK_IMAGE_VIEW_TYPE_2D,
-                                   VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
+      sc.textures[i] = VKTexture::CreateAdopted(tex_config, images[i].image, VK_IMAGE_VIEW_TYPE_2D,
+                                                VK_IMAGE_LAYOUT_UNDEFINED, vk_view_format);
       if (!sc.textures[i])
       {
         ERROR_LOG_FMT(VIDEO, "OpenXR: VKTexture::CreateAdopted failed for eye {}, image {}.", eye,
@@ -1161,8 +1320,12 @@ bool VulkanOpenXR::CreateEyeSwapchains(int64_t swapchain_format)
 
 void VulkanOpenXR::DestroySwapchains()
 {
-  // Wait for the GPU to finish all pending work before destroying resources.
-  if (g_vulkan_context)
+  // Submit recorded work as well as waiting for the queue before freeing runtime images.
+  if (g_gfx)
+    g_gfx->WaitForGPUIdle();
+  else if (g_command_buffer_mgr)
+    g_command_buffer_mgr->SubmitCommandBuffer(false, true);
+  else if (g_vulkan_context)
     vkDeviceWaitIdle(g_vulkan_context->GetDevice());
 
   DestroyPrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain);
@@ -1187,8 +1350,8 @@ void VulkanOpenXR::DestroySwapchains()
     m_layered_image_acquired = false;
   }
 
-  m_layered_swapchain.framebuffers.clear();
-  m_layered_swapchain.textures.clear();
+  DestroySwapchainVulkanObjects(m_layered_swapchain);
+  m_foveated = false;
 
   if (m_layered_swapchain.swapchain != XR_NULL_HANDLE)
   {
@@ -1220,16 +1383,15 @@ void VulkanOpenXR::DestroySwapchains()
       if (XR_FAILED(release_result))
       {
         WARN_LOG_FMT(VIDEO,
-                     "OpenXR: xrReleaseSwapchainImage during shutdown failed for eye {} ({}).",
-                     eye, static_cast<int>(release_result));
+                     "OpenXR: xrReleaseSwapchainImage during shutdown failed for eye {} ({}).", eye,
+                     static_cast<int>(release_result));
       }
       m_image_acquired[eye] = false;
     }
 
     // Release Dolphin wrappers before destroying the swapchain so the
     // runtime's VkImages are only freed after our views are gone.
-    sc.framebuffers.clear();
-    sc.textures.clear();
+    DestroySwapchainVulkanObjects(sc);
 
     if (sc.swapchain != XR_NULL_HANDLE)
     {
@@ -1334,9 +1496,9 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
   laser.textures.resize(image_count);
   for (uint32_t i = 0; i < image_count; ++i)
   {
-    laser.textures[i] = VKTexture::CreateAdopted(tex_config, laser.images[i].image,
-                                                 VK_IMAGE_VIEW_TYPE_2D,
-                                                 VK_IMAGE_LAYOUT_UNDEFINED, vk_format);
+    laser.textures[i] =
+        VKTexture::CreateAdopted(tex_config, laser.images[i].image, VK_IMAGE_VIEW_TYPE_2D,
+                                 VK_IMAGE_LAYOUT_UNDEFINED, vk_format);
     if (!laser.textures[i])
     {
       DestroyPrimedGunLaserSwapchain();
@@ -1407,9 +1569,9 @@ bool VulkanOpenXR::EnsurePrimedGunLaserSwapchain()
 }
 
 bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain* overlay,
-                                                  uint32_t content_kind, uint32_t generation,
-                                                  uint32_t width, uint32_t height,
-                                                  const std::vector<uint32_t>& pixels)
+                                                   uint32_t content_kind, uint32_t generation,
+                                                   uint32_t width, uint32_t height,
+                                                   const std::vector<uint32_t>& pixels)
 {
   if (!overlay)
     return false;
@@ -1472,9 +1634,9 @@ bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain
   overlay->textures.resize(image_count);
   for (uint32_t i = 0; i < image_count; ++i)
   {
-    overlay->textures[i] = VKTexture::CreateAdopted(tex_config, overlay->images[i].image,
-                                                    VK_IMAGE_VIEW_TYPE_2D,
-                                                    VK_IMAGE_LAYOUT_UNDEFINED, vk_format);
+    overlay->textures[i] =
+        VKTexture::CreateAdopted(tex_config, overlay->images[i].image, VK_IMAGE_VIEW_TYPE_2D,
+                                 VK_IMAGE_LAYOUT_UNDEFINED, vk_format);
     if (!overlay->textures[i])
     {
       DestroyPrimedGunOverlaySwapchain(overlay);
@@ -1569,11 +1731,9 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
       m_primedgun_position_marker_layer.subImage.imageRect.offset = {0, 0};
       m_primedgun_position_marker_layer.subImage.imageRect.extent = {
           static_cast<int32_t>(marker_width), static_cast<int32_t>(marker_height)};
-      m_primedgun_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f,
-                                                           0.70710678f};
-      m_primedgun_position_marker_layer.pose.position = {snapshot.tracking_origin_position[0],
-                                                        0.005f,
-                                                        snapshot.tracking_origin_position[2]};
+      m_primedgun_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f, 0.70710678f};
+      m_primedgun_position_marker_layer.pose.position = {
+          snapshot.tracking_origin_position[0], 0.005f, snapshot.tracking_origin_position[2]};
       m_primedgun_position_marker_layer.size = {0.356f, 0.356f};
       layers->push_back(
           reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_position_marker_layer));
@@ -1589,25 +1749,26 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   const uint32_t content_kind = menu ? 2u : weapon_panel ? 3u : 1u;
   const uint32_t width = menu ? 1024 : weapon_panel ? 512 : 1024;
   const uint32_t height = menu ? 512 : weapon_panel ? 512 : 384;
-  const uint32_t generation = menu ? overlay.generation :
+  const uint32_t generation = menu         ? overlay.generation :
                               weapon_panel ? (100u + overlay.weapon_selected_index) :
                                              1u;
-  const std::vector<uint32_t> pixels = menu        ? PGO::BuildMenuPixels(width, height, overlay) :
-                                       weapon_panel ? PGO::BuildWeaponPanelPixels(width, height, overlay) :
-                                                      PGO::BuildPromptPixels(width, height);
+  const std::vector<uint32_t> pixels = menu ? PGO::BuildMenuPixels(width, height, overlay) :
+                                       weapon_panel ?
+                                              PGO::BuildWeaponPanelPixels(width, height, overlay) :
+                                              PGO::BuildPromptPixels(width, height);
   if (!EnsurePrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain, content_kind, generation,
                                        width, height, pixels))
     return appended_layer;
 
   m_primedgun_overlay_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
   m_primedgun_overlay_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
-                                        XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                                         XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
   m_primedgun_overlay_layer.space = VR::g_openxr->GetReferenceSpace();
   m_primedgun_overlay_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
   m_primedgun_overlay_layer.subImage.swapchain = m_primedgun_overlay_swapchain.swapchain;
   m_primedgun_overlay_layer.subImage.imageRect.offset = {0, 0};
   m_primedgun_overlay_layer.subImage.imageRect.extent = {static_cast<int32_t>(width),
-                                                        static_cast<int32_t>(height)};
+                                                         static_cast<int32_t>(height)};
 
   PGO::HybridControllerPose left_grip_pose = PGO::MakeGripPose(snapshot.controllers[0]);
   PGO::HybridControllerPose right_grip_pose = PGO::MakeGripPose(snapshot.controllers[1]);
@@ -1624,10 +1785,9 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
 
   if (menu && overlay.vr_menu_floating && overlay.floating_menu_pose_valid)
   {
-    m_primedgun_overlay_layer.pose.orientation = {overlay.floating_menu_orientation[0],
-                                                  overlay.floating_menu_orientation[1],
-                                                  overlay.floating_menu_orientation[2],
-                                                  overlay.floating_menu_orientation[3]};
+    m_primedgun_overlay_layer.pose.orientation = {
+        overlay.floating_menu_orientation[0], overlay.floating_menu_orientation[1],
+        overlay.floating_menu_orientation[2], overlay.floating_menu_orientation[3]};
     m_primedgun_overlay_layer.pose.position = {
         overlay.floating_menu_position[0] + snapshot.tracking_origin_position[0],
         overlay.floating_menu_position[1] + snapshot.tracking_origin_position[1],
@@ -1637,21 +1797,20 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   else if (menu && panel_pose.valid)
   {
     const XrQuaternionf q = panel_pose.orientation;
-    m_primedgun_overlay_layer.pose.orientation = PGO::MulQuat(
-        q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
-    const XrVector3f offset = PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation,
-                                                {0.0f, 0.10f, -0.18f});
+    m_primedgun_overlay_layer.pose.orientation =
+        PGO::MulQuat(q, {-0.70710678f, 0.0f, 0.0f, 0.70710678f});
+    const XrVector3f offset =
+        PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.10f, -0.18f});
     m_primedgun_overlay_layer.pose.position = {panel_pose.position.x + offset.x,
-                                              panel_pose.position.y + offset.y,
-                                              panel_pose.position.z + offset.z};
+                                               panel_pose.position.y + offset.y,
+                                               panel_pose.position.z + offset.z};
     m_primedgun_overlay_layer.size = {1.05f, 0.72f};
   }
   else if (weapon_panel)
   {
-    m_primedgun_overlay_layer.pose.orientation = {overlay.weapon_panel_orientation[0],
-                                                 overlay.weapon_panel_orientation[1],
-                                                 overlay.weapon_panel_orientation[2],
-                                                 overlay.weapon_panel_orientation[3]};
+    m_primedgun_overlay_layer.pose.orientation = {
+        overlay.weapon_panel_orientation[0], overlay.weapon_panel_orientation[1],
+        overlay.weapon_panel_orientation[2], overlay.weapon_panel_orientation[3]};
     const XrVector3f offset =
         PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.055f, -0.26f});
     m_primedgun_overlay_layer.pose.position = {
@@ -1664,7 +1823,7 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   {
     const auto& head = snapshot.head_pose;
     m_primedgun_overlay_layer.pose.orientation = {head.orientation[0], head.orientation[1],
-                                                 head.orientation[2], head.orientation[3]};
+                                                  head.orientation[2], head.orientation[3]};
     const XrVector3f offset =
         PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.0f, -1.35f});
     m_primedgun_overlay_layer.pose.position = {
@@ -1687,7 +1846,7 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
     const XrVector3f forward = PGO::RotateVector(q, {0.0f, 0.0f, -1.0f});
     m_primedgun_laser_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
     m_primedgun_laser_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
-                                        XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                                         XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
     m_primedgun_laser_layer.space = VR::g_openxr->GetReferenceSpace();
     m_primedgun_laser_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     m_primedgun_laser_layer.subImage.swapchain = m_primedgun_laser_swapchain.swapchain;
@@ -1710,9 +1869,8 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
       const XrVector3f panel_normal =
           PGO::RotateVector(m_primedgun_overlay_layer.pose.orientation, {0.0f, 0.0f, 1.0f});
       m_primedgun_laser_hit_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-      m_primedgun_laser_hit_layer.layerFlags =
-          XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
-          XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+      m_primedgun_laser_hit_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                                               XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
       m_primedgun_laser_hit_layer.space = VR::g_openxr->GetReferenceSpace();
       m_primedgun_laser_hit_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
       m_primedgun_laser_hit_layer.subImage.swapchain = m_primedgun_laser_swapchain.swapchain;
@@ -1809,6 +1967,9 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
   if (!m_use_layered_swapchain || sc.swapchain == XR_NULL_HANDLE)
     return nullptr;
 
+  if (!WaitForPendingFrameFinalization("before acquiring the next layered image"))
+    return nullptr;
+
   XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrResult acquire_result = XR_SUCCESS;
   {
@@ -1825,7 +1986,10 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
   m_layered_image_acquired = true;
 
   XrSwapchainImageWaitInfo wait_info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-  wait_info.timeout = 5'000'000;  // 5 ms; fallback to per-eye rendering instead of hanging.
+  // A timeout does not relinquish the acquired image: releasing it before a successful
+  // wait violates the OpenXR call order. In particular, do not alternate between stale
+  // layered images and the per-eye fallback when GPU work takes longer than 5 ms.
+  wait_info.timeout = XR_INFINITE_DURATION;
   const XrResult wait_result = xrWaitSwapchainImage(sc.swapchain, &wait_info);
   if (wait_result != XR_SUCCESS)
   {
@@ -1840,8 +2004,7 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
     }
     if (XR_FAILED(release_result))
     {
-      WARN_LOG_FMT(VIDEO,
-                   "OpenXR: xrReleaseSwapchainImage after layered wait failure failed ({}).",
+      WARN_LOG_FMT(VIDEO, "OpenXR: xrReleaseSwapchainImage after layered wait failure failed ({}).",
                    static_cast<int>(release_result));
     }
     m_layered_image_acquired = false;
@@ -1935,9 +2098,10 @@ bool VulkanOpenXR::SubmitFrame()
   std::vector<XrCompositionLayerBaseHeader*> quad_layers;
   if (overlay.cinematic_screen_active && !submit_layered &&
       BuildCinematicScreenLayer(m_eye_swapchains, overlay.cinematic_screen_generation,
-                               &m_cinematic_screen_layer))
+                                &m_cinematic_screen_layer))
   {
-    quad_layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer));
+    quad_layers.push_back(
+        reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer));
   }
   else
   {
@@ -1957,15 +2121,15 @@ bool VulkanOpenXR::SubmitFrame()
       pv = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
       pv.pose = eye_views[eye].pose;
       pv.fov = eye_views[eye].fov;
-      pv.subImage.swapchain = submit_layered ? m_layered_swapchain.swapchain :
-                                              m_eye_swapchains[eye].swapchain;
+      pv.subImage.swapchain =
+          submit_layered ? m_layered_swapchain.swapchain : m_eye_swapchains[eye].swapchain;
       pv.subImage.imageArrayIndex = submit_layered ? eye : 0;
       pv.subImage.imageRect = {
           {0, 0},
           {static_cast<int32_t>(submit_layered ? m_layered_swapchain.width :
-                                                m_eye_swapchains[eye].width),
+                                                 m_eye_swapchains[eye].width),
            static_cast<int32_t>(submit_layered ? m_layered_swapchain.height :
-                                                m_eye_swapchains[eye].height)}};
+                                                 m_eye_swapchains[eye].height)}};
     }
   }
 

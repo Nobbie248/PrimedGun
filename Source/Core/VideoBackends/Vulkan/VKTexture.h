@@ -35,6 +35,9 @@ public:
             ComputeImageLayout compute_layout = ComputeImageLayout::Undefined);
   ~VKTexture() override;
 
+  // Caller must wait for GPU use to finish and destroy the released view.
+  VkImageView ReleaseView();
+
   static VkFormat GetLinearFormat(VkFormat format);
   static VkFormat GetVkFormatForHostTextureFormat(AbstractTextureFormat format);
   static VkImageAspectFlags GetImageAspectForFormat(AbstractTextureFormat format);
@@ -55,8 +58,9 @@ public:
   VkImageLayout GetLayout() const { return m_layout; }
   VkFormat GetVkFormat() const
   {
-    return m_vk_format_override != VK_FORMAT_UNDEFINED ? m_vk_format_override
-                                                       : GetVkFormatForHostTextureFormat(m_config.format);
+    return m_vk_format_override != VK_FORMAT_UNDEFINED ?
+               m_vk_format_override :
+               GetVkFormatForHostTextureFormat(m_config.format);
   }
   bool IsAdopted() const { return m_alloc != VmaAllocation(VK_NULL_HANDLE); }
 
@@ -140,6 +144,9 @@ public:
                 VkRenderPass discard_render_pass, VkRenderPass clear_render_pass,
                 bool has_fragment_density_map = false);
   ~VKFramebuffer() override;
+
+  // Caller must wait for GPU use to finish and destroy the released framebuffer.
+  VkFramebuffer ReleaseHandle();
 
   VkFramebuffer GetFB() const { return m_fb; }
   VkRect2D GetRect() const { return VkRect2D{{0, 0}, {m_width, m_height}}; }

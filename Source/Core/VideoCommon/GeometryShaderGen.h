@@ -45,3 +45,6 @@ struct fmt::formatter<geometry_shader_uid_data>
                           uid.primitive_type);
   }
 };
+
+void GenerateVRProjection(ShaderCode& out, APIType api_type, const ShaderHostConfig& host_config,
+                          bool vertex_shader);

@@ -243,6 +243,9 @@ extern const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT;
 extern const Info<bool> GFX_VR_PIN_EMULATION_CORES;
 
 // XR_FB_foveation (fixed foveated rendering). Level: 0 off, 1 low, 2 medium, 3 high.
+extern const Info<float> GFX_VR_RESOLUTION_SCALE;
+constexpr float GFX_VR_RESOLUTION_SCALE_MIN = 0.5f;
+constexpr float GFX_VR_RESOLUTION_SCALE_MAX = 2.0f;
 extern const Info<int> GFX_VR_FOVEATION_LEVEL;
 extern const Info<bool> GFX_VR_FOVEATION_DYNAMIC;
 // Foveate the EFB as well as the eye swapchains. Needs fragmentDensityMapNonSubsampledImages.
@@ -323,8 +326,7 @@ inline int ChooseClosestVRForcedVBIFrequency(float refresh_rate_hz)
   int closest_frequency = GFX_VR_FORCED_VBI_FREQUENCY_72;
   float closest_distance = std::abs(refresh_rate_hz - GFX_VR_FORCED_VBI_FREQUENCY_72);
 
-  constexpr int frequencies[] = {GFX_VR_FORCED_VBI_FREQUENCY_90,
-                                 GFX_VR_FORCED_VBI_FREQUENCY_120};
+  constexpr int frequencies[] = {GFX_VR_FORCED_VBI_FREQUENCY_90, GFX_VR_FORCED_VBI_FREQUENCY_120};
   for (const int frequency : frequencies)
   {
     const float distance = std::abs(refresh_rate_hz - static_cast<float>(frequency));

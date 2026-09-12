@@ -976,4 +976,15 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="achievements_logout">Log Out</string>
     <string name="achievements_login_in_progress">Logging In</string>
     <string name="achievements_login_failed">Login Failed</string>
+    <string name="quest_multiview">Vulkan multiview</string>
+    <string name="quest_multiview_description">Renders both eyes together and enables foveated rendering. Restart the game to apply.</string>
+    <string name="quest_rendering">Quest VR rendering</string>
+    <string name="quest_resolution_scale">OpenXR resolution scale</string>
+    <string name="quest_resolution_scale_description">Scales the headset eye buffers independently of internal resolution. 0.85 is the default. Restart the game to apply.</string>
+    <string name="quest_foveation_level">Foveated rendering</string>
+    <string name="quest_foveation_level_description">Reduces detail at the edges of the final stereo output. Requires Vulkan multiview. Higher levels blur more. Restart the game to apply.</string>
+    <string name="quest_dynamic_foveation">Dynamic foveation</string>
+    <string name="quest_dynamic_foveation_description">Lets the headset reduce foveation below the selected level when GPU load allows. Restart the game to apply.</string>
+    <string name="quest_foveate_efb">Foveate game rendering (experimental)</string>
+    <string name="quest_foveate_efb_description">Also reduces detail at the edges while rendering the game. May affect HUD clarity or slow games that copy the frame buffer frequently. Requires Vulkan multiview and no anti-aliasing. Off by default. Restart the game to apply.</string>
 </resources>

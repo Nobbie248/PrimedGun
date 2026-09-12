@@ -46,14 +46,28 @@ VKTexture::VKTexture(const TextureConfig& tex_config, VmaAllocation alloc, VkIma
 
 VKTexture::~VKTexture()
 {
-  StateTracker::GetInstance()->UnbindTexture(m_view);
-  g_command_buffer_mgr->DeferImageViewDestruction(m_view);
+  if (m_view != VK_NULL_HANDLE)
+  {
+    StateTracker::GetInstance()->UnbindTexture(m_view);
+    g_command_buffer_mgr->DeferImageViewDestruction(m_view);
+  }
 
   // If we don't have device memory allocated, the image is not owned by us (e.g. swapchain)
   if (m_alloc != VK_NULL_HANDLE)
   {
     g_command_buffer_mgr->DeferImageDestruction(m_image, m_alloc);
   }
+}
+
+VkImageView VKTexture::ReleaseView()
+{
+  if (m_view == VK_NULL_HANDLE)
+    return VK_NULL_HANDLE;
+
+  StateTracker::GetInstance()->UnbindTexture(m_view);
+  const VkImageView view = m_view;
+  m_view = VK_NULL_HANDLE;
+  return view;
 }
 
 std::unique_ptr<VKTexture> VKTexture::Create(const TextureConfig& tex_config, std::string_view name)
@@ -1063,8 +1077,7 @@ VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attac
                              std::vector<AbstractTexture*> additional_color_attachments, u32 width,
                              u32 height, u32 layers, u32 samples, VkFramebuffer fb,
                              VkRenderPass load_render_pass, VkRenderPass discard_render_pass,
-                             VkRenderPass clear_render_pass,
-                             bool has_fragment_density_map)
+                             VkRenderPass clear_render_pass, bool has_fragment_density_map)
     : AbstractFramebuffer(
           color_attachment, depth_attachment, std::move(additional_color_attachments),
           color_attachment ? color_attachment->GetFormat() : AbstractTextureFormat::Undefined,
@@ -1078,7 +1091,15 @@ VKFramebuffer::VKFramebuffer(VKTexture* color_attachment, VKTexture* depth_attac
 
 VKFramebuffer::~VKFramebuffer()
 {
-  g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
+  if (m_fb != VK_NULL_HANDLE)
+    g_command_buffer_mgr->DeferFramebufferDestruction(m_fb);
+}
+
+VkFramebuffer VKFramebuffer::ReleaseHandle()
+{
+  const VkFramebuffer framebuffer = m_fb;
+  m_fb = VK_NULL_HANDLE;
+  return framebuffer;
 }
 
 static std::unique_ptr<VKFramebuffer>
@@ -1128,14 +1149,13 @@ CreateFramebufferInternal(VKTexture* color_attachment, VKTexture* depth_attachme
   // framebuffer share it, and ReinterpretPixelData() swaps the two after each format
   // conversion. They must agree on multiview-ness or GX pipelines (built for the
   // multiview render pass) become incompatible with the framebuffer after a swap.
-  const bool is_current_efb =
-      g_framebuffer_manager && color_attachment != nullptr &&
-      depth_attachment == g_framebuffer_manager->GetEFBDepthTexture();
+  const bool is_current_efb = g_framebuffer_manager && color_attachment != nullptr &&
+                              depth_attachment == g_framebuffer_manager->GetEFBDepthTexture();
   const bool can_use_multiview =
       layers == 2 && samples == 1 && g_vulkan_context->SupportsMultiview();
-  const bool automatic_efb_multiview =
-      is_current_efb && can_use_multiview && g_ActiveConfig.vr_use_vulkan_multiview &&
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR;
+  const bool automatic_efb_multiview = is_current_efb && can_use_multiview &&
+                                       g_ActiveConfig.vr_use_vulkan_multiview &&
+                                       g_ActiveConfig.stereo_mode == StereoMode::OpenXR;
   const bool use_multiview = force_multiview || automatic_efb_multiview;
   if (use_multiview && !can_use_multiview)
   {

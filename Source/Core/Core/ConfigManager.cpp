@@ -350,6 +350,10 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id)
   const Config::ConfigChangeCallbackGuard guard;
   const VRSettingMap values = LoadVRSettingsFromINI(game_id);
 
+  ApplyVRSetting(values, "ResolutionScale", Config::GFX_VR_RESOLUTION_SCALE);
+  ApplyVRSetting(values, "FoveationLevel", Config::GFX_VR_FOVEATION_LEVEL);
+  ApplyVRSetting(values, "DynamicFoveation", Config::GFX_VR_FOVEATION_DYNAMIC);
+  ApplyVRSetting(values, "FoveateEFB", Config::GFX_VR_EFB_FOVEATION);
   ApplyVRSetting(values, "EnableOpenXR", Config::GFX_VR_ENABLE_OPENXR);
   ApplyVRSetting(values, "UnitsPerMeter", Config::GFX_VR_UNITS_PER_METER);
   ApplyVRSetting(values, "LeanBackAngle", Config::GFX_VR_LEAN_BACK_ANGLE);

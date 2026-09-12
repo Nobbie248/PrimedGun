@@ -76,7 +76,30 @@ object QuestVrSettings {
 
     fun removeBarsSetting() = vrBooleanSetting("RemoveCinematicBars", true)
 
-    fun useVulkanMultiviewSetting() = vrBooleanSetting("UseVulkanMultiview", true)
+    fun resolutionScaleSetting(): AbstractFloatSetting =
+        object : AbstractFloatSetting by vrFloatSetting("ResolutionScale", 0.85f) {
+            override val isRuntimeEditable: Boolean = false
+        }
+
+    fun foveationLevelSetting(): AbstractIntSetting =
+        object : AbstractIntSetting by vrIntSetting("FoveationLevel", 2) {
+            override val isRuntimeEditable: Boolean = false
+        }
+
+    fun dynamicFoveationSetting(): AbstractBooleanSetting =
+        object : AbstractBooleanSetting by vrBooleanSetting("DynamicFoveation", true) {
+            override val isRuntimeEditable: Boolean = false
+        }
+
+    fun foveateEfbSetting(): AbstractBooleanSetting =
+        object : AbstractBooleanSetting by vrBooleanSetting("FoveateEFB", false) {
+            override val isRuntimeEditable: Boolean = false
+        }
+
+    fun useVulkanMultiviewSetting(): AbstractBooleanSetting =
+        object : AbstractBooleanSetting by vrBooleanSetting("UseVulkanMultiview", false) {
+            override val isRuntimeEditable: Boolean = false
+        }
 
     fun androidDirectToHmdSetting() = vrBooleanSetting("AndroidDirectToHMD", true)
 
