@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/primedgun_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/primedgun_background"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/primedgun_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/primedgun_panel"
+        app:title="@string/primedgun_title"
+        app:titleTextColor="@color/primedgun_text" />
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/primedgun_tabs"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/primedgun_panel"
+        app:tabGravity="fill"
+        app:tabIndicatorColor="@color/primedgun_accent"
+        app:tabMode="scrollable"
+        app:tabSelectedTextColor="@color/primedgun_text"
+        app:tabTextColor="@color/primedgun_text_muted" />
+
+    <FrameLayout
+        android:id="@+id/primedgun_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_margin="8dp"
+        android:layout_weight="1"
+        android:background="@drawable/primedgun_panel_background" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/primedgun_panel"
+        android:orientation="horizontal"
+        android:padding="8dp">
+
+        <Button
+            android:id="@+id/primedgun_save_settings"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/primedgun_control_background"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/primedgun_save_settings"
+            android:textAllCaps="false"
+            android:textColor="@color/primedgun_text" />
+    </LinearLayout>
+</LinearLayout>

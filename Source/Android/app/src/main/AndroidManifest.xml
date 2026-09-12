@@ -138,6 +138,12 @@
             android:exported="false"
             android:theme="@style/Theme.Dolphin.Main" />
 
+        <activity
+            android:name=".features.primedgun.ui.PrimedGunActivity"
+            android:exported="false"
+            android:label="@string/primedgun_title"
+            android:theme="@style/Theme.Dolphin.Main" />
+
         <service
             android:name=".services.SyncChannelJobService"
             android:exported="false"

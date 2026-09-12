@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Mirrors the palette the Qt launcher sets in MainWindow's stylesheet so the Quest UI reads as
+     the same application. -->
+<resources>
+    <color name="primedgun_background">#0E1116</color>
+    <color name="primedgun_panel">#121519</color>
+    <color name="primedgun_panel_border">#353A43</color>
+    <color name="primedgun_control">#242A33</color>
+    <color name="primedgun_control_border">#343C49</color>
+    <color name="primedgun_control_pressed">#303844</color>
+    <color name="primedgun_text">#EDF0F4</color>
+    <color name="primedgun_text_muted">#9AA3B0</color>
+    <color name="primedgun_accent">#C2802E</color>
+    <color name="primedgun_start">#20783B</color>
+    <color name="primedgun_separator">#444955</color>
+</resources>

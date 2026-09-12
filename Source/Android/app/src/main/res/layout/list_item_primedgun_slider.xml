@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- The Qt window puts label, slider, spin box and the -/+ steppers on one row. At panel width
+     that row does not fit, so the label and value take the first line and the slider keeps the
+     steppers beside it on the second. Every control from the desktop row is still present. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/primedgun_slider_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/primedgun_text"
+            android:textSize="14sp"
+            tools:text="Movement speed" />
+
+        <TextView
+            android:id="@+id/primedgun_slider_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:minWidth="64dp"
+            android:textAlignment="textEnd"
+            android:textColor="@color/primedgun_accent"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            tools:text="14.00" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/primedgun_slider_minus"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/primedgun_control_background"
+            android:contentDescription="@string/primedgun_decrease"
+            android:padding="0dp"
+            android:text="@string/primedgun_minus"
+            android:textColor="@color/primedgun_text"
+            android:textSize="18sp" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/primedgun_slider"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:contentDescription="@string/primedgun_slider" />
+
+        <Button
+            android:id="@+id/primedgun_slider_plus"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/primedgun_control_background"
+            android:contentDescription="@string/primedgun_increase"
+            android:padding="0dp"
+            android:text="@string/primedgun_plus"
+            android:textColor="@color/primedgun_text"
+            android:textSize="18sp" />
+    </LinearLayout>
+</LinearLayout>

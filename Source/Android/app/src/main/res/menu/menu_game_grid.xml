@@ -3,6 +3,11 @@
       xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/menu_primedgun"
+        android:title="@string/primedgun_title"
+        app:showAsAction="ifRoom"/>
+
+    <item
         android:id="@+id/menu_settings"
         android:title="@string/grid_menu_settings"
         android:icon="@drawable/ic_settings"

@@ -500,6 +500,7 @@ add_library(core
   PrimedGun/PPCTrace.h
   PrimedGun/Settings.cpp
   PrimedGun/Settings.h
+  PrimedGun/SettingsVisitor.h
   PowerPC/BreakPoints.cpp
   PowerPC/BreakPoints.h
   PowerPC/CachedInterpreter/CachedInterpreter_Disassembler.cpp

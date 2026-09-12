@@ -35,6 +35,7 @@ add_library(main SHARED
   Input/NumericSetting.cpp
   Input/NumericSetting.h
   MainAndroid.cpp
+  PrimedGunSettings.cpp
   RiivolutionPatches.cpp
   SkylanderConfig.cpp
   WiiUtils.cpp

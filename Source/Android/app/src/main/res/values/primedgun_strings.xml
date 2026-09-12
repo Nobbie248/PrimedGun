@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Labels for the PrimedGun settings UI. Wording is kept identical to the Qt launcher so guides
+     and support answers apply to both frontends. -->
+<resources>
+    <string name="primedgun_title">PrimedGun</string>
+
+    <!-- Tabs -->
+    <string name="primedgun_tab_controller">Controller</string>
+    <string name="primedgun_tab_calibration">Calibration</string>
+
+    <!-- Shared controls -->
+    <string name="primedgun_minus">−</string>
+    <string name="primedgun_plus">+</string>
+    <string name="primedgun_decrease">Decrease</string>
+    <string name="primedgun_increase">Increase</string>
+    <string name="primedgun_slider">Value</string>
+    <string name="primedgun_save_settings">Save Settings</string>
+    <string name="primedgun_settings_saved">Settings saved</string>
+    <string name="primedgun_settings_save_failed">Could not write PrimedGun.ini</string>
+
+    <!-- Controller tab -->
+    <string name="primedgun_section_controller_mapping">Controller Mapping</string>
+    <string name="primedgun_reset_controller">Reset Controller</string>
+    <string name="primedgun_right_hand">Right hand</string>
+    <string name="primedgun_left_hand">Left hand</string>
+    <string name="primedgun_vr_menu_hold_left_stick">Longer held press for VR menu</string>
+    <string name="primedgun_vr_menu_requires_head_zone">VR menu requires controller near head to activate</string>
+    <string name="primedgun_combat_jump_use_primary_button">Use A button for jump</string>
+
+    <string name="primedgun_section_rumble_grip">Rumble / Grip Inputs</string>
+    <string name="primedgun_rumble">Rumble</string>
+    <string name="primedgun_rumble_target">Rumble target</string>
+    <string name="primedgun_rumble_both">Both</string>
+    <string name="primedgun_rumble_left_only">Left only</string>
+    <string name="primedgun_rumble_right_only">Right only</string>
+    <string name="primedgun_grip_inputs_enabled">Use grip input</string>
+    <string name="primedgun_grip_inputs_use_trackpad">Use touchpad for PrimedGun grip inputs (Index users)</string>
+    <string name="primedgun_grip_inputs_use_trackpad_note">Use Index touchpad pressure for map and missiles. When off, squeeze the grips. Other controller types use their normal grips.</string>
+    <string name="primedgun_rumble_intensity">Rumble intensity</string>
+
+    <string name="primedgun_section_dpad">D-pad</string>
+    <string name="primedgun_dpad_enabled">Enable visor gesture input</string>
+    <string name="primedgun_dpad_head_radius">Head radius</string>
+    <string name="primedgun_dpad_head_y_below">Below head</string>
+    <string name="primedgun_dpad_deadzone">Stick deadzone</string>
+
+    <string name="primedgun_section_directional_movement">Directional Movement</string>
+    <string name="primedgun_movement_enabled">Left stick strafe movement</string>
+    <string name="primedgun_left_stick">Left stick</string>
+    <string name="primedgun_right_stick">Right stick</string>
+    <string name="primedgun_controller_direction">Controller direction</string>
+    <string name="primedgun_hmd_direction">HMD direction</string>
+    <string name="primedgun_movement_deadzone">Movement deadzone</string>
+    <string name="primedgun_movement_speed">Movement speed</string>
+    <string name="primedgun_movement_accel">Movement acceleration</string>
+    <string name="primedgun_movement_air_accel">Air acceleration</string>
+    <string name="primedgun_look_yaw_sensitivity">Look yaw sensitivity</string>
+    <string name="primedgun_snap_turn">Snap turn</string>
+    <string name="primedgun_snap_turn_angle">Snap turn angle</string>
+    <string name="primedgun_snap_turn_30">30 degrees</string>
+    <string name="primedgun_snap_turn_45">45 degrees</string>
+    <string name="primedgun_snap_turn_60">60 degrees</string>
+    <string name="primedgun_snap_turn_90">90 degrees</string>
+
+    <!-- Calibration tab -->
+    <string name="primedgun_section_in_headset_display">In-headset Display</string>
+    <string name="primedgun_vr_overlays_enabled">In-headset overlays</string>
+    <string name="primedgun_height_prompt_enabled">Show height prompt</string>
+    <string name="primedgun_cinematic_screen_enabled">Show cutscenes on cinema screen</string>
+    <string name="primedgun_vr_menu_floating">Detach VR menu from hand</string>
+    <string name="primedgun_game_menu_screen_enabled">Detach game menu and map from view</string>
+    <string name="primedgun_visor_helmet_enabled">Enable visor helmet</string>
+    <string name="primedgun_visor_helmet_note">Allows user to turn helmet back on in the pause menu</string>
+    <string name="primedgun_position_marker_enabled">Show floor position marker</string>
+
+    <string name="primedgun_section_culling">Culling</string>
+    <string name="primedgun_frustum_culling_enabled">Enable frustum culling</string>
+    <string name="primedgun_frustum_culling_degrees">Culling cone</string>
+
+    <string name="primedgun_section_hud">HUD</string>
+    <string name="primedgun_reset_hud">Reset HUD</string>
+    <string name="primedgun_hud_distance">HUD distance</string>
+    <string name="primedgun_hud_size">HUD size</string>
+    <string name="primedgun_hud_vertical">HUD vertical</string>
+    <string name="primedgun_hud_horizontal">HUD horizontal</string>
+
+    <string name="primedgun_section_targeting">Targeting</string>
+    <string name="primedgun_reset_targeting">Reset Targeting</string>
+    <string name="primedgun_target_distance">Target distance</string>
+    <string name="primedgun_target_radius">Target radius</string>
+
+    <string name="primedgun_section_offset_tuning">Offset Tuning</string>
+    <string name="primedgun_reset_calibration">Reset Calibration</string>
+
+    <string name="primedgun_section_position">Position</string>
+    <string name="primedgun_offset_left_right">Left / right</string>
+    <string name="primedgun_offset_forward_back">Forward / back</string>
+    <string name="primedgun_offset_up_down">Up / down</string>
+
+    <string name="primedgun_section_rotation">Rotation</string>
+    <string name="primedgun_pitch_offset">Pitch offset</string>
+    <string name="primedgun_yaw_offset">Yaw offset</string>
+    <string name="primedgun_roll_offset">Roll offset</string>
+
+    <string name="primedgun_section_presets">Presets</string>
+    <string name="primedgun_preset_default_arm">Default arm preset</string>
+    <string name="primedgun_preset_samus_arm">Samus arm preset</string>
+</resources>

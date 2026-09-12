@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<Button xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/primedgun_action_button"
+    style="?android:attr/borderlessButtonStyle"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/primedgun_control_background"
+    android:minHeight="48dp"
+    android:textAllCaps="false"
+    android:textColor="@color/primedgun_text"
+    android:textSize="14sp"
+    tools:text="Reset Controller" />
