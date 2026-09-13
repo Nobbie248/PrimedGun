@@ -81,13 +81,29 @@ private:
   bool m_projection_changed = false;
   bool m_viewport_changed = false;
 
-  // Cached OpenXR head pose data — refreshed only at frame boundaries (XFB copy)
-  // when vr_lock_head_pose is enabled, otherwise refreshed every SetConstants call.
-  std::array<std::array<float, 4>, 4> m_cached_eye_projection{};
-  std::array<std::array<float, 4>, 2> m_cached_eye_z_row{};
-  std::array<std::array<float, 4>, 4> m_cached_head_projection{};
-  float m_cached_units_per_meter = 0.0f;
+  // Cached OpenXR eye projection rows keyed by units-per-meter. Every entry is dropped at the
+  // frame boundary (XFB copy) and, unless the head pose is locked per frame, whenever
+  // LocateViews publishes new eye views. Draws that alternate between HUD and world scales
+  // reuse an entry instead of redoing the projection trig on each draw.
+  struct EyeProjectionEntry
+  {
+    bool valid = false;
+    bool freelook_applied = false;
+    float units_per_meter = 0.0f;
+    std::array<std::array<float, 4>, 4> eye_projection{};
+    std::array<std::array<float, 4>, 2> eye_z_row{};
+    std::array<std::array<float, 4>, 4> head_projection{};
+  };
+  static constexpr size_t NUM_EYE_PROJECTION_ENTRIES = 4;
+  std::array<EyeProjectionEntry, NUM_EYE_PROJECTION_ENTRIES> m_eye_projection_entries{};
+  size_t m_eye_projection_next_entry = 0;
+  int m_current_eye_projection_entry = -1;
+  u64 m_cached_eye_views_generation = 0;
   bool m_vr_pose_needs_refresh = true;
+
+  void InvalidateEyeProjectionEntries();
+  // Returns the entry index for this scale, computing the rows on a miss.
+  int LookupEyeProjection(float units_per_meter, bool apply_freelook, bool record_rendered_views);
 
   // Shared reference depth for the headlocked perspective HUD (-3) path. Stable body layers choose
   // the next frame's anchor; all coherent draws in a frame reuse one anchor so they share one

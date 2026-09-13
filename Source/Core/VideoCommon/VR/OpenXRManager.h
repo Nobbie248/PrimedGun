@@ -255,6 +255,9 @@ public:
     return m_present_eye_views_valid ? m_present_eye_views : m_submitted_eye_views;
   }
   bool AreEyeViewsValid() const { return m_eye_views_valid; }
+  // Advances on every LocateViews call, so video-thread callers can cache values derived
+  // from GetEyeViews() until the next update.
+  uint64_t GetEyeViewsGeneration() const { return m_eye_views_generation; }
   bool AreSubmittedEyeViewsValid() const { return m_submitted_eye_views_valid; }
   const std::array<XrViewConfigurationView, 2>& GetViewConfigViews() const
   {
@@ -427,6 +430,7 @@ private:
   bool m_present_eye_views_valid = false;
 
   bool m_eye_views_valid = false;
+  uint64_t m_eye_views_generation = 0;
   bool m_submitted_eye_views_valid = false;
 
   // LocateViews owns render tracking on the video thread. Input runs on the pacing

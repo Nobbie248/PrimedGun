@@ -211,6 +211,9 @@ extern const Info<OpenXRReferenceSpaceMode> GFX_VR_REFERENCE_SPACE_MODE;
 extern const Info<OpenXRTrackingMode> GFX_VR_TRACKING_MODE;
 extern const Info<bool> GFX_VR_USE_OPENXR_PLAY_SPACE_CENTER;
 extern const Info<bool> GFX_VR_USE_XR_PACING_THREAD;
+// Samples per-draw CPU timing into the Vulkan VKPERF counters. Off by default: the timer
+// reads alone cost about 3% of the video thread on Quest.
+extern const Info<bool> GFX_VR_PERF_COUNTERS;
 extern const Info<bool> GFX_VR_EAGER_HEARTBEAT;
 extern const Info<int> GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE;
 extern const Info<int> GFX_VR_FORCED_VBI_FREQUENCY;

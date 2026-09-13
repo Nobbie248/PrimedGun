@@ -230,6 +230,7 @@ void VideoConfig::Refresh()
       std::isfinite(blend_width) ? std::clamp(blend_width, 0.0f, 1.0f) : 0.10f;
   vr_tracking_mode = Config::Get(Config::GFX_VR_TRACKING_MODE);
   vr_use_xr_pacing_thread = Config::Get(Config::GFX_VR_USE_XR_PACING_THREAD);
+  vr_perf_counters = Config::Get(Config::GFX_VR_PERF_COUNTERS);
   vr_eager_heartbeat = Config::Get(Config::GFX_VR_EAGER_HEARTBEAT);
   vr_opcode_replay_target_refresh_rate = Config::NormalizeVROpcodeReplayTargetRefreshRate(
       Config::Get(Config::GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE));

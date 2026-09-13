@@ -166,7 +166,9 @@ struct TCacheEntry
   u32 pending_efb_copy_width = 0;
   u32 pending_efb_copy_height = 0;
 
-  std::string texture_info_name = "";
+  void SetTextureInfoName(std::string name);
+  const std::string& GetTextureInfoName() const { return m_texture_info_name; }
+  u64 GetOverrideHash() const { return m_texture_name_hash != 0 ? m_texture_name_hash : hash; }
 
   VideoCommon::CustomAsset::TimeType last_load_time;
   std::shared_ptr<HiresTexture> hires_texture;
@@ -237,6 +239,11 @@ struct TCacheEntry
   u32 GetNumLayers() const { return texture->GetConfig().layers; }
   AbstractTextureFormat GetFormat() const { return texture->GetConfig().format; }
   void DoState(PointerWrap& p);
+
+private:
+  std::string m_texture_info_name;
+  // Only the parsed filename hash is cached. The fallback hash can change with EFB/palette content.
+  u64 m_texture_name_hash = 0;
 };
 
 using RcTcacheEntry = std::shared_ptr<TCacheEntry>;

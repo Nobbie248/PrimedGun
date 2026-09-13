@@ -2054,6 +2054,7 @@ bool OpenXRManager::LocateViews()
   uint32_t view_count = static_cast<uint32_t>(m_views.size());
   m_views.fill({XR_TYPE_VIEW});
   m_eye_views_valid = false;
+  ++m_eye_views_generation;
 
   const XrResult locate_result =
       xrLocateViews(m_session, &locate_info, &view_state, view_count, &view_count, m_views.data());

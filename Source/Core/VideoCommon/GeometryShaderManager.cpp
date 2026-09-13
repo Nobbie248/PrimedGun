@@ -290,55 +290,41 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
           // When the head-pose lock is on, only re-fetch the head pose from OpenXR when
           // we've been explicitly invalidated (at the XFB-copy frame boundary).  This
           // prevents mid-frame LocateViews() updates from desynchronising different draw
-          // calls within the same game frame.  When OFF, refetch every call (legacy
-          // behavior — kept as an escape hatch).
+          // calls within the same game frame.  When OFF, follow every LocateViews update
+          // (legacy behavior — kept as an escape hatch); the eye-view generation says when
+          // one happened, so draws in between reuse the cached rows for their scale.
           // During opcode replay, never refresh: the real frame's cache is already
           // correct, and BPStructs' XFB-copy LocateViews has mutated m_eye_views
           // between real-frame draws and replay-frame draws.  Refreshing here would
           // render the replay with a different pose than the real frame it pairs
           // with, producing alternating-frame flicker on head rotation.
           const bool is_replay = VideoCommon::OpenXROpcodeReplay::IsReplaying();
-          const bool upm_changed = std::abs(upm - m_cached_units_per_meter) > 0.0001f;
-          const bool need_refresh =
-              !is_replay && (upm_changed || !g_ActiveConfig.VRLockHeadPoseEffective() ||
-                             m_vr_pose_needs_refresh);
-          if (need_refresh)
+          if (!is_replay)
           {
-            std::array<std::array<float, 4>, 4> eye_projection_rows{};
-            std::array<std::array<float, 4>, 2> eye_z_rows{};
-            VR::g_openxr->GetEyeProjectionRows(upm, eye_projection_rows, eye_z_rows);
-
-            // OpenXR stereo path bypasses the classic cproj path, so apply freelook here too.
-            if (perspective && g_freelook_camera.IsActive())
+            const u64 eye_views_generation = VR::g_openxr->GetEyeViewsGeneration();
+            if (m_vr_pose_needs_refresh || (!g_ActiveConfig.VRLockHeadPoseEffective() &&
+                                            eye_views_generation != m_cached_eye_views_generation))
             {
-              const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
-              ApplyRowTransform(&eye_projection_rows, freelook_view);
-              ApplyRowTransform(&eye_z_rows, freelook_view);
+              InvalidateEyeProjectionEntries();
+              m_cached_eye_views_generation = eye_views_generation;
+              m_vr_pose_needs_refresh = false;
             }
-
-            m_cached_eye_projection = eye_projection_rows;
-            m_cached_eye_z_row = eye_z_rows;
-            m_cached_units_per_meter = upm;
-
-            // Unrotated per-eye projection rows for head-locked content.
-            std::array<std::array<float, 4>, 4> head_proj_rows{};
-            VR::g_openxr->GetRawEyeProjectionRows(upm, head_proj_rows);
-            m_cached_head_projection = head_proj_rows;
-
-            // Snapshot the pose the cache was built from.  SubmitFrame will use
-            // this snapshot so render_pose == submit_pose regardless of any
-            // later LocateViews that may clobber m_eye_views before xrEndFrame.
-            VR::g_openxr->RecordRenderedEyeViews();
-
-            m_vr_pose_needs_refresh = false;
+            // OpenXR stereo path bypasses the classic cproj path, so apply freelook here too.
+            m_current_eye_projection_entry =
+                LookupEyeProjection(upm, perspective && g_freelook_camera.IsActive(), true);
           }
 
-          constants.eye_projection[0] = m_cached_eye_projection[0];
-          constants.eye_projection[1] = m_cached_eye_projection[1];
-          constants.eye_projection[2] = m_cached_eye_projection[2];
-          constants.eye_projection[3] = m_cached_eye_projection[3];
-          constants.eye_z_row[0] = m_cached_eye_z_row[0];
-          constants.eye_z_row[1] = m_cached_eye_z_row[1];
+          static const EyeProjectionEntry s_empty_eye_projection{};
+          const EyeProjectionEntry& eye_projection =
+              m_current_eye_projection_entry >= 0 ?
+                  m_eye_projection_entries[m_current_eye_projection_entry] :
+                  s_empty_eye_projection;
+          constants.eye_projection[0] = eye_projection.eye_projection[0];
+          constants.eye_projection[1] = eye_projection.eye_projection[1];
+          constants.eye_projection[2] = eye_projection.eye_projection[2];
+          constants.eye_projection[3] = eye_projection.eye_projection[3];
+          constants.eye_z_row[0] = eye_projection.eye_z_row[0];
+          constants.eye_z_row[1] = eye_projection.eye_z_row[1];
 
           // The Vulkan legacy projected-space fallback is only safe for runtimes/headsets that
           // tolerate approximating the runtime frustum in projected space.
@@ -382,10 +368,10 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
 #endif
 
           // Unrotated per-eye projection rows for head-locked content (cached above).
-          constants.head_projection[0] = m_cached_head_projection[0];
-          constants.head_projection[1] = m_cached_head_projection[1];
-          constants.head_projection[2] = m_cached_head_projection[2];
-          constants.head_projection[3] = m_cached_head_projection[3];
+          constants.head_projection[0] = eye_projection.head_projection[0];
+          constants.head_projection[1] = eye_projection.head_projection[1];
+          constants.head_projection[2] = eye_projection.head_projection[2];
+          constants.head_projection[3] = eye_projection.head_projection[3];
           for (u32 eye = 0; eye < 2; ++eye)
           {
             auto& row0 = constants.head_projection[eye * 2 + 0];
@@ -637,11 +623,12 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             // Rebuild rotated (eye_proj) and unrotated (head_proj) per-eye projection
             // rows with the layer-specific UPM.  Both are consumed by the GS — Screen
             // path uses eye_proj (rotated), HeadLocked uses head_proj (unrotated).
-            std::array<std::array<float, 4>, 4> layer_eye_proj{};
-            std::array<std::array<float, 4>, 2> layer_eye_z{};
-            std::array<std::array<float, 4>, 4> layer_head_proj{};
-            VR::g_openxr->GetEyeProjectionRows(layer_upm, layer_eye_proj, layer_eye_z);
-            VR::g_openxr->GetRawEyeProjectionRows(layer_upm, layer_head_proj);
+            // Cached per layer scale; the width/height hacks below are applied to copies.
+            const EyeProjectionEntry& layer_entry =
+                m_eye_projection_entries[LookupEyeProjection(layer_upm, false, false)];
+            std::array<std::array<float, 4>, 4> layer_eye_proj = layer_entry.eye_projection;
+            std::array<std::array<float, 4>, 2> layer_eye_z = layer_entry.eye_z_row;
+            std::array<std::array<float, 4>, 4> layer_head_proj = layer_entry.head_projection;
             // Apply fWidthHack / fHeightHack to projection rows (mirrors Hydra
             // VertexShaderManager.cpp:1530-1549).  Row 0 is X (multiply by width_hack),
             // row 1 is Y (multiply by height_hack).
@@ -741,6 +728,58 @@ void GeometryShaderManager::SetProjectionChanged()
 {
   m_projection_changed = true;
 }
+
+#ifdef ENABLE_VR
+void GeometryShaderManager::InvalidateEyeProjectionEntries()
+{
+  for (EyeProjectionEntry& entry : m_eye_projection_entries)
+    entry.valid = false;
+  m_eye_projection_next_entry = 0;
+  m_current_eye_projection_entry = -1;
+}
+
+int GeometryShaderManager::LookupEyeProjection(float units_per_meter, bool apply_freelook,
+                                               bool record_rendered_views)
+{
+  for (size_t i = 0; i < NUM_EYE_PROJECTION_ENTRIES; ++i)
+  {
+    const EyeProjectionEntry& entry = m_eye_projection_entries[i];
+    if (entry.valid && entry.freelook_applied == apply_freelook &&
+        std::abs(entry.units_per_meter - units_per_meter) <= 0.0001f)
+    {
+      return static_cast<int>(i);
+    }
+  }
+
+  // Round-robin replacement that never evicts the entry the current frame's draws use, so a
+  // layer lookup cannot invalidate what opcode replay will re-read.
+  size_t slot = m_eye_projection_next_entry;
+  if (static_cast<int>(slot) == m_current_eye_projection_entry)
+    slot = (slot + 1) % NUM_EYE_PROJECTION_ENTRIES;
+  m_eye_projection_next_entry = (slot + 1) % NUM_EYE_PROJECTION_ENTRIES;
+
+  EyeProjectionEntry& entry = m_eye_projection_entries[slot];
+  entry.valid = true;
+  entry.freelook_applied = apply_freelook;
+  entry.units_per_meter = units_per_meter;
+  VR::g_openxr->GetEyeProjectionRows(units_per_meter, entry.eye_projection, entry.eye_z_row);
+  if (apply_freelook)
+  {
+    const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
+    ApplyRowTransform(&entry.eye_projection, freelook_view);
+    ApplyRowTransform(&entry.eye_z_row, freelook_view);
+  }
+  // Unrotated per-eye projection rows for head-locked content.
+  VR::g_openxr->GetRawEyeProjectionRows(units_per_meter, entry.head_projection);
+  if (record_rendered_views)
+  {
+    // Snapshot the pose these rows were built from. SubmitFrame uses this snapshot so
+    // render_pose == submit_pose regardless of any later LocateViews before xrEndFrame.
+    VR::g_openxr->RecordRenderedEyeViews();
+  }
+  return static_cast<int>(slot);
+}
+#endif
 
 void GeometryShaderManager::InvalidateVRHeadPose()
 {

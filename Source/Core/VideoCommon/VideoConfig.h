@@ -378,6 +378,7 @@ struct VideoConfig final
   int vr_opcode_replay_target_refresh_rate = -1;
   bool vr_use_openxr_play_space_center = false;
   bool vr_use_xr_pacing_thread = true;
+  bool vr_perf_counters = false;  // Sample per-draw CPU timing into the backend VKPERF counters
   bool vr_eager_heartbeat = false;
   bool vr_auto_layer_spread = true;
   bool vr_remove_bars = true;       // Expand scissor/viewport to remove cinematic letterbox bars

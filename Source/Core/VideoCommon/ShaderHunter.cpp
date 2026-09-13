@@ -86,7 +86,8 @@ u64 ComputePixelFamilySignature(const pixel_shader_uid_data& uid)
   return signature;
 }
 
-u64 ComputeShaderFamilySignature(ShaderHunter::ShaderType type, const u8* uid_data, size_t uid_size)
+u64 ComputeShaderFamilySignature(ShaderHunter::ShaderType type, u64 hash, const u8* uid_data,
+                                 size_t uid_size)
 {
   if (!uid_data || uid_size == 0)
     return 0;
@@ -97,7 +98,8 @@ u64 ComputeShaderFamilySignature(ShaderHunter::ShaderType type, const u8* uid_da
     return ComputePixelFamilySignature(*ps_uid);
   }
 
-  return static_cast<u64>(Common::ComputeCRC32(uid_data, static_cast<u32>(uid_size)));
+  // Non-pixel families use the same complete-UID CRC32 supplied by the draw caller.
+  return hash;
 }
 
 std::vector<u64> GetSortedTextureHashes(
@@ -121,9 +123,35 @@ ShaderHunter& ShaderHunter::GetInstance()
 
 u64 ShaderHunter::RegisterShader(ShaderType type, u64 hash, const u8* uid_data, size_t uid_size)
 {
-  const u64 family_signature = ComputeShaderFamilySignature(type, uid_data, uid_size);
+  const u64 family_signature = ComputeShaderFamilySignature(type, hash, uid_data, uid_size);
 
   std::lock_guard lock(m_mutex);
+  return RegisterShaderLocked(type, hash, family_signature, uid_data, uid_size);
+}
+
+ShaderHunter::DrawShaderFamilies
+ShaderHunter::RegisterDrawShaders(u64 vs_hash, const u8* vs_uid, size_t vs_uid_size, u64 ps_hash,
+                                  const u8* ps_uid, size_t ps_uid_size, u64 gs_hash,
+                                  const u8* gs_uid, size_t gs_uid_size)
+{
+  const u64 vs_family =
+      ComputeShaderFamilySignature(ShaderType::Vertex, vs_hash, vs_uid, vs_uid_size);
+  const u64 ps_family =
+      ComputeShaderFamilySignature(ShaderType::Pixel, ps_hash, ps_uid, ps_uid_size);
+  const u64 gs_family =
+      ComputeShaderFamilySignature(ShaderType::Geometry, gs_hash, gs_uid, gs_uid_size);
+
+  std::lock_guard lock(m_mutex);
+  DrawShaderFamilies families;
+  families.vs = RegisterShaderLocked(ShaderType::Vertex, vs_hash, vs_family, vs_uid, vs_uid_size);
+  families.ps = RegisterShaderLocked(ShaderType::Pixel, ps_hash, ps_family, ps_uid, ps_uid_size);
+  families.gs = RegisterShaderLocked(ShaderType::Geometry, gs_hash, gs_family, gs_uid, gs_uid_size);
+  return families;
+}
+
+u64 ShaderHunter::RegisterShaderLocked(ShaderType type, u64 hash, u64 family_signature,
+                                       const u8* uid_data, size_t uid_size)
+{
   const int t = static_cast<int>(type);
   if (hash != 0 && family_signature != 0)
     m_shader_family_signatures[t][hash] = family_signature;

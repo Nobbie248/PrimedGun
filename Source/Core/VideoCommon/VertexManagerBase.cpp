@@ -1559,9 +1559,9 @@ void VertexManagerBase::Flush()
         const auto cache_entry = g_texture_cache->Load(i);
         if (cache_entry)
         {
-          if (!Common::Contains(texture_names, cache_entry->texture_info_name))
+          if (!Common::Contains(texture_names, cache_entry->GetTextureInfoName()))
           {
-            texture_names.push_back(cache_entry->texture_info_name);
+            texture_names.push_back(cache_entry->GetTextureInfoName());
             texture_units.push_back(i);
           }
 
@@ -1685,12 +1685,14 @@ void VertexManagerBase::Flush()
           const auto& vs = m_current_pipeline_config.vs_uid;
           const auto& ps = m_current_pipeline_config.ps_uid;
           const auto& gs = m_current_pipeline_config.gs_uid;
-          const u64 vs_hash =
-              Common::ComputeCRC32(vs.GetUidDataRaw(), static_cast<u32>(vs.GetUidDataSize()));
-          const u64 ps_hash =
-              Common::ComputeCRC32(ps.GetUidDataRaw(), static_cast<u32>(ps.GetUidDataSize()));
-          const u64 gs_hash =
-              Common::ComputeCRC32(gs.GetUidDataRaw(), static_cast<u32>(gs.GetUidDataSize()));
+          const auto get_override_hash = [](const auto& uid, std::optional<u64>& cached) {
+            if (!cached)
+              cached = Common::ComputeCRC32(uid.GetUidDataRaw(), uid.GetUidDataSize());
+            return *cached;
+          };
+          const u64 vs_hash = get_override_hash(vs, m_current_vs_override_hash);
+          const u64 ps_hash = get_override_hash(ps, m_current_ps_override_hash);
+          const u64 gs_hash = get_override_hash(gs, m_current_gs_override_hash);
 
           std::array<u64, 8> tex_hashes{};
           std::array<std::string, 8> tex_names{};
@@ -1719,12 +1721,12 @@ void VertexManagerBase::Flush()
           u64 gs_family = 0;
           if (hunter_enabled || hunter_needs_families || elements_runtime_active)
           {
-            vs_family = hunter.RegisterShader(ShaderHunter::ShaderType::Vertex, vs_hash,
-                                              vs.GetUidDataRaw(), vs.GetUidDataSize());
-            ps_family = hunter.RegisterShader(ShaderHunter::ShaderType::Pixel, ps_hash,
-                                              ps.GetUidDataRaw(), ps.GetUidDataSize());
-            gs_family = hunter.RegisterShader(ShaderHunter::ShaderType::Geometry, gs_hash,
-                                              gs.GetUidDataRaw(), gs.GetUidDataSize());
+            const auto families = hunter.RegisterDrawShaders(
+                vs_hash, vs.GetUidDataRaw(), vs.GetUidDataSize(), ps_hash, ps.GetUidDataRaw(),
+                ps.GetUidDataSize(), gs_hash, gs.GetUidDataRaw(), gs.GetUidDataSize());
+            vs_family = families.vs;
+            ps_family = families.ps;
+            gs_family = families.gs;
             hunter.SetCurrentDrawShaderFamilies(vs_family, ps_family, gs_family);
           }
 
@@ -1751,6 +1753,7 @@ void VertexManagerBase::Flush()
           }
 
           std::optional<ElementsGroupManager::DrawRecord> element_draw;
+          std::optional<ElementsGroupManager::DrawResolution> element_resolution;
           if (elements_runtime_active)
           {
             const bool needs_profile_classification = elements.NeedsProfileClassification();
@@ -1832,25 +1835,24 @@ void VertexManagerBase::Flush()
                 element_draw->draw_sequence);
             committed_hide_object_capture = true;
 
-            const auto preview_action = elements.RegisterDraw(*element_draw);
-            elements_skip = preview_action == ElementsGroupManager::PreviewAction::Skip;
-            if (preview_action == ElementsGroupManager::PreviewAction::Pink)
+            // One lock covers hunt registration, flag matches, element counters and the
+            // override queries; the results are consumed below in the original order.
+            element_resolution = elements.ResolveDraw(*element_draw);
+            elements_skip =
+                element_resolution->preview == ElementsGroupManager::PreviewAction::Skip;
+            if (element_resolution->preview == ElementsGroupManager::PreviewAction::Pink)
               shader_hunter_force_pink = true;
           }
 
           // Register flag shaders (must be before skip/handling checks)
           if (hunter_has_overrides)
             hunter.RegisterFlags(vs_hash, ps_hash, gs_hash);
-          if (elements_runtime_active)
-            elements.RegisterFlagsForDraw(*element_draw);
 
           if (hunter_needs_counters)
             hunter.AdvanceOverrideDrawCounters(vs_hash, ps_hash, gs_hash);
-          if (elements_runtime_active)
-            elements.AdvanceOverrideDrawCounters(*element_draw);
 
           if (!hunter_skip && !elements_skip && elements_runtime_active && elements_has_overrides)
-            elements_skip = elements.ShouldSkipByOverride(*element_draw);
+            elements_skip = element_resolution->skip;
 
           if (!hunter_skip && !elements_skip && element_draw)
           {
@@ -1885,18 +1887,18 @@ void VertexManagerBase::Flush()
                                MetroidHydraHudSettings{};
 
             if (elements_runtime_active && elements_has_overrides)
-              handling = elements.GetOverrideHandling(*element_draw);
+              handling = element_resolution->handling;
             if (handling != ShaderHunter::HandlingType::Skip)
             {
               if (handling == ShaderHunter::HandlingType::Screen ||
                   handling == ShaderHunter::HandlingType::HeadLocked)
               {
-                manual_layer = elements.GetOverrideLayer(*element_draw);
-                element_depth = elements.GetOverrideElementDepth(*element_draw);
+                manual_layer = element_resolution->layer;
+                element_depth = element_resolution->element_depth;
               }
               else if (handling == ShaderHunter::HandlingType::UnitsPerMeter)
               {
-                units_per_meter = elements.GetOverrideUnitsPerMeter(*element_draw);
+                units_per_meter = element_resolution->units_per_meter;
               }
             }
             else if (hunter_has_overrides)
@@ -2399,6 +2401,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (vs_uid != m_current_pipeline_config.vs_uid)
   {
     m_current_pipeline_config.vs_uid = vs_uid;
+    m_current_vs_override_hash.reset();
     m_current_uber_pipeline_config.vs_uid = UberShader::GetVertexShaderUid();
     m_pipeline_config_changed = true;
   }
@@ -2407,6 +2410,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (ps_uid != m_current_pipeline_config.ps_uid)
   {
     m_current_pipeline_config.ps_uid = ps_uid;
+    m_current_ps_override_hash.reset();
     m_current_uber_pipeline_config.ps_uid = UberShader::GetPixelShaderUid();
     m_pipeline_config_changed = true;
   }
@@ -2415,6 +2419,7 @@ void VertexManagerBase::UpdatePipelineConfig()
   if (gs_uid != m_current_pipeline_config.gs_uid)
   {
     m_current_pipeline_config.gs_uid = gs_uid;
+    m_current_gs_override_hash.reset();
     m_current_uber_pipeline_config.gs_uid = gs_uid;
     m_pipeline_config_changed = true;
   }

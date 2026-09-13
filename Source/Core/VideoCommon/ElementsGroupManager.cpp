@@ -1029,9 +1029,10 @@ void ElementsGroupManager::LoadOverrides(const std::string& game_id)
   m_draw_counters.clear();
   m_draw_totals_prev.clear();
   m_current_draw_indices.clear();
-  m_stable_submatch_occurrence_counters.clear();
+  m_stable_submatch_occurrence_counters.Clear();
   m_current_stable_submatch = {};
   m_active_profiles.clear();
+  m_prime1_gc_profile_active.store(false);
   m_metroid_classifier = {};
   if (game_id.empty())
   {
@@ -1058,6 +1059,9 @@ void ElementsGroupManager::LoadOverrides(const std::string& game_id)
 
   m_has_overrides.store(!m_overrides.empty());
   m_has_profile_overrides.store(!m_active_profiles.empty());
+  m_prime1_gc_profile_active.store(std::find(m_active_profiles.begin(), m_active_profiles.end(),
+                                             MetroidElementProfile::Prime1GC) !=
+                                   m_active_profiles.end());
 
   if (!m_overrides.empty())
   {
@@ -1088,9 +1092,7 @@ bool ElementsGroupManager::NeedsProfileClassification() const
 
 bool ElementsGroupManager::IsMetroidPrime1GCProfileActive() const
 {
-  std::lock_guard lock(m_mutex);
-  return std::find(m_active_profiles.begin(), m_active_profiles.end(),
-                   MetroidElementProfile::Prime1GC) != m_active_profiles.end();
+  return m_prime1_gc_profile_active.load();
 }
 
 void ElementsGroupManager::SetPopupOpen(bool open)
@@ -1120,7 +1122,7 @@ void ElementsGroupManager::SetPopupOpen(bool open)
     m_collecting_highlighted_draw.reset();
     m_display_highlighted_draw.reset();
     m_display_highlighted_match_raw_draw_count = 0;
-    m_stable_submatch_occurrence_counters.clear();
+    m_stable_submatch_occurrence_counters.Clear();
     m_current_stable_submatch = {};
     ClearSeedSelectionLocked();
   }
@@ -1593,7 +1595,11 @@ void ElementsGroupManager::ClassifyProfileDraw(DrawRecord* draw,
 ElementsGroupManager::PreviewAction ElementsGroupManager::RegisterDraw(const DrawRecord& draw)
 {
   std::lock_guard lock(m_mutex);
+  return RegisterDrawLocked(draw);
+}
 
+ElementsGroupManager::PreviewAction ElementsGroupManager::RegisterDrawLocked(const DrawRecord& draw)
+{
   if (m_popup_open_count > 0 && m_hunt_enabled)
   {
     DrawRecord recorded = draw;
@@ -1745,7 +1751,7 @@ void ElementsGroupManager::OnFrameEnd()
     m_display_highlighted_match_raw_draw_count = 0;
   }
 
-  m_stable_submatch_occurrence_counters.clear();
+  m_stable_submatch_occurrence_counters.Clear();
   m_current_stable_submatch = {};
 }
 
@@ -1799,25 +1805,29 @@ ElementsGroupManager::ResolveSelectedMatchDisplayDrawsLocked() const
   return result;
 }
 
-ElementsGroupManager::StableSubMatchSignature
-ElementsGroupManager::GetStableSubMatchSignatureLocked(const DrawRecord& draw) const
+void ElementsGroupManager::EnsureStableSubMatchSignatureLocked(const DrawRecord& draw) const
 {
   if (m_current_stable_submatch.valid && m_current_stable_submatch.draw_sequence == draw.draw_sequence)
-    return m_current_stable_submatch.signature;
+    return;
 
-  const StableSubMatchSignature base_signature = MakeStableSubMatchSignature(draw, -1);
-  const u64 base_key = static_cast<u64>(ComputeStableSubMatchBaseKey(base_signature));
-  const int occurrence_slot = m_stable_submatch_occurrence_counters[base_key]++;
+  auto signature = MakeStableSubMatchSignature(draw, -1);
+  const u64 base_key = static_cast<u64>(ComputeStableSubMatchBaseKey(signature));
+  signature.occurrence_slot = m_stable_submatch_occurrence_counters.Increment(base_key);
   m_current_stable_submatch.valid = true;
   m_current_stable_submatch.draw_sequence = draw.draw_sequence;
-  m_current_stable_submatch.signature = MakeStableSubMatchSignature(draw, occurrence_slot);
-  return m_current_stable_submatch.signature;
+  // Matching reads this context under m_mutex. Do not copy its texture vector for each query.
+  m_current_stable_submatch.signature = std::move(signature);
 }
 
 void ElementsGroupManager::AdvanceOverrideDrawCounters(const DrawRecord& draw)
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  AdvanceOverrideDrawCountersLocked(draw);
+}
+
+void ElementsGroupManager::AdvanceOverrideDrawCountersLocked(const DrawRecord& draw)
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.element_start < 0 || entry.element_end < 0)
@@ -1980,7 +1990,12 @@ bool ElementsGroupManager::DoesEntryMatch(const ElementGroupOverride& entry, con
 void ElementsGroupManager::RegisterFlagsForDraw(const DrawRecord& draw)
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  RegisterFlagsForDrawLocked(draw);
+}
+
+void ElementsGroupManager::RegisterFlagsForDrawLocked(const DrawRecord& draw)
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.flag_group.empty())
@@ -1999,7 +2014,12 @@ void ElementsGroupManager::RegisterFlagsForDraw(const DrawRecord& draw)
 bool ElementsGroupManager::ShouldSkipByOverride(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return ShouldSkipByOverrideLocked(draw);
+}
+
+bool ElementsGroupManager::ShouldSkipByOverrideLocked(const DrawRecord& draw) const
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.handling != HandlingType::Skip)
@@ -2021,7 +2041,13 @@ ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
     const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideHandlingLocked(draw);
+}
+
+ElementsGroupManager::HandlingType
+ElementsGroupManager::GetOverrideHandlingLocked(const DrawRecord& draw) const
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.handling == HandlingType::Skip || entry.handling == HandlingType::Flag)
@@ -2042,7 +2068,12 @@ ElementsGroupManager::HandlingType ElementsGroupManager::GetOverrideHandling(
 int ElementsGroupManager::GetOverrideLayer(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideLayerLocked(draw);
+}
+
+int ElementsGroupManager::GetOverrideLayerLocked(const DrawRecord& draw) const
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.layer < 0)
@@ -2056,7 +2087,12 @@ int ElementsGroupManager::GetOverrideLayer(const DrawRecord& draw) const
 float ElementsGroupManager::GetOverrideElementDepth(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideElementDepthLocked(draw);
+}
+
+float ElementsGroupManager::GetOverrideElementDepthLocked(const DrawRecord& draw) const
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.element_depth < 0.0f)
@@ -2070,7 +2106,12 @@ float ElementsGroupManager::GetOverrideElementDepth(const DrawRecord& draw) cons
 float ElementsGroupManager::GetOverrideUnitsPerMeter(const DrawRecord& draw) const
 {
   std::lock_guard lock(m_mutex);
-  GetStableSubMatchSignatureLocked(draw);
+  return GetOverrideUnitsPerMeterLocked(draw);
+}
+
+float ElementsGroupManager::GetOverrideUnitsPerMeterLocked(const DrawRecord& draw) const
+{
+  EnsureStableSubMatchSignatureLocked(draw);
   for (const auto& entry : m_overrides)
   {
     if (entry.units_per_meter <= 0.0f)
@@ -2079,4 +2120,31 @@ float ElementsGroupManager::GetOverrideUnitsPerMeter(const DrawRecord& draw) con
       return entry.units_per_meter;
   }
   return -1.0f;
+}
+
+ElementsGroupManager::DrawResolution ElementsGroupManager::ResolveDraw(const DrawRecord& draw)
+{
+  std::lock_guard lock(m_mutex);
+  DrawResolution resolution;
+  resolution.preview = RegisterDrawLocked(draw);
+  RegisterFlagsForDrawLocked(draw);
+  AdvanceOverrideDrawCountersLocked(draw);
+  if (m_overrides.empty())
+    return resolution;
+
+  // The queries below are pure reads of this draw's context; evaluating them eagerly here
+  // matches what the separate calls returned, in the same order.
+  resolution.skip = ShouldSkipByOverrideLocked(draw);
+  resolution.handling = GetOverrideHandlingLocked(draw);
+  if (resolution.handling == HandlingType::Screen ||
+      resolution.handling == HandlingType::HeadLocked)
+  {
+    resolution.layer = GetOverrideLayerLocked(draw);
+    resolution.element_depth = GetOverrideElementDepthLocked(draw);
+  }
+  else if (resolution.handling == HandlingType::UnitsPerMeter)
+  {
+    resolution.units_per_meter = GetOverrideUnitsPerMeterLocked(draw);
+  }
+  return resolution;
 }

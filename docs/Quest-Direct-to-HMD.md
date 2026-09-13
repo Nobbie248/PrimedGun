@@ -47,9 +47,10 @@ Validation on Quest 3, 2026-09-12:
 - `git diff --check` passed. Changed C++ regions were formatted with clang-format
   19.1.5. Desktop and non-VR builds were not separately compiled; the direct-mode
   predicate compiles to false outside Android VR.
-- The heavy-area gameplay comparison and subjective HUD/visor/head-motion check
-  are awaiting user feedback; title/menu timings are not comparable to the earlier
-  heavy-area performance measurements.
+- On 2026-09-13 the user confirmed a significant performance improvement with
+  direct mode. This is subjective gameplay feedback; title/menu timings are not
+  comparable to the earlier heavy-area performance measurements. The subsequent
+  CPU profile is recorded in `Quest-Draw-Cache-Performance.md`.
 
 Artifacts are in the ignored `Source/Android/app/build/direct-hmd-validation/`
 directory (`build-1.log`, `mirror.log`, `direct.log`, `direct.png`, config backups).
