@@ -3,6 +3,10 @@
 
 #include "VideoBackends/Vulkan/VKPipeline.h"
 
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+
 #include <array>
 #include <cctype>
 
@@ -31,6 +35,8 @@ VKPipeline::VKPipeline(const AbstractPipelineConfig& config, VkPipeline pipeline
 
 VKPipeline::~VKPipeline()
 {
+  // A queued SetPipeline may still reference this object.
+  DrainRecordingWorkerForDirectAccess();
   vkDestroyPipeline(g_vulkan_context->GetDevice(), m_pipeline, nullptr);
 }
 

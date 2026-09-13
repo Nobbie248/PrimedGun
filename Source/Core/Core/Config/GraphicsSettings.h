@@ -95,6 +95,9 @@ extern const Info<bool> GFX_DISABLE_FOG;
 extern const Info<bool> GFX_BORDERLESS_FULLSCREEN;
 extern const Info<bool> GFX_ENABLE_VALIDATION_LAYER;
 extern const Info<bool> GFX_BACKEND_MULTITHREADING;
+// Vulkan only: record state binds and draws on a helper thread (see VKRecordingWorker.h).
+// Read when the backend starts; changing it needs a backend restart.
+extern const Info<bool> GFX_VULKAN_RECORDING_WORKER;
 extern const Info<int> GFX_COMMAND_BUFFER_EXECUTE_INTERVAL;
 extern const Info<bool> GFX_SHADER_CACHE;
 extern const Info<bool> GFX_WAIT_FOR_SHADERS_BEFORE_STARTING;

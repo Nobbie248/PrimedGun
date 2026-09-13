@@ -3,6 +3,10 @@
 
 #include "VideoBackends/Vulkan/VKBoundingBox.h"
 
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+
 #include <vector>
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
@@ -24,6 +28,7 @@ VKBoundingBox::~VKBoundingBox()
 
 bool VKBoundingBox::Initialize()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (!CreateGPUBuffer())
     return false;
 
@@ -37,6 +42,7 @@ bool VKBoundingBox::Initialize()
 
 std::vector<BBoxType> VKBoundingBox::Read(u32 index, u32 length)
 {
+  DrainRecordingWorkerForDirectAccess();
   // Can't be done within a render pass.
   StateTracker::GetInstance()->EndRenderPass();
 
@@ -77,6 +83,7 @@ std::vector<BBoxType> VKBoundingBox::Read(u32 index, u32 length)
 
 void VKBoundingBox::Write(u32 index, std::span<const BBoxType> values)
 {
+  DrainRecordingWorkerForDirectAccess();
   // We can't issue vkCmdUpdateBuffer within a render pass.
   // However, the writes must be serialized, so we can't put it in the init buffer.
   StateTracker::GetInstance()->EndRenderPass();

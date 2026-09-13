@@ -26,6 +26,7 @@
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/StateTracker.h"
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/AbstractGfx.h"
@@ -1043,6 +1044,7 @@ bool VulkanOpenXR::CreateSwapchains()
 
 bool VulkanOpenXR::CreateLayeredSwapchain(int64_t swapchain_format, bool allow_foveation)
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(VR::g_openxr != nullptr);
 
   const auto& view_cfgs = VR::g_openxr->GetViewConfigViews();
@@ -2033,6 +2035,7 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
 
 void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(eye_index < 2);
   if (!m_image_acquired[eye_index])
     return;
@@ -2062,6 +2065,7 @@ void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
 
 void VulkanOpenXR::ReleaseLayeredTexture()
 {
+  DrainRecordingWorkerForDirectAccess();
   if (!m_layered_image_acquired)
     return;
 
@@ -2076,6 +2080,7 @@ void VulkanOpenXR::ReleaseLayeredTexture()
 
 bool VulkanOpenXR::SubmitFrame()
 {
+  DrainRecordingWorkerForDirectAccess();
   ASSERT(VR::g_openxr != nullptr);
 
   if (!WaitForPendingFrameFinalization("before publishing the next XR frame"))

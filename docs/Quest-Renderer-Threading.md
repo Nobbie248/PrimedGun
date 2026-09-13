@@ -1,8 +1,11 @@
 # Quest renderer threading proposal
 
-Status: design only, 2026-09-13. No additional renderer worker is implemented by
-the descriptor-cache change. This proposal preserves Prime's rendering rules,
-visibility and the detached OpenXR pacing fixes.
+Status: the first stage (one ordered Vulkan recording worker with drains at every
+synchronous backend path) is implemented; see
+[Quest-Vulkan-Recording-Worker.md](Quest-Vulkan-Recording-Worker.md) for the design as
+built, its measurements and the pitfalls found. The rest of this document is the
+original 2026-09-13 proposal and still describes the later stages. It preserves Prime's
+rendering rules, visibility and the detached OpenXR pacing fixes.
 
 ## Why consider another worker?
 

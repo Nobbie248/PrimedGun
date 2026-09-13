@@ -3,6 +3,8 @@
 
 #include "VideoBackends/Vulkan/ObjectCache.h"
 
+#include "VideoBackends/Vulkan/VKRecordingWorker.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -679,6 +681,7 @@ VkImageView ObjectCache::GetEFBFragmentDensityMapView(u32 fb_width, u32 fb_heigh
     FillFoveationDensityLayer(map + layer * layer_size, fdm_width, fdm_height, level);
   vmaFlushAllocation(g_vulkan_context->GetMemoryAllocator(), staging_alloc, 0, VK_WHOLE_SIZE);
 
+  DrainRecordingWorkerForDirectAccess();
   VkCommandBuffer cmd = g_command_buffer_mgr->GetCurrentInitCommandBuffer();
 
   VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
