@@ -252,7 +252,9 @@ const Info<bool> GFX_VR_HUD_3D_ENABLE{{System::GFX, "VR", "Hud3DEnable"}, false}
 const Info<float> GFX_VR_HUD_3D_CLOSER{{System::GFX, "VR", "Hud3DCloser"}, 0.5f};
 const Info<bool> GFX_VR_REMOVE_BARS{{System::GFX, "VR", "RemoveCinematicBars"}, true};
 const Info<bool> GFX_VR_ORTHO_SCISSOR_FIX{{System::GFX, "VR", "OrthoScissorFix"}, true};
-const Info<bool> GFX_VR_DETECT_SKYBOX{{System::GFX, "VR", "DetectSkybox"}, false};
+// On by default: Metroid Prime draws its sky as a small box centred on the camera, which
+// looks only a metre or two away in VR unless the per-eye offset is dropped for it.
+const Info<bool> GFX_VR_DETECT_SKYBOX{{System::GFX, "VR", "DetectSkybox"}, true};
 const Info<bool> GFX_VR_METROID_VISOR_FIX{{System::GFX, "VR", "MetroidVisorFix"}, true};
 const Info<bool> GFX_VR_LOCK_HEAD_POSE{{System::GFX, "VR", "LockHeadPosePerFrame"}, false};
 const Info<bool> GFX_VR_AR_MODE{{System::GFX, "VR", "ARMode"}, false};

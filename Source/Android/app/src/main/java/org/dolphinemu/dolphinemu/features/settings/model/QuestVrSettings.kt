@@ -214,7 +214,7 @@ object QuestVrSettings {
 
     fun orthoScissorFixSetting() = vrBooleanSetting("OrthoScissorFix", true)
 
-    fun detectSkyboxSetting() = vrBooleanSetting("DetectSkybox", false)
+    fun detectSkyboxSetting() = vrBooleanSetting("DetectSkybox", true)
 
     fun metroidVisorFixSetting() = vrBooleanSetting("MetroidVisorFix", true)
 

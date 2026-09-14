@@ -58,6 +58,7 @@ private:
   ConfigBool* m_dont_clear_screen = nullptr;
   ConfigBool* m_disable_cpu_cull = nullptr;
   ConfigBool* m_ortho_scissor_fix = nullptr;
+  ConfigBool* m_detect_skybox = nullptr;
   ConfigBool* m_metroid_visor_fix = nullptr;
   ConfigBool* m_xr_pacing_thread = nullptr;
   ConfigBool* m_eager_heartbeat = nullptr;

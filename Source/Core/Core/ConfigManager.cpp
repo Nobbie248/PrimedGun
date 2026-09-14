@@ -365,6 +365,7 @@ static void ApplyGameVRConfigOverrides(std::string_view game_id)
   ApplyVRSetting(values, "DontClearScreen", Config::GFX_VR_DONT_CLEAR_SCREEN);
   ApplyVRSetting(values, "LoadCustomShaders", Config::GFX_VR_LOAD_CUSTOM_SHADERS);
   ApplyVRSetting(values, "DisableCPUCull", Config::GFX_VR_DISABLE_CPU_CULL);
+  ApplyVRSetting(values, "DetectSkybox", Config::GFX_VR_DETECT_SKYBOX);
   ApplyVRSetting(values, "AutoVBIFromHMD", Config::GFX_VR_AUTO_VBI_FROM_HMD);
   ApplyVRSetting(values, "AutoLayerSpread", Config::GFX_VR_AUTO_LAYER_SPREAD);
   ApplyVRSetting(values, "LayerOffset", Config::GFX_VR_LAYER_OFFSET);

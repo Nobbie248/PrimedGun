@@ -383,7 +383,7 @@ struct VideoConfig final
   bool vr_auto_layer_spread = true;
   bool vr_remove_bars = true;       // Expand scissor/viewport to remove cinematic letterbox bars
   bool vr_ortho_scissor_fix = true;  // Expand scissor for orthographic VR draws
-  bool vr_detect_skybox = false;     // Treat camera-origin objects as skyboxes
+  bool vr_detect_skybox = true;      // Treat camera-origin objects as skyboxes (rotation only)
   // Metroid Prime visor fix bundle: layered palette conversion + thermal source
   // classifier + D3D fullscreen-mono per-eye routing. Disable to revert to stock
   // Dolphin paletted-EFB behaviour if non-Metroid titles regress (e.g. MKWii).
