@@ -7,16 +7,33 @@
 // use, so a setting added there becomes reachable here without touching this file.
 
 #include <algorithm>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <type_traits>
 
+#include <fmt/format.h>
 #include <jni.h>
 
+#include "Common/CommonTypes.h"
+#include "Common/FileUtil.h"
+#include "Common/IOFile.h"
+#include "Common/Version.h"
+
+#include "Core/Config/MainSettings.h"
+#include "Core/HW/AddressSpace.h"
+#include "Core/HW/EXI/EXI.h"
+#include "Core/PowerPC/Gekko.h"
+#include "Core/PowerPC/PowerPC.h"
 #include "Core/PrimedGun/NativeRuntime.h"
 #include "Core/PrimedGun/Settings.h"
 #include "Core/PrimedGun/SettingsVisitor.h"
+#include "Core/System.h"
+
+#include "DiscIO/Enums.h"
 
 #include "jni/AndroidCommon/AndroidCommon.h"
+#include "jni/Host.h"
 
 namespace
 {
@@ -107,6 +124,56 @@ bool WriteDerivedFloat(const std::string& key, float value)
   }
   PrimedGun::SetRuntimeSettings(settings);
   return true;
+}
+
+// Writes MEM1 and a register snapshot next to it, the way the Qt window's Dump RAM button does,
+// so a Quest crash report can carry the same files. Returns the dump path, or an empty string
+// when memory is not mapped (no game running) or the files could not be written.
+std::string DumpMem1ToUserDirectory()
+{
+  AddressSpace::Accessors* accessors = AddressSpace::GetAccessors(AddressSpace::Type::Mem1);
+  if (!accessors || !accessors->begin())
+    return {};
+
+  const std::string path = File::GetUserPath(F_MEM1DUMP_IDX);
+  File::CreateFullPath(path);
+  File::IOFile file(path, "wb");
+  if (!file)
+    return {};
+
+  const size_t size = static_cast<size_t>(std::distance(accessors->begin(), accessors->end()));
+  if (!file.WriteBytes(accessors->begin(), size))
+    return {};
+
+  File::IOFile context_file(path + ".txt", "wb");
+  if (context_file)
+  {
+    const auto& ppc_state = Core::System::GetInstance().GetPPCState();
+    std::string context = fmt::format("PrimedGun RAM dump context\n"
+                                      "PC={:08X}\n"
+                                      "NPC={:08X}\n"
+                                      "LR={:08X}\n"
+                                      "CTR={:08X}\n"
+                                      "SRR0={:08X}\n"
+                                      "SRR1={:08X}\n"
+                                      "DSISR={:08X}\n"
+                                      "DAR={:08X}\n"
+                                      "Exceptions={:08X}\n",
+                                      ppc_state.pc, ppc_state.npc, ppc_state.spr[SPR_LR],
+                                      ppc_state.spr[SPR_CTR], ppc_state.spr[SPR_SRR0],
+                                      ppc_state.spr[SPR_SRR1], ppc_state.spr[SPR_DSISR],
+                                      ppc_state.spr[SPR_DAR], ppc_state.Exceptions);
+    context += "\nGPRs\n";
+    for (int reg = 0; reg < 32; reg += 4)
+    {
+      context += fmt::format("R{:02}={:08X} R{:02}={:08X} R{:02}={:08X} R{:02}={:08X}\n", reg,
+                             ppc_state.gpr[reg], reg + 1, ppc_state.gpr[reg + 1], reg + 2,
+                             ppc_state.gpr[reg + 2], reg + 3, ppc_state.gpr[reg + 3]);
+    }
+    context_file.WriteBytes(context.data(), context.size());
+  }
+
+  return path;
 }
 }  // namespace
 
@@ -263,5 +330,56 @@ Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_applyS
   s.rot_offset_y = 20.0f;
   s.rot_offset_z = -90.0f;
   PrimedGun::SetRuntimeSettings(s);
+}
+
+JNIEXPORT void JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_resetAll(JNIEnv*, jclass)
+{
+  // Same as the Qt window's Reset All: every runtime setting back to its struct default, with the
+  // legacy offsets cleared as well.
+  PrimedGun::RuntimeSettings s{};
+  s.offset_x = 0.0f;
+  s.offset_y = 0.0f;
+  s.offset_z = 0.0f;
+  PrimedGun::SetRuntimeSettings(s);
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_getVersion(JNIEnv* env,
+                                                                                     jclass)
+{
+  return ToJString(env, Common::GetScmDescStr());
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_getMemoryCardPath(
+    JNIEnv* env, jclass)
+{
+  // Metroid Prime NTSC-U saves to the USA card in slot A; the Qt transfer targets the same file.
+  return ToJString(env,
+                   Config::GetMemcardPath(ExpansionInterface::Slot::A, DiscIO::Region::NTSC_U));
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_importSettings(
+    JNIEnv* env, jclass, jstring path)
+{
+  return PrimedGun::ImportRuntimeSettings(GetJString(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_applyCannonTextureSlot(
+    JNIEnv*, jclass, jint slot)
+{
+  HostThreadLock guard;
+  return PrimedGun::ApplyCannonTextureSlot(static_cast<int>(slot)) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_dumpMem1(JNIEnv* env,
+                                                                                   jclass)
+{
+  HostThreadLock guard;
+  return ToJString(env, DumpMem1ToUserDirectory());
 }
 }

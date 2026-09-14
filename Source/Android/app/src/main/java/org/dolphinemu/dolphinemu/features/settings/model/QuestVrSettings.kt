@@ -14,6 +14,30 @@ object QuestVrSettings {
     private const val WIIMOTE_PROFILE_NAME = "OpenXR Wii Remote.ini"
     private const val VR_SECTION = "VR"
 
+    /** Metroid Prime is the only game the mod supports, so its VR profile is the one edited. */
+    private const val METROID_PRIME_GAME_ID = "GM8E01"
+    private const val METROID_PRIME_REVISION = 0
+
+    /**
+     * Keys that ConfigManager's ApplyGameVRConfigOverrides pins for Metroid Prime at boot from
+     * the per-game VR profile (User/GameSettingsVR/GM8E01.ini, with built-in fallbacks). A value
+     * for them in the global GFX.ini is never seen by the game, so the OpenXR screen edits the
+     * per-game profile for these instead. Their defaults below repeat the built-in fallbacks.
+     */
+    private val METROID_PINNED_KEYS = setOf(
+        "UnitsPerMeter",
+        "LeanBackAngle",
+        "CameraForward",
+        "VirtualScreen",
+        "HeadLockedCurvature",
+        "DontClearScreen",
+        "LoadCustomShaders",
+        "DisableCPUCull",
+        "LayerOffset",
+        "ElementDepth",
+        "ClearEFBCopies"
+    )
+
     private fun androidBooleanSetting(key: String, defaultValue: Boolean) =
         AdHocBooleanSetting(Settings.FILE_DOLPHIN, Settings.SECTION_INI_ANDROID, key, defaultValue)
 
@@ -29,7 +53,32 @@ object QuestVrSettings {
     private fun vrFloatSetting(key: String, defaultValue: Float) =
         AdHocFloatSetting(Settings.FILE_GFX, VR_SECTION, key, defaultValue)
 
+    // The "effective" accessors pick the store the game actually reads: the per-game profile for
+    // pinned keys, the global GFX.ini for everything else.
+    private fun effectiveBoolean(key: String, defaultValue: Boolean): AbstractBooleanSetting =
+        if (key in METROID_PINNED_KEYS) {
+            QuestGameVrConfigBooleanSetting(METROID_PRIME_GAME_ID, METROID_PRIME_REVISION, key, defaultValue)
+        } else {
+            vrBooleanSetting(key, defaultValue)
+        }
+
+    private fun effectiveInt(key: String, defaultValue: Int): AbstractIntSetting =
+        if (key in METROID_PINNED_KEYS) {
+            QuestGameVrConfigIntSetting(METROID_PRIME_GAME_ID, METROID_PRIME_REVISION, key, defaultValue)
+        } else {
+            vrIntSetting(key, defaultValue)
+        }
+
+    private fun effectiveFloat(key: String, defaultValue: Float): AbstractFloatSetting =
+        if (key in METROID_PINNED_KEYS) {
+            QuestGameVrConfigFloatSetting(METROID_PRIME_GAME_ID, METROID_PRIME_REVISION, key, defaultValue)
+        } else {
+            vrFloatSetting(key, defaultValue)
+        }
+
     fun isQuestBuild(): Boolean = BuildConfig.IS_QUEST
+
+    // ---------- Runtime ----------
 
     fun openXrEnabledSetting() = androidBooleanSetting("QuestOpenXREnabled", true)
 
@@ -44,38 +93,47 @@ object QuestVrSettings {
     fun controllerPresetSetting() =
         androidIntSetting("QuestControllerPreset", CONTROLLER_PRESET_GAMECUBE)
 
-    fun passthroughSetting() = vrBooleanSetting("ARMode", false)
+    fun unitsPerMeterSetting(): AbstractFloatSetting = effectiveFloat("UnitsPerMeter", 1.5f)
 
-    fun debugPassthroughSetting() = vrBooleanSetting("ARModeDebug", false)
+    // ---------- Camera ----------
 
-    fun arBackgroundAlphaSetting() = vrFloatSetting("ARBackgroundAlpha", 0.0f)
+    fun leanBackAngleSetting(): AbstractFloatSetting = effectiveFloat("LeanBackAngle", 0.0f)
 
-    fun autoImmediateXfbSetting() = vrBooleanSetting("AutoImmediateXFB", true)
+    fun enableCameraForwardSetting() = vrBooleanSetting("EnableCameraForward", true)
 
-    fun autoVbiFromHmdSetting() = vrBooleanSetting("AutoVBIFromHMD", false)
+    fun cameraForwardSetting(): AbstractFloatSetting = effectiveFloat("CameraForward", 0.0f)
 
-    fun unitsPerMeterSetting(): AbstractFloatSetting = FloatSetting.GFX_VR_UNITS_PER_METER
-
-    fun leanBackAngleSetting() = vrFloatSetting("LeanBackAngle", 0.0f)
-
-    fun cameraForwardSetting() = vrFloatSetting("CameraForward", 0.0f)
+    fun enableCameraHeightSetting() = vrBooleanSetting("EnableCameraHeight", true)
 
     fun cameraHeightSetting() = vrFloatSetting("CameraHeight", 0.0f)
 
-    fun lockHeadPoseSetting() = vrBooleanSetting("LockHeadPosePerFrame", false)
+    // ---------- Virtual screen ----------
 
-    fun opcodeReplaySetting() = vrIntSetting("OpcodeReplay", 0)
+    fun virtualScreenSetting(): AbstractBooleanSetting = effectiveBoolean("VirtualScreen", true)
 
-    fun vrGammaSetting() = vrFloatSetting("Gamma", 1.0f)
+    fun screenDistanceSetting() = vrFloatSetting("ScreenDistance", 1.5f)
 
-    fun autoLayerSpreadSetting() = vrBooleanSetting("AutoLayerSpread", true)
+    fun screenSizeSetting() = vrFloatSetting("ScreenSize", 1.5f)
 
-    fun layerOffsetSetting() = vrFloatSetting("LayerOffset", 0.002f)
+    fun headLockedCurvatureSetting(): AbstractFloatSetting =
+        effectiveFloat("HeadLockedCurvature", 0.0f)
 
-    fun elementDepthSetting() = vrFloatSetting("ElementDepth", 0.001f)
+    fun hudThicknessSetting() = vrFloatSetting("HudThickness", 0.0f)
 
-    fun removeBarsSetting() = vrBooleanSetting("RemoveCinematicBars", true)
+    fun autoLayerSpreadSetting() = vrBooleanSetting("AutoLayerSpread", false)
 
+    fun layerOffsetSetting(): AbstractFloatSetting = effectiveFloat("LayerOffset", 0.002f)
+
+    fun elementDepthSetting(): AbstractFloatSetting = effectiveFloat("ElementDepth", 0.001f)
+
+    fun hud3dEnableSetting() = vrBooleanSetting("Hud3DEnable", false)
+
+    fun hud3dCloserSetting() = vrFloatSetting("Hud3DCloser", 0.5f)
+
+    // ---------- Rendering ----------
+
+    // Defaults must match GraphicsSettings.cpp (Android values). These four need a restart, so
+    // they are not runtime editable.
     fun resolutionScaleSetting(): AbstractFloatSetting =
         object : AbstractFloatSetting by vrFloatSetting("ResolutionScale", 0.85f) {
             override val isRuntimeEditable: Boolean = false
@@ -96,30 +154,91 @@ object QuestVrSettings {
             override val isRuntimeEditable: Boolean = false
         }
 
+    fun clearEfbCopiesSetting(): AbstractIntSetting = effectiveInt("ClearEFBCopies", 0)
+
+    fun vrGammaSetting() = vrFloatSetting("Gamma", 1.0f)
+
+    // ---------- Framerate ----------
+
+    // AutoVBIFromHMD is the legacy boolean that ForcedVBIFrequency replaced. While set it pins
+    // the effective rate to 90 Hz even when the frequency reads "Off", so it is cleared whenever
+    // an explicit choice is made, the same as the PC VR pane does.
+    fun autoVbiFromHmdSetting() = vrBooleanSetting("AutoVBIFromHMD", false)
+
+    fun forcedVbiFrequencySetting(): AbstractIntSetting = ForcedVbiFrequencySetting
+
+    private object ForcedVbiFrequencySetting : AbstractIntSetting {
+        private val backing = vrIntSetting("ForcedVBIFrequency", 0)
+
+        override val isOverridden: Boolean
+            get() = backing.isOverridden
+
+        override val isRuntimeEditable: Boolean
+            get() = backing.isRuntimeEditable
+
+        override fun delete(settings: Settings): Boolean = backing.delete(settings)
+
+        override val int: Int
+            get() = backing.int
+
+        override fun setInt(settings: Settings, newValue: Int) {
+            backing.setInt(settings, newValue)
+            autoVbiFromHmdSetting().setBoolean(settings, false)
+        }
+    }
+
+    fun eagerHeartbeatSetting() = vrBooleanSetting("EagerHeartbeat", false)
+
+    fun xrPacingThreadSetting() = vrBooleanSetting("UseXRPacingThread", true)
+
+    fun autoImmediateXfbSetting() = vrBooleanSetting("AutoImmediateXFB", true)
+
+    fun opcodeReplaySetting() = vrIntSetting("OpcodeReplay", 0)
+
+    fun opcodeReplayTargetRefreshRateSetting() = vrIntSetting("OpcodeReplayTargetRefreshRate", -1)
+
+    // ---------- VR hacks ----------
+
     fun useVulkanMultiviewSetting(): AbstractBooleanSetting =
         object : AbstractBooleanSetting by vrBooleanSetting("UseVulkanMultiview", false) {
             override val isRuntimeEditable: Boolean = false
         }
 
+    fun lockHeadPoseSetting() = vrBooleanSetting("LockHeadPosePerFrame", false)
+
+    fun dontClearScreenSetting(): AbstractBooleanSetting = effectiveBoolean("DontClearScreen", false)
+
+    fun disableCpuCullSetting(): AbstractBooleanSetting = effectiveBoolean("DisableCPUCull", true)
+
+    fun removeBarsSetting() = vrBooleanSetting("RemoveCinematicBars", true)
+
+    fun orthoScissorFixSetting() = vrBooleanSetting("OrthoScissorFix", true)
+
+    fun detectSkyboxSetting() = vrBooleanSetting("DetectSkybox", false)
+
+    fun metroidVisorFixSetting() = vrBooleanSetting("MetroidVisorFix", true)
+
+    // ---------- Passthrough ----------
+
+    fun passthroughSetting() = vrBooleanSetting("ARMode", false)
+
+    fun debugPassthroughSetting() = vrBooleanSetting("ARModeDebug", false)
+
+    fun arBackgroundAlphaSetting() = vrFloatSetting("ARBackgroundAlpha", 0.0f)
+
+    // ---------- Comfort and debug ----------
+
     fun androidDirectToHmdSetting() = vrBooleanSetting("AndroidDirectToHMD", true)
 
     fun cpuLevel5HintSetting() = vrBooleanSetting("QuestCpuLevel5Hint", false)
 
-    fun virtualScreenSetting() = vrBooleanSetting("VirtualScreen", false)
+    fun pinEmulationCoresSetting() = vrBooleanSetting("PinEmulationCores", true)
 
-    fun screenDistanceSetting() = vrFloatSetting("ScreenDistance", 1.5f)
+    fun loadCustomShadersSetting(): AbstractBooleanSetting = effectiveBoolean("LoadCustomShaders", true)
 
-    fun screenSizeSetting() = vrFloatSetting("ScreenSize", 1.5f)
+    fun referenceSpaceModeSetting() = vrIntSetting("ReferenceSpaceMode", 1)
 
-    fun headLockedCurvatureSetting() = vrFloatSetting("HeadLockedCurvature", 0.0f)
-
-    fun dontClearScreenSetting() = vrBooleanSetting("DontClearScreen", false)
-
-    fun disableCpuCullSetting() = vrBooleanSetting("DisableCPUCull", false)
-
-    fun clearEfbCopiesSetting() = vrIntSetting("ClearEFBCopies", 0)
-
-    fun loadCustomShadersSetting() = vrBooleanSetting("LoadCustomShaders", false)
+    fun trackingModeSetting() = vrIntSetting("TrackingMode", 0)
 
     fun openXrConfigSceneSetting() = vrBooleanSetting("EnableOpenXRConfigScene", true)
 
@@ -159,17 +278,99 @@ object QuestVrSettings {
         IntSetting.GFX_EFB_SCALE.setInt(settings, 3)
         BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, false)
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(settings, false)
-        lockHeadPoseSetting().setBoolean(settings, false)
-        autoLayerSpreadSetting().setBoolean(settings, true)
-        androidDirectToHmdSetting().setBoolean(settings, true)
-        removeBarsSetting().setBoolean(settings, true)
-        virtualScreenSetting().setBoolean(settings, false)
-        passthroughSetting().setBoolean(settings, false)
-        debugPassthroughSetting().setBoolean(settings, false)
+        applyRecommendedVrDefaults(settings)
         BooleanSetting.GFX_HACK_IMMEDIATE_XFB.setBoolean(settings, true)
         BooleanSetting.GFX_HACK_VI_SKIP.setBoolean(settings, false)
         perfDefaultsAppliedSetting().setBoolean(settings, true)
         backendMultithreadingReenabledSetting().setBoolean(settings, true)
+    }
+
+    /** The VR keys of the recommended Quest profile, shared with [resetOpenXrSettings]. */
+    private fun applyRecommendedVrDefaults(settings: Settings) {
+        lockHeadPoseSetting().setBoolean(settings, false)
+        autoLayerSpreadSetting().setBoolean(settings, true)
+        androidDirectToHmdSetting().setBoolean(settings, true)
+        removeBarsSetting().setBoolean(settings, true)
+        // The global key: the game reads the pinned per-game value, which stays untouched here.
+        vrBooleanSetting("VirtualScreen", true).setBoolean(settings, false)
+        passthroughSetting().setBoolean(settings, false)
+        debugPassthroughSetting().setBoolean(settings, false)
+    }
+
+    /**
+     * Restores every setting on the OpenXR screen to its built-in default and then re-applies
+     * the recommended Quest profile, mirroring the PC VR pane's "Reset Settings" button.
+     *
+     * Deletes the keys instead of writing values so the compiled-in defaults apply; the pinned
+     * per-game keys are removed from the per-game profile so the built-in Metroid Prime fallbacks
+     * take over again. Non-VR graphics settings (backend, EFB scale) and controller mappings are
+     * deliberately left alone; they do not belong to this screen.
+     */
+    fun resetOpenXrSettings(settings: Settings) {
+        val resettable: List<AbstractSetting> = listOf(
+            // Runtime
+            openXrEnabledSetting(),
+            launchInVrSetting(),
+            recenterOnLaunchSetting(),
+            unitsPerMeterSetting(),
+            // Camera
+            leanBackAngleSetting(),
+            enableCameraForwardSetting(),
+            cameraForwardSetting(),
+            enableCameraHeightSetting(),
+            cameraHeightSetting(),
+            // Virtual screen
+            virtualScreenSetting(),
+            screenDistanceSetting(),
+            screenSizeSetting(),
+            headLockedCurvatureSetting(),
+            hudThicknessSetting(),
+            autoLayerSpreadSetting(),
+            layerOffsetSetting(),
+            elementDepthSetting(),
+            hud3dEnableSetting(),
+            hud3dCloserSetting(),
+            // Rendering
+            resolutionScaleSetting(),
+            foveationLevelSetting(),
+            dynamicFoveationSetting(),
+            foveateEfbSetting(),
+            clearEfbCopiesSetting(),
+            vrGammaSetting(),
+            // Framerate
+            forcedVbiFrequencySetting(),
+            autoVbiFromHmdSetting(),
+            eagerHeartbeatSetting(),
+            xrPacingThreadSetting(),
+            autoImmediateXfbSetting(),
+            opcodeReplaySetting(),
+            opcodeReplayTargetRefreshRateSetting(),
+            // VR hacks
+            useVulkanMultiviewSetting(),
+            lockHeadPoseSetting(),
+            dontClearScreenSetting(),
+            disableCpuCullSetting(),
+            removeBarsSetting(),
+            orthoScissorFixSetting(),
+            detectSkyboxSetting(),
+            metroidVisorFixSetting(),
+            // Passthrough
+            passthroughSetting(),
+            debugPassthroughSetting(),
+            arBackgroundAlphaSetting(),
+            // Comfort and debug
+            showMirrorSurfaceSetting(),
+            BooleanSetting.GFX_SHOW_FPS,
+            androidDirectToHmdSetting(),
+            cpuLevel5HintSetting(),
+            pinEmulationCoresSetting(),
+            loadCustomShadersSetting(),
+            referenceSpaceModeSetting(),
+            trackingModeSetting()
+        )
+
+        resettable.forEach { it.delete(settings) }
+        applyRecommendedVrDefaults(settings)
     }
 
     fun applySelectedControllerPreset(settings: Settings) {

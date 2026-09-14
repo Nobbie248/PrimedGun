@@ -8698,6 +8698,23 @@ void SetVrStateSlot(int slot)
   s_vr_state_slot_from_ui.store(static_cast<int>(ClampVrStateSlot(slot)), std::memory_order_release);
 }
 
+bool ApplyCannonTextureSlot([[maybe_unused]] int slot)
+{
+#ifdef ENABLE_VR
+  if (slot < 0 || slot > static_cast<int>(VR_MENU_CANNON_SLOT_MAX))
+    return false;
+  if (!ApplyPrimedGunCannonTextureSlot(static_cast<u32>(slot)))
+    return false;
+
+  RuntimeSettings settings = GetRuntimeSettings();
+  settings.cannon_texture_slot = slot;
+  SetRuntimeSettings(settings);
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool ConsumeVrSettingsSaveRequest()
 {
   std::lock_guard lock{s_settings_mutex};

@@ -9,4 +9,6 @@
     <dimen name="card_width">135dp</dimen>
 
     <dimen name="elevated_app_bar">3dp</dimen>
+
+    <dimen name="primedgun_touch_target">48dp</dimen>
 </resources>

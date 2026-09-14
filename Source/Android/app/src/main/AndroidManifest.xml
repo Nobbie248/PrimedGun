@@ -52,10 +52,11 @@
             android:shell="true"
             tools:targetApi="29" />
 
+        <!-- The PrimedGun launcher window: the Android counterpart of the Qt main window. -->
         <activity
             android:name=".ui.main.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Dolphin.Splash.Main">
+            android:theme="@style/Theme.PrimedGun.Splash">
 
             <!-- This intentfilter marks this Activity as the one that gets launched from Home screen. -->
             <intent-filter>
@@ -64,6 +65,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Dolphin's own game grid, reachable from the launcher's Dolphin Config tab. -->
+        <activity
+            android:name=".ui.main.GameLibraryActivity"
+            android:exported="false"
+            android:label="@string/primedgun_game_library"
+            android:theme="@style/Theme.Dolphin.Main" />
 
         <activity
             android:name=".ui.main.TvMainActivity"
@@ -136,12 +144,6 @@
         <activity
             android:name=".features.riivolution.ui.RiivolutionBootActivity"
             android:exported="false"
-            android:theme="@style/Theme.Dolphin.Main" />
-
-        <activity
-            android:name=".features.primedgun.ui.PrimedGunActivity"
-            android:exported="false"
-            android:label="@string/primedgun_title"
             android:theme="@style/Theme.Dolphin.Main" />
 
         <service

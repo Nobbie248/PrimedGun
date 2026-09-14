@@ -16,6 +16,9 @@ object PrimedGunSettings {
     const val KEY_HUD_OFFSET_VERTICAL = "hud_offset_vertical"
     const val KEY_HUD_OFFSET_HORIZONTAL = "hud_offset_horizontal"
 
+    /** The cannon texture slot most recently applied, 0 = default. */
+    const val KEY_CANNON_TEXTURE_SLOT = "cannon_texture_slot"
+
     @JvmStatic
     external fun getBoolean(key: String, defaultValue: Boolean): Boolean
 
@@ -52,4 +55,38 @@ object PrimedGunSettings {
 
     @JvmStatic
     external fun applySamusArmPreset()
+
+    /** Restores every runtime setting to its default, like the Qt window's Reset All button. */
+    @JvmStatic
+    external fun resetAll()
+
+    /** The PrimedGun release string shown in the title bar, without a leading "v". */
+    @JvmStatic
+    external fun getVersion(): String
+
+    /** Path of the slot A memory card for NTSC-U games: the file the old-save transfer replaces. */
+    @JvmStatic
+    external fun getMemoryCardPath(): String
+
+    /**
+     * Applies the settings stored in another install's PrimedGun.ini (or an old Qt.ini) to the
+     * running mod and persists them. Returns false if the file holds no PrimedGun settings.
+     */
+    @JvmStatic
+    external fun importSettings(path: String): Boolean
+
+    /**
+     * Copies a cannon texture slot (0 = default, 1-4 = presets, 5 = custom) into the managed
+     * texture pack, refreshes the texture cache and records the slot. Returns false when the slot
+     * holds no textures.
+     */
+    @JvmStatic
+    external fun applyCannonTextureSlot(slot: Int): Boolean
+
+    /**
+     * Writes MEM1 plus a register snapshot into the user directory for crash reports. Returns the
+     * dump path, or an empty string when no game is running or the files could not be written.
+     */
+    @JvmStatic
+    external fun dumpMem1(): String
 }

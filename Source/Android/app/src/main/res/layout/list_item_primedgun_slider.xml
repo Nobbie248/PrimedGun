@@ -36,7 +36,7 @@
             android:layout_marginStart="12dp"
             android:minWidth="64dp"
             android:textAlignment="textEnd"
-            android:textColor="@color/primedgun_accent"
+            android:textColor="@color/primedgun_accent_text"
             android:textSize="14sp"
             android:textStyle="bold"
             tools:text="14.00" />
@@ -50,14 +50,14 @@
 
         <Button
             android:id="@+id/primedgun_slider_minus"
-            style="?android:attr/borderlessButtonStyle"
+            style="@style/PrimedGunButton.Small"
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:background="@drawable/primedgun_control_background"
             android:contentDescription="@string/primedgun_decrease"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
             android:padding="0dp"
             android:text="@string/primedgun_minus"
-            android:textColor="@color/primedgun_text"
             android:textSize="18sp" />
 
         <com.google.android.material.slider.Slider
@@ -69,14 +69,14 @@
 
         <Button
             android:id="@+id/primedgun_slider_plus"
-            style="?android:attr/borderlessButtonStyle"
+            style="@style/PrimedGunButton.Small"
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:background="@drawable/primedgun_control_background"
             android:contentDescription="@string/primedgun_increase"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
             android:padding="0dp"
             android:text="@string/primedgun_plus"
-            android:textColor="@color/primedgun_text"
             android:textSize="18sp" />
     </LinearLayout>
 </LinearLayout>

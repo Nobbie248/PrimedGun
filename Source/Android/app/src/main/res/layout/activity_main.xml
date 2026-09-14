@@ -1,62 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- The PrimedGun launcher window, laid out like MainWindow::ConnectStack(): a title bar, the
+     tab strip, the tab content panel, and the Reset All / Save Settings / credit footer. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/coordinator_main"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/colorSurface">
+    android:background="@color/primedgun_background"
+    android:orientation="vertical">
 
-    <com.google.android.material.appbar.AppBarLayout
-        android:id="@+id/appbar_main"
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/main_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@color/primedgun_background"
+        app:contentInsetStart="14dp"
+        app:title="@string/primedgun_title"
+        app:titleTextAppearance="@style/PrimedGunToolbarTitle"
+        app:titleTextColor="@color/primedgun_text" />
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/main_tabs"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:liftOnScroll="false"
-        app:elevation="0dp">
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="@color/primedgun_background"
+        app:tabGravity="start"
+        app:tabIndicatorColor="@color/primedgun_accent"
+        app:tabIndicatorHeight="2dp"
+        app:tabMode="scrollable"
+        app:tabPaddingEnd="14dp"
+        app:tabPaddingStart="14dp"
+        app:tabRippleColor="@color/primedgun_ripple"
+        app:tabSelectedTextColor="@color/primedgun_text"
+        app:tabTextAppearance="@style/PrimedGunTabText"
+        app:tabTextColor="@color/primedgun_text_muted" />
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar_main"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorSurface"
-            app:subtitleTextColor="?attr/colorOnSurface"
-            app:titleTextColor="?attr/colorOnSurface" />
-
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/tabs_platforms"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?attr/colorSurface"
-            app:tabGravity="fill"
-            app:tabIndicatorColor="?attr/colorPrimary"
-            app:tabIndicatorHeight="3dp"
-            app:tabMode="fixed" />
-
-    </com.google.android.material.appbar.AppBarLayout>
-
-    <androidx.viewpager.widget.ViewPager
-        android:id="@+id/pager_platforms"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="?attr/colorSurface"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior" />
-
-    <View
-        android:id="@+id/workaround_view"
+    <FrameLayout
+        android:id="@+id/main_content"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_gravity="bottom"
-        android:clickable="true"
-        android:focusable="false"
-        android:background="@android:color/transparent" />
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="12dp"
+        android:layout_weight="1"
+        android:background="@drawable/primedgun_panel_background" />
 
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/button_add_directory"
-        android:layout_width="wrap_content"
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="12dp"
+        android:background="@color/primedgun_separator" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/add_games"
-        app:icon="@drawable/ic_add"
-        app:layout_anchor="@+id/pager_platforms"
-        app:layout_anchorGravity="bottom|right|end" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp">
 
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+        <Button
+            android:id="@+id/main_reset_all"
+            style="@style/PrimedGunButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            android:text="@string/primedgun_reset_all" />
+
+        <Button
+            android:id="@+id/main_save_settings"
+            style="@style/PrimedGunButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:minHeight="40dp"
+            android:text="@string/primedgun_save_settings" />
+
+        <TextView
+            android:id="@+id/main_credit"
+            style="@style/PrimedGunMutedLabel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:gravity="end"
+            android:textAlignment="viewEnd"
+            tools:text="By Nobbie   v1.1.6" />
+    </LinearLayout>
+</LinearLayout>

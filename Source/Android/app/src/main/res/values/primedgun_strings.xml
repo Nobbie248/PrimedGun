@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2026 PrimedGun Project -->
 <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
-<!-- Labels for the PrimedGun settings UI. Wording is kept identical to the Qt launcher so guides
-     and support answers apply to both frontends. -->
+<!-- Labels for the PrimedGun launcher and settings UI. Wording is kept identical to the Qt
+     launcher wherever the two frontends do the same thing, so guides and support answers apply
+     to both. -->
 <resources>
     <string name="primedgun_title">PrimedGun</string>
+    <string name="primedgun_window_title">PrimedGun %1$s</string>
+    <string name="primedgun_credit">By Nobbie and iChris4   %1$s</string>
+    <string name="primedgun_game_library">Game Library</string>
 
     <!-- Tabs -->
+    <string name="primedgun_tab_setup">Setup</string>
     <string name="primedgun_tab_controller">Controller</string>
     <string name="primedgun_tab_calibration">Calibration</string>
+    <string name="primedgun_tab_cannon_textures">Cannon Textures</string>
+    <string name="primedgun_tab_layout">Layout</string>
+    <string name="primedgun_tab_dolphin_config">Dolphin Config</string>
 
     <!-- Shared controls -->
     <string name="primedgun_minus">−</string>
@@ -16,9 +24,52 @@
     <string name="primedgun_decrease">Decrease</string>
     <string name="primedgun_increase">Increase</string>
     <string name="primedgun_slider">Value</string>
+    <string name="primedgun_reset_all">Reset All</string>
+    <string name="primedgun_reset_all_done">All PrimedGun settings reset</string>
+    <string name="primedgun_reset_all_confirmation">Reset every PrimedGun setting to its default? Use Save Settings afterwards to keep the reset.</string>
     <string name="primedgun_save_settings">Save Settings</string>
     <string name="primedgun_settings_saved">Settings saved</string>
     <string name="primedgun_settings_save_failed">Could not write PrimedGun.ini</string>
+    <string name="primedgun_information">Information</string>
+    <string name="primedgun_error">Error</string>
+    <string name="primedgun_close">Close</string>
+
+    <!-- Setup tab -->
+    <string name="primedgun_section_setup">Setup</string>
+    <string name="primedgun_setup_notes">Setup Notes</string>
+    <string name="primedgun_setup_notes_text">• Use Select Game to pick your Metroid Prime NTSC Revision 0 (1.0) game file, then press Play. The game opens in the immersive VR view and this window returns when you exit.\n\n• Check the Layout tab for controller bindings.\n\n• To transfer your old saves, use Transfer Old Memory Card / Settings and pick the memory card file from your old install. Then open Dolphin Settings, GameCube, and check the card is selected there.\n\n• Do not transfer save states across versions. Make sure to save normally before you transfer.\n\n• Once in game, click the right stick to set your height.\n\n• Click the left thumbstick to open or close the in-headset settings menu.\n\n• Try to stay in the centre of your play space and face forward, this mod is not roomscaled.\n\n• Use Save Settings after changing PrimedGun options to apply them.</string>
+    <string name="primedgun_selected_game">Selected: %1$s</string>
+    <string name="primedgun_select_game_note">Select Metroid Prime NTSC Revision 0 (1.0).</string>
+    <string name="primedgun_wrong_game">Wrong game</string>
+    <string name="primedgun_wrong_revision">Wrong revision</string>
+    <string name="primedgun_select_game">Select Game...</string>
+    <string name="primedgun_play">Play</string>
+    <string name="primedgun_game_options">Game Options...</string>
+    <string name="primedgun_no_game_selected">No game selected.</string>
+    <string name="primedgun_game_unreadable">The selected game file could not be read.</string>
+    <string name="primedgun_samus_art">Samus</string>
+    <string name="primedgun_section_memory_card">Memory Card</string>
+    <string name="primedgun_transfer_old_save">Transfer Old Memory Card / Settings</string>
+
+    <!-- Transfer old memory card -->
+    <string name="primedgun_transfer_title">Transfer Old Memory Card</string>
+    <string name="primedgun_transfer_running">Stop the game before transferring a memory card save.</string>
+    <string name="primedgun_transfer_prompt">Transfer old save game.</string>
+    <string name="primedgun_transfer_prompt_detail">Pick the memory card file (.raw or .gcp) from your old PrimedGun install. PrimedGun will back up the current card, copy the old one into place, then offer to import your old PrimedGun.ini settings. Per-game GameSettings, GameSettingsVR, and shader overrides are not transferred.</string>
+    <string name="primedgun_transfer">Transfer</string>
+    <string name="primedgun_transfer_wrong_extension">Memory cards must be .raw or .gcp files.</string>
+    <string name="primedgun_transfer_folder_failed">Could not create the current memory card folder:\n%1$s</string>
+    <string name="primedgun_transfer_backup_failed">Could not back up the current memory card:\n%1$s</string>
+    <string name="primedgun_transfer_copy_failed">Could not copy the selected save to:\n%1$s</string>
+    <string name="primedgun_transfer_done">Old memory card transferred to:\n%1$s</string>
+    <string name="primedgun_transfer_backup_done">\n\nPrevious memory card backed up to:\n%1$s</string>
+    <string name="primedgun_transfer_import_settings_prompt">Also import your old PrimedGun settings? Pick the PrimedGun.ini from the Config folder of the old install.</string>
+    <string name="primedgun_transfer_import_settings">Import Settings</string>
+    <string name="primedgun_transfer_skip">Skip</string>
+    <string name="primedgun_transfer_settings_done">\n\nPrimedGun settings transferred from:\n%1$s</string>
+    <string name="primedgun_transfer_settings_failed">\n\nNo PrimedGun settings were found in:\n%1$s</string>
+    <string name="primedgun_transfer_settings_skipped">\n\nPrimedGun settings were not imported.</string>
+    <string name="primedgun_transfer_footer">\n\nPer-game GameSettings, GameSettingsVR, and shader overrides were not transferred.</string>
 
     <!-- Controller tab -->
     <string name="primedgun_section_controller_mapping">Controller Mapping</string>
@@ -107,4 +158,72 @@
     <string name="primedgun_section_presets">Presets</string>
     <string name="primedgun_preset_default_arm">Default arm preset</string>
     <string name="primedgun_preset_samus_arm">Samus arm preset</string>
+
+    <!-- Cannon Textures tab -->
+    <string name="primedgun_section_custom_cannon_textures">Custom Cannon Textures</string>
+    <string name="primedgun_cannon_note">PrimedGun stores cannon texture slots outside the GM8E01 texture-pack folder of Metroid Prime. Default disables the PrimedGun override so any installed HD texture pack can supply the cannon textures.</string>
+    <string name="primedgun_cannon_slot_default">Default</string>
+    <string name="primedgun_cannon_slot_custom">Custom</string>
+    <string name="primedgun_cannon_slot_n">Slot %1$d</string>
+    <string name="primedgun_cannon_selected_slot_files">Selected Slot Files</string>
+    <string name="primedgun_cannon_texture_a">Cannon texture A</string>
+    <string name="primedgun_cannon_texture_b">Cannon texture B</string>
+    <string name="primedgun_cannon_shine_mask">Shine mask</string>
+    <string name="primedgun_cannon_preview">Texture preview</string>
+    <string name="primedgun_cannon_no_preview">No preview</string>
+    <string name="primedgun_cannon_import">Import...</string>
+    <string name="primedgun_cannon_default_no_override">Default: no PrimedGun override</string>
+    <string name="primedgun_cannon_no_texture_imported">No texture imported</string>
+    <string name="primedgun_cannon_default_active">Default is active. PrimedGun cannon overrides are clear.</string>
+    <string name="primedgun_cannon_slot_active">%1$s is active.</string>
+    <string name="primedgun_cannon_default_selected">Default selected. Click Apply to use it.</string>
+    <string name="primedgun_cannon_slot_selected">%1$s selected. Click Apply to use it.</string>
+    <string name="primedgun_cannon_default_applied">Default applied. Installed HD texture packs can supply the cannon.</string>
+    <string name="primedgun_cannon_slot_applied">Applied %1$s. Custom textures are enabled.</string>
+    <string name="primedgun_cannon_apply_failed">Could not apply %1$s. The slot has no cannon textures.</string>
+    <string name="primedgun_cannon_imported">Imported texture for %1$s. Click Apply to use it.</string>
+    <string name="primedgun_cannon_choose_custom">Choose Custom before importing a texture.</string>
+    <string name="primedgun_cannon_png_or_dds">Cannon textures must be PNG or DDS files.</string>
+    <string name="primedgun_cannon_folder_failed">Could not create the selected cannon texture slot folder.</string>
+    <string name="primedgun_cannon_copy_failed">Could not copy the selected texture into the slot.</string>
+    <string name="primedgun_cannon_apply">Apply</string>
+    <string name="primedgun_cannon_remove_shine">Remove Shine</string>
+    <string name="primedgun_cannon_restore_shine">Restore Shine</string>
+    <string name="primedgun_cannon_slot_folder">Slot Folder</string>
+    <string name="primedgun_cannon_active_pack">Active Pack</string>
+    <string name="primedgun_cannon_slot_folder_message">Cannon texture slots live in:\n%1$s</string>
+    <string name="primedgun_cannon_active_pack_message">The managed cannon texture pack is at:\n%1$s</string>
+    <string name="primedgun_cannon_choose_slot_remove_shine">Choose Slot 1-4 or Custom before applying Remove Shine.</string>
+    <string name="primedgun_cannon_choose_slot_restore_shine">Choose Slot 1-4 or Custom before restoring shine.</string>
+    <string name="primedgun_cannon_remove_shine_missing">Could not find the remove-shine DDS at:\n%1$s</string>
+    <string name="primedgun_cannon_backup_shine_failed">Could not save the current slot shine texture into:\n%1$s</string>
+    <string name="primedgun_cannon_remove_shine_copy_failed">Could not copy the remove-shine texture into the slot.</string>
+    <string name="primedgun_cannon_restore_shine_missing">Could not find the saved shine texture for this slot.</string>
+    <string name="primedgun_cannon_restore_shine_copy_failed">Could not copy the default shine texture into the slot.</string>
+    <string name="primedgun_cannon_remove_shine_applied">Applied %1$s with Remove Shine. Custom textures are enabled.</string>
+    <string name="primedgun_cannon_restore_shine_applied">Restored shine for %1$s. Cannon base textures are unchanged.</string>
+
+    <!-- Layout tab -->
+    <string name="primedgun_section_controller_layout">Controller Layout</string>
+    <string name="primedgun_controller_layout_description">Quest Touch controller bindings</string>
+
+    <!-- Dolphin Config tab -->
+    <string name="primedgun_section_dolphin_config">Dolphin Config</string>
+    <string name="primedgun_dolphin_config_note">Open the native Dolphin configuration screens when you need emulator-specific settings.</string>
+    <string name="primedgun_section_configuration">Configuration</string>
+    <string name="primedgun_dolphin_settings">Dolphin Settings</string>
+    <string name="primedgun_graphics_settings">Graphics Settings</string>
+    <string name="primedgun_openxr_settings">OpenXR Settings</string>
+    <string name="primedgun_controller_settings">Controller Settings</string>
+    <string name="primedgun_section_tools">Tools</string>
+    <string name="primedgun_gamecube_settings">GameCube / Memory Card Settings</string>
+    <string name="primedgun_cheat_manager">Cheat Manager</string>
+    <string name="primedgun_user_data">User Data</string>
+    <string name="primedgun_section_warnings">Warnings</string>
+    <string name="primedgun_suppress_cpu_thread_warnings">Suppress CPU thread warnings</string>
+    <string name="primedgun_section_debug">Debug (send dump to dev upon crash)</string>
+    <string name="primedgun_dump_ram">Dump RAM</string>
+    <string name="primedgun_ram_dump_title">RAM Dump</string>
+    <string name="primedgun_ram_dump_failed">Failed to dump RAM: memory is not available. Start the game first.</string>
+    <string name="primedgun_ram_dump_done">RAM dumped to:\n%1$s</string>
 </resources>

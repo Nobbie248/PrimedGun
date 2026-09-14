@@ -275,6 +275,14 @@ class SettingsFragment : Fragment(), SettingsFragmentView {
             titles[MenuTag.ENHANCEMENTS] = R.string.enhancements_submenu
             titles[MenuTag.COLOR_CORRECTION] = R.string.color_correction_submenu
             titles[MenuTag.STEREOSCOPY] = R.string.stereoscopy_submenu
+            titles[MenuTag.OPENXR] = R.string.openxr_submenu
+            titles[MenuTag.QUEST_VR_CAMERA] = R.string.quest_vr_camera
+            titles[MenuTag.QUEST_VR_VIRTUAL_SCREEN] = R.string.quest_vr_virtual_screen
+            titles[MenuTag.QUEST_VR_RENDERING] = R.string.quest_vr_rendering
+            titles[MenuTag.QUEST_VR_FRAMERATE] = R.string.quest_vr_framerate
+            titles[MenuTag.QUEST_VR_HACKS] = R.string.quest_vr_hacks
+            titles[MenuTag.QUEST_VR_PASSTHROUGH] = R.string.quest_vr_passthrough
+            titles[MenuTag.QUEST_VR_DEBUG] = R.string.quest_vr_debug
             titles[MenuTag.HACKS] = R.string.hacks_submenu
             titles[MenuTag.STATISTICS] = R.string.statistics_submenu
             titles[MenuTag.ADVANCED_GRAPHICS] = R.string.advanced_graphics_submenu

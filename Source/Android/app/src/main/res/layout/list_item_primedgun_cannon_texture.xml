@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 PrimedGun Project -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- One row of the "Selected Slot Files" box: target name, preview, source path, Import. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:id="@+id/cannon_texture_label"
+        style="@style/PrimedGunLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="2"
+        tools:text="Cannon texture A" />
+
+    <FrameLayout
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/primedgun_preview_background">
+
+        <ImageView
+            android:id="@+id/cannon_texture_preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/primedgun_cannon_preview"
+            android:padding="2dp"
+            android:scaleType="fitCenter" />
+
+        <TextView
+            android:id="@+id/cannon_texture_no_preview"
+            style="@style/PrimedGunMutedLabel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="@string/primedgun_cannon_no_preview"
+            android:textSize="9sp" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/cannon_texture_path"
+        style="@style/PrimedGunMutedLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_weight="3"
+        android:textSize="11sp"
+        tools:text="No texture imported" />
+
+    <Button
+        android:id="@+id/cannon_texture_import"
+        style="@style/PrimedGunButton.Small"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="@string/primedgun_cannon_import" />
+</LinearLayout>

@@ -3,12 +3,26 @@
 
 package org.dolphinemu.dolphinemu.features.primedgun.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.dolphinemu.dolphinemu.R
+import org.dolphinemu.dolphinemu.activities.UserDataActivity
+import org.dolphinemu.dolphinemu.features.cheats.ui.CheatsActivity
+import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSelectedGame
 import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSettings
+import org.dolphinemu.dolphinemu.features.settings.model.AdHocBooleanSetting
+import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
+import org.dolphinemu.dolphinemu.features.settings.model.Settings
+import org.dolphinemu.dolphinemu.features.settings.ui.MenuTag
+import org.dolphinemu.dolphinemu.features.settings.ui.SettingsActivity
+import org.dolphinemu.dolphinemu.ui.main.GameLibraryActivity
+import org.dolphinemu.dolphinemu.utils.ThreadUtil
 
 /**
- * Builds the row lists for each PrimedGun tab.
+ * The launcher's tabs, in the order MainWindow::ConnectStack() adds them, and the row lists for
+ * the tabs that are plain settings lists.
  *
  * Order, labels, ranges and step sizes are taken from MainWindow::ConnectStack() so the Quest UI
  * and the Qt launcher stay the same product. Defaults repeat the RuntimeSettings struct defaults
@@ -20,13 +34,20 @@ import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSettings
 object PrimedGunTabs {
 
     enum class Tab(val titleId: Int) {
+        SETUP(R.string.primedgun_tab_setup),
         CONTROLLER(R.string.primedgun_tab_controller),
-        CALIBRATION(R.string.primedgun_tab_calibration)
+        CALIBRATION(R.string.primedgun_tab_calibration),
+        CANNON_TEXTURES(R.string.primedgun_tab_cannon_textures),
+        LAYOUT(R.string.primedgun_tab_layout),
+        DOLPHIN_CONFIG(R.string.primedgun_tab_dolphin_config)
     }
 
+    /** Rows for the list-based tabs. The other tabs have their own fragments. */
     fun itemsFor(context: Context, tab: Tab): List<PrimedGunItem> = when (tab) {
         Tab.CONTROLLER -> controllerItems(context)
         Tab.CALIBRATION -> calibrationItems(context)
+        Tab.DOLPHIN_CONFIG -> dolphinConfigItems(context)
+        Tab.SETUP, Tab.CANNON_TEXTURES, Tab.LAYOUT -> emptyList()
     }
 
     private fun controllerItems(context: Context): List<PrimedGunItem> = buildList {
@@ -285,8 +306,113 @@ object PrimedGunTabs {
         })
     }
 
+    // The Qt tab opens Dolphin's own windows. Their Android counterparts are the settings
+    // activity's sections, the cheats activity, and the user data screen; the entries with no
+    // Android equivalent (hotkeys, memory card manager, resource packs) are replaced by the
+    // screens that hold the same settings here.
+    private fun dolphinConfigItems(context: Context): List<PrimedGunItem> = buildList {
+        add(header(context, R.string.primedgun_section_dolphin_config))
+        add(PrimedGunItem.Note(context.getString(R.string.primedgun_dolphin_config_note)))
+
+        add(header(context, R.string.primedgun_section_configuration))
+        add(action(context, R.string.primedgun_dolphin_settings) {
+            SettingsActivity.launch(context, MenuTag.SETTINGS)
+        })
+        add(action(context, R.string.primedgun_graphics_settings) {
+            SettingsActivity.launch(context, MenuTag.GRAPHICS)
+        })
+        if (QuestVrSettings.isQuestBuild()) {
+            add(action(context, R.string.primedgun_openxr_settings) {
+                SettingsActivity.launch(context, MenuTag.OPENXR)
+            })
+        }
+        add(action(context, R.string.primedgun_controller_settings) {
+            SettingsActivity.launch(context, MenuTag.GCPAD_TYPE)
+        })
+
+        add(header(context, R.string.primedgun_section_tools))
+        add(action(context, R.string.primedgun_game_library) {
+            context.startActivity(Intent(context, GameLibraryActivity::class.java))
+        })
+        add(action(context, R.string.primedgun_gamecube_settings) {
+            SettingsActivity.launch(context, MenuTag.CONFIG_GAME_CUBE)
+        })
+        add(action(context, R.string.primedgun_cheat_manager) { launchCheatManager(context) })
+        add(action(context, R.string.primedgun_user_data) { UserDataActivity.launch(context) })
+
+        add(header(context, R.string.primedgun_section_warnings))
+        add(
+            PrimedGunItem.Switch(
+                title = context.getString(R.string.primedgun_suppress_cpu_thread_warnings),
+                get = { suppressCpuThreadWarnings().boolean },
+                set = { value ->
+                    Settings().use { settings ->
+                        settings.loadSettings()
+                        suppressCpuThreadWarnings().setBoolean(settings, value)
+                        settings.saveSettings()
+                    }
+                }
+            )
+        )
+
+        add(header(context, R.string.primedgun_section_debug))
+        add(action(context, R.string.primedgun_dump_ram) { dumpRam(context) })
+    }
+
+    private fun suppressCpuThreadWarnings() = AdHocBooleanSetting(
+        Settings.FILE_DOLPHIN, Settings.SECTION_INI_INTERFACE, "SuppressCPUThreadWarnings", false
+    )
+
+    private fun launchCheatManager(context: Context) {
+        // Metroid Prime is the only game the mod supports, so its ids are the fallback when no
+        // readable game has been selected yet.
+        val game = PrimedGunSelectedGame.parse(context)
+        val gameId = game?.getGameId() ?: PrimedGunSelectedGame.METROID_PRIME_GAME_ID
+        CheatsActivity.launch(
+            context,
+            gameId,
+            game?.getGameTdbId() ?: gameId,
+            game?.getRevision() ?: 0,
+            false
+        )
+    }
+
+    private fun dumpRam(context: Context) {
+        val activity = context as? Activity
+        if (activity == null) {
+            showRamDumpResult(context, PrimedGunSettings.dumpMem1())
+            return
+        }
+        // MEM1 is 24 MiB, so the write runs behind a progress dialog rather than on the UI thread.
+        ThreadUtil.runOnThreadAndShowResult(activity, R.string.primedgun_ram_dump_title, 0, {
+            val path = PrimedGunSettings.dumpMem1()
+            if (path.isEmpty()) {
+                context.getString(R.string.primedgun_ram_dump_failed)
+            } else {
+                context.getString(R.string.primedgun_ram_dump_done, path)
+            }
+        })
+    }
+
+    private fun showRamDumpResult(context: Context, path: String) {
+        MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.primedgun_ram_dump_title)
+            .setMessage(
+                if (path.isEmpty()) {
+                    context.getString(R.string.primedgun_ram_dump_failed)
+                } else {
+                    context.getString(R.string.primedgun_ram_dump_done, path)
+                }
+            )
+            .setPositiveButton(R.string.ok, null)
+            .show()
+    }
+
     private fun header(context: Context, titleId: Int) =
         PrimedGunItem.Header(context.getString(titleId))
+
+    private fun action(context: Context, titleId: Int, onClick: () -> Unit) =
+        PrimedGunItem.Action(context.getString(titleId), onClick)
 
     private fun switch(context: Context, titleId: Int, key: String, default: Boolean) =
         PrimedGunItem.Switch(

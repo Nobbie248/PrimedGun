@@ -3,6 +3,7 @@ package org.dolphinemu.dolphinemu.utils
 import android.app.Activity
 import android.app.Application.ActivityLifecycleCallbacks
 import android.os.Bundle
+import org.dolphinemu.dolphinemu.ui.main.MainActivity
 import org.dolphinemu.dolphinemu.ui.main.MainView
 
 class ActivityTracker : ActivityLifecycleCallbacks {
@@ -13,7 +14,7 @@ class ActivityTracker : ActivityLifecycleCallbacks {
         private set
 
     private fun isMainActivity(activity: Activity): Boolean {
-        return activity is MainView
+        return activity is MainView || activity is MainActivity
     }
 
     override fun onActivityCreated(activity: Activity, bundle: Bundle?) {

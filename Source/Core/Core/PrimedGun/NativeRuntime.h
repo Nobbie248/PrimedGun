@@ -89,6 +89,11 @@ void SetRuntimeSettings(const RuntimeSettings& settings);
 void ResetCalibrationOffsets();
 void ApplySamusArmPreset();
 void SetVrStateSlot(int slot);
+// Copies the cannon textures of `slot` (0 = default, 1-4 = presets, 5 = custom) into the managed
+// texture pack, refreshes the texture cache and records the slot in RuntimeSettings. Returns
+// false when the slot has no textures or VR support is compiled out. Shared by the in-headset
+// menu and the Android launcher so both apply a slot the same way.
+bool ApplyCannonTextureSlot(int slot);
 bool ConsumeVrSettingsSaveRequest();
 void MarkVrSettingsSaved();
 int ConsumeVrStateSlotSelectRequest();

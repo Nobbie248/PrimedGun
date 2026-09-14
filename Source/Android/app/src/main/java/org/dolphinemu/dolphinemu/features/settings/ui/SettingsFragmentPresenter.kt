@@ -119,6 +119,14 @@ class SettingsFragmentPresenter(
             MenuTag.ENHANCEMENTS -> addEnhanceSettings(sl)
             MenuTag.COLOR_CORRECTION -> addColorCorrectionSettings(sl)
             MenuTag.STEREOSCOPY -> addStereoSettings(sl)
+            MenuTag.OPENXR -> addOpenXrSettings(sl)
+            MenuTag.QUEST_VR_CAMERA -> addQuestVrCameraSettings(sl)
+            MenuTag.QUEST_VR_VIRTUAL_SCREEN -> addQuestVrVirtualScreenSettings(sl)
+            MenuTag.QUEST_VR_RENDERING -> addQuestVrRenderingSettings(sl)
+            MenuTag.QUEST_VR_FRAMERATE -> addQuestVrFramerateSettings(sl)
+            MenuTag.QUEST_VR_HACKS -> addQuestVrHackSettings(sl)
+            MenuTag.QUEST_VR_PASSTHROUGH -> addQuestVrPassthroughSettings(sl)
+            MenuTag.QUEST_VR_DEBUG -> addQuestVrDebugSettings(sl)
             MenuTag.HACKS -> addHackSettings(sl)
             MenuTag.STATISTICS -> addStatisticsSettings(sl)
             MenuTag.ADVANCED_GRAPHICS -> addAdvancedGraphicsSettings(sl)
@@ -184,6 +192,9 @@ class SettingsFragmentPresenter(
     private fun addTopLevelSettings(sl: ArrayList<SettingsItem>) {
         sl.add(SubmenuSetting(context, R.string.config, MenuTag.CONFIG))
         sl.add(SubmenuSetting(context, R.string.graphics_settings, MenuTag.GRAPHICS))
+        if (QuestVrSettings.isQuestBuild() && gameId.isNullOrEmpty()) {
+            sl.add(SubmenuSetting(context, R.string.openxr_submenu, MenuTag.OPENXR))
+        }
 
         sl.add(SubmenuSetting(context, R.string.gcpad_settings, MenuTag.GCPAD_TYPE))
         if (settings!!.isWii) {
@@ -1330,6 +1341,340 @@ class SettingsFragmentPresenter(
         }
     }
 
+    // ---------- OpenXR (Quest) ----------
+    // Follows the DolphinXR Quest build's OpenXR tab, group for group. Every row is backed by
+    // QuestVrSettings, which routes the keys PrimedGun pins for Metroid Prime at boot to the
+    // per-game VR profile, so the values shown here are the ones the game runs with.
+
+    private fun addOpenXrSettings(sl: ArrayList<SettingsItem>) {
+        sl.add(HeaderSetting(context, R.string.quest_vr_runtime, R.string.quest_vr_openxr_description))
+        questSwitch(
+            sl, QuestVrSettings.openXrEnabledSetting(),
+            R.string.quest_enable_openxr, R.string.quest_enable_openxr_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.launchInVrSetting(),
+            R.string.quest_launch_in_vr, R.string.quest_launch_in_vr_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.recenterOnLaunchSetting(),
+            R.string.quest_recenter_on_launch, R.string.quest_recenter_on_launch_description
+        )
+        questFloat(
+            sl, QuestVrSettings.unitsPerMeterSetting(),
+            R.string.quest_units_per_meter, R.string.quest_units_per_meter_description,
+            0.1f, 500.0f, 0.1f
+        )
+
+        sl.add(HeaderSetting(context, R.string.quest_vr_groups, 0))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_camera, MenuTag.QUEST_VR_CAMERA))
+        sl.add(
+            SubmenuSetting(
+                context, R.string.quest_vr_virtual_screen, MenuTag.QUEST_VR_VIRTUAL_SCREEN
+            )
+        )
+        sl.add(SubmenuSetting(context, R.string.quest_vr_rendering, MenuTag.QUEST_VR_RENDERING))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_framerate, MenuTag.QUEST_VR_FRAMERATE))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_hacks, MenuTag.QUEST_VR_HACKS))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_passthrough, MenuTag.QUEST_VR_PASSTHROUGH))
+        sl.add(SubmenuSetting(context, R.string.quest_vr_debug, MenuTag.QUEST_VR_DEBUG))
+    }
+
+    private fun addQuestVrCameraSettings(sl: ArrayList<SettingsItem>) {
+        questFloat(
+            sl, QuestVrSettings.leanBackAngleSetting(),
+            R.string.quest_lean_back_angle, R.string.quest_lean_back_angle_description,
+            -45.0f, 45.0f, 0.1f
+        )
+        questSwitch(
+            sl, QuestVrSettings.enableCameraForwardSetting(),
+            R.string.quest_enable_camera_forward, R.string.quest_enable_camera_forward_description
+        )
+        questFloat(
+            sl, QuestVrSettings.cameraForwardSetting(),
+            R.string.quest_camera_forward, R.string.quest_camera_forward_description,
+            -20.0f, 20.0f, 0.1f
+        )
+        questSwitch(
+            sl, QuestVrSettings.enableCameraHeightSetting(),
+            R.string.quest_enable_camera_height, R.string.quest_enable_camera_height_description
+        )
+        questFloat(
+            sl, QuestVrSettings.cameraHeightSetting(),
+            R.string.quest_camera_height, R.string.quest_camera_height_description,
+            -20.0f, 20.0f, 0.1f
+        )
+    }
+
+    private fun addQuestVrVirtualScreenSettings(sl: ArrayList<SettingsItem>) {
+        questSwitch(
+            sl, QuestVrSettings.virtualScreenSetting(),
+            R.string.quest_virtual_screen, R.string.quest_virtual_screen_description
+        )
+        questFloat(
+            sl, QuestVrSettings.screenDistanceSetting(),
+            R.string.quest_screen_distance, R.string.quest_screen_distance_description,
+            0.5f, 10.0f, 0.1f
+        )
+        questFloat(
+            sl, QuestVrSettings.screenSizeSetting(),
+            R.string.quest_screen_size, R.string.quest_screen_size_description,
+            0.5f, 5.0f, 0.1f
+        )
+        questFloat(
+            sl, QuestVrSettings.headLockedCurvatureSetting(),
+            R.string.quest_head_locked_curvature, R.string.quest_head_locked_curvature_description,
+            0.0f, 5.0f, 0.01f
+        )
+        questFloat(
+            sl, QuestVrSettings.hudThicknessSetting(),
+            R.string.quest_hud_thickness, R.string.quest_hud_thickness_description,
+            0.0f, 10.0f, 0.05f
+        )
+        questSwitch(
+            sl, QuestVrSettings.autoLayerSpreadSetting(),
+            R.string.quest_auto_layer_spread, R.string.quest_auto_layer_spread_description
+        )
+        questFloat(
+            sl, QuestVrSettings.layerOffsetSetting(),
+            R.string.quest_layer_offset, R.string.quest_layer_offset_description,
+            0.0001f, 0.01f, 0.0001f
+        )
+        questFloat(
+            sl, QuestVrSettings.elementDepthSetting(),
+            R.string.quest_element_depth, R.string.quest_element_depth_description,
+            0.0f, 0.1f, 0.0005f
+        )
+        questSwitch(
+            sl, QuestVrSettings.hud3dEnableSetting(),
+            R.string.quest_hud_3d_enable, R.string.quest_hud_3d_enable_description
+        )
+        questFloat(
+            sl, QuestVrSettings.hud3dCloserSetting(),
+            R.string.quest_hud_3d_closer, R.string.quest_hud_3d_closer_description,
+            0.0f, 1.0f, 0.01f
+        )
+    }
+
+    private fun addQuestVrRenderingSettings(sl: ArrayList<SettingsItem>) {
+        questFloat(
+            sl, QuestVrSettings.resolutionScaleSetting(),
+            R.string.quest_resolution_scale, R.string.quest_resolution_scale_description,
+            0.5f, 2.0f, 0.05f
+        )
+        questChoice(
+            sl, QuestVrSettings.foveationLevelSetting(),
+            R.string.quest_foveation_level, R.string.quest_foveation_level_description,
+            R.array.questFoveationLevelEntries, R.array.questFoveationLevelValues
+        )
+        questSwitch(
+            sl, QuestVrSettings.dynamicFoveationSetting(),
+            R.string.quest_dynamic_foveation, R.string.quest_dynamic_foveation_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.foveateEfbSetting(),
+            R.string.quest_foveate_efb, R.string.quest_foveate_efb_description
+        )
+        sl.add(
+            IntSliderSetting(
+                context,
+                QuestVrSettings.clearEfbCopiesSetting(),
+                R.string.quest_clear_efb_copies,
+                R.string.quest_clear_efb_copies_description,
+                0,
+                640,
+                "",
+                10
+            )
+        )
+        questFloat(
+            sl, QuestVrSettings.vrGammaSetting(),
+            R.string.quest_vr_gamma, R.string.quest_vr_gamma_description,
+            1.0f, 3.0f, 0.1f
+        )
+    }
+
+    private fun addQuestVrFramerateSettings(sl: ArrayList<SettingsItem>) {
+        questChoice(
+            sl, QuestVrSettings.forcedVbiFrequencySetting(),
+            R.string.quest_forced_vbi_frequency, R.string.quest_forced_vbi_frequency_description,
+            R.array.questForcedVbiFrequencyEntries, R.array.questForcedVbiFrequencyValues
+        )
+        questSwitch(
+            sl, QuestVrSettings.eagerHeartbeatSetting(),
+            R.string.quest_eager_heartbeat, R.string.quest_eager_heartbeat_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.xrPacingThreadSetting(),
+            R.string.quest_xr_pacing_thread, R.string.quest_xr_pacing_thread_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.autoImmediateXfbSetting(),
+            R.string.quest_auto_immediate_xfb, R.string.quest_auto_immediate_xfb_description
+        )
+        questChoice(
+            sl, QuestVrSettings.opcodeReplaySetting(),
+            R.string.quest_opcode_replay, R.string.quest_opcode_replay_description,
+            R.array.questOpcodeReplayEntries, R.array.questOpcodeReplayValues
+        )
+        questChoice(
+            sl, QuestVrSettings.opcodeReplayTargetRefreshRateSetting(),
+            R.string.quest_opcode_replay_refresh_rate,
+            R.string.quest_opcode_replay_refresh_rate_description,
+            R.array.questOpcodeReplayRefreshRateEntries,
+            R.array.questOpcodeReplayRefreshRateValues
+        )
+    }
+
+    private fun addQuestVrHackSettings(sl: ArrayList<SettingsItem>) {
+        questSwitch(
+            sl, QuestVrSettings.useVulkanMultiviewSetting(),
+            R.string.quest_use_vulkan_multiview, R.string.quest_use_vulkan_multiview_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.lockHeadPoseSetting(),
+            R.string.quest_lock_head_pose, R.string.quest_lock_head_pose_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.dontClearScreenSetting(),
+            R.string.quest_dont_clear_screen, R.string.quest_dont_clear_screen_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.disableCpuCullSetting(),
+            R.string.quest_disable_cpu_culling, R.string.quest_disable_cpu_culling_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.removeBarsSetting(),
+            R.string.quest_remove_cinematic_bars, R.string.quest_remove_cinematic_bars_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.orthoScissorFixSetting(),
+            R.string.quest_ortho_scissor_fix, R.string.quest_ortho_scissor_fix_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.detectSkyboxSetting(),
+            R.string.quest_detect_skybox, R.string.quest_detect_skybox_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.metroidVisorFixSetting(),
+            R.string.quest_metroid_visor_fix, R.string.quest_metroid_visor_fix_description
+        )
+    }
+
+    private fun addQuestVrPassthroughSettings(sl: ArrayList<SettingsItem>) {
+        questSwitch(
+            sl, QuestVrSettings.passthroughSetting(),
+            R.string.quest_ar_mode, R.string.quest_ar_mode_description
+        )
+        questFloat(
+            sl, QuestVrSettings.arBackgroundAlphaSetting(),
+            R.string.quest_ar_background_alpha, R.string.quest_ar_background_alpha_description,
+            0.0f, 1.0f, 0.05f
+        )
+        questSwitch(
+            sl, QuestVrSettings.debugPassthroughSetting(),
+            R.string.quest_ar_mode_debug, R.string.quest_ar_mode_debug_description
+        )
+    }
+
+    private fun addQuestVrDebugSettings(sl: ArrayList<SettingsItem>) {
+        questSwitch(
+            sl, QuestVrSettings.showMirrorSurfaceSetting(),
+            R.string.quest_show_mirror_surface, R.string.quest_show_mirror_surface_description
+        )
+        questSwitch(
+            sl, BooleanSetting.GFX_SHOW_FPS,
+            R.string.quest_show_perf_hud, R.string.quest_show_perf_hud_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.androidDirectToHmdSetting(),
+            R.string.quest_android_direct_to_hmd, R.string.quest_android_direct_to_hmd_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.cpuLevel5HintSetting(),
+            R.string.quest_cpu_level_5_hint, R.string.quest_cpu_level_5_hint_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.pinEmulationCoresSetting(),
+            R.string.quest_pin_emulation_cores, R.string.quest_pin_emulation_cores_description
+        )
+        questSwitch(
+            sl, QuestVrSettings.loadCustomShadersSetting(),
+            R.string.quest_load_custom_shaders, R.string.quest_load_custom_shaders_description
+        )
+        questChoice(
+            sl, QuestVrSettings.referenceSpaceModeSetting(),
+            R.string.quest_reference_space_mode, R.string.quest_reference_space_mode_description,
+            R.array.questReferenceSpaceModeEntries, R.array.questReferenceSpaceModeValues
+        )
+        questChoice(
+            sl, QuestVrSettings.trackingModeSetting(),
+            R.string.quest_tracking_mode, R.string.quest_tracking_mode_description,
+            R.array.questTrackingModeEntries, R.array.questTrackingModeValues
+        )
+        sl.add(
+            RunRunnable(
+                context,
+                R.string.quest_recenter_now,
+                R.string.quest_recenter_now_description,
+                0,
+                0,
+                true
+            ) { NativeLibrary.RequestOpenXRRecenter() }
+        )
+        sl.add(
+            RunRunnable(
+                context,
+                R.string.quest_reset_openxr_settings,
+                R.string.quest_reset_openxr_settings_description,
+                R.string.quest_reset_openxr_settings_confirmation,
+                R.string.quest_openxr_settings_reset,
+                false
+            ) {
+                runQuestSettingsMutation { settings -> QuestVrSettings.resetOpenXrSettings(settings) }
+            }
+        )
+    }
+
+    private fun runQuestSettingsMutation(block: (Settings) -> Unit) {
+        val activeSettings = settings ?: return
+        block(activeSettings)
+        activeSettings.saveSettings()
+        fragmentView.adapter?.notifyAllSettingsChanged()
+    }
+
+    private fun questSwitch(
+        sl: ArrayList<SettingsItem>,
+        setting: AbstractBooleanSetting,
+        titleId: Int,
+        descriptionId: Int
+    ) {
+        sl.add(SwitchSetting(context, setting, titleId, descriptionId))
+    }
+
+    private fun questFloat(
+        sl: ArrayList<SettingsItem>,
+        setting: AbstractFloatSetting,
+        titleId: Int,
+        descriptionId: Int,
+        min: Float,
+        max: Float,
+        step: Float
+    ) {
+        sl.add(FloatSliderSetting(context, setting, titleId, descriptionId, min, max, "", step, true))
+    }
+
+    private fun questChoice(
+        sl: ArrayList<SettingsItem>,
+        setting: AbstractIntSetting,
+        titleId: Int,
+        descriptionId: Int,
+        entriesId: Int,
+        valuesId: Int
+    ) {
+        sl.add(SingleChoiceSetting(context, setting, titleId, descriptionId, entriesId, valuesId))
+    }
+
     private fun addGcPadSettings(sl: ArrayList<SettingsItem>) {
         sl.add(
             SingleChoiceSetting(
@@ -1443,31 +1788,6 @@ class SettingsFragmentPresenter(
     }
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
-        if (QuestVrSettings.isQuestBuild()) {
-            sl.add(HeaderSetting(context, R.string.quest_rendering, 0))
-            sl.add(SwitchSetting(
-                context, QuestVrSettings.useVulkanMultiviewSetting(),
-                R.string.quest_multiview, R.string.quest_multiview_description
-            ))
-            sl.add(FloatSliderSetting(
-                context, QuestVrSettings.resolutionScaleSetting(),
-                R.string.quest_resolution_scale, R.string.quest_resolution_scale_description,
-                0.5f, 2.0f, "", 0.05f, true
-            ))
-            sl.add(SingleChoiceSetting(
-                context, QuestVrSettings.foveationLevelSetting(),
-                R.string.quest_foveation_level, R.string.quest_foveation_level_description,
-                R.array.questFoveationLevelEntries, R.array.questFoveationLevelValues
-            ))
-            sl.add(SwitchSetting(
-                context, QuestVrSettings.dynamicFoveationSetting(),
-                R.string.quest_dynamic_foveation, R.string.quest_dynamic_foveation_description
-            ))
-            sl.add(SwitchSetting(
-                context, QuestVrSettings.foveateEfbSetting(),
-                R.string.quest_foveate_efb, R.string.quest_foveate_efb_description
-            ))
-        }
         sl.add(HeaderSetting(context, R.string.graphics_general, 0))
         sl.add(
             StringSingleChoiceSetting(

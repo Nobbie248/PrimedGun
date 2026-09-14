@@ -12,8 +12,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import org.dolphinemu.dolphinemu.R
 
-/** One tab of the PrimedGun settings UI. */
-class PrimedGunSettingsFragment : Fragment() {
+/** A launcher tab made of [PrimedGunItem] rows: Controller, Calibration and Dolphin Config. */
+class PrimedGunSettingsFragment : Fragment(), PrimedGunRefreshable {
 
     companion object {
         private const val ARG_TAB = "tab"
@@ -50,11 +50,15 @@ class PrimedGunSettingsFragment : Fragment() {
         super.onResume()
         // The in-headset menu writes the same settings while the game runs, so re-read on return
         // rather than trusting what was on screen when this tab lost focus.
-        adapter?.refresh()
+        refresh()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         adapter = null
+    }
+
+    override fun refresh() {
+        adapter?.refresh()
     }
 }
