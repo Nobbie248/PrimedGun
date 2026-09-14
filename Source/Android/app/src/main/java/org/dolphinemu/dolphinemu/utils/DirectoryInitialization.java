@@ -162,6 +162,13 @@ public final class DirectoryInitialization
       editor.apply();
     }
 
+    // The PrimedGun overlay images (weapon panel icons, floor marker) live in Sys/PrimedGun. The
+    // version key above only re-extracts Sys when the git revision changes, so a build that adds
+    // this folder at an already-extracted revision would never get it; copy it if it is missing.
+    File primedGunSysDirectory = new File(sysDirectory, "PrimedGun");
+    if (!primedGunSysDirectory.exists())
+      copyAssetFolder("Sys" + File.separator + "PrimedGun", primedGunSysDirectory, context);
+
     // Let the native code know where the Sys directory is.
     sysPath = sysDirectory.getPath();
     SetSysDirectory(sysPath);

@@ -68,6 +68,17 @@ PRIVATE
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/)
 file(REMOVE_RECURSE ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/Sys/)
 file(COPY ${CMAKE_SOURCE_DIR}/Data/Sys DESTINATION ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/)
+# PrimedGun in-headset overlay images (weapon panel icons and the floor position marker). The
+# desktop build reads these from <exe>/assets; the APK has no executable directory, so bundle
+# them inside Sys, which DirectoryInitialization extracts to internal storage on first launch.
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/Sys/PrimedGun/)
+file(COPY
+     ${CMAKE_SOURCE_DIR}/assets/power.png
+     ${CMAKE_SOURCE_DIR}/assets/wave.png
+     ${CMAKE_SOURCE_DIR}/assets/ice.png
+     ${CMAKE_SOURCE_DIR}/assets/plasma.png
+     ${CMAKE_SOURCE_DIR}/assets/position.png
+     DESTINATION ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/Sys/PrimedGun/)
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/User/Load/)
 file(COPY ${CMAKE_SOURCE_DIR}/Data/User/Load/PrimedGun
      DESTINATION ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/User/Load/)

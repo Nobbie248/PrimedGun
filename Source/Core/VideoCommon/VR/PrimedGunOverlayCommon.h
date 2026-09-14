@@ -172,7 +172,13 @@ inline const PrimedGunPng& LoadPrimedGunPng(const char* filename)
   if (!image->tried)
   {
     image->tried = true;
+#ifdef ANDROID
+    // The APK has no executable directory. Source/Android/jni/CMakeLists.txt copies these images
+    // into the Sys payload, which is extracted to internal storage before emulation starts.
+    const std::string path = File::GetSysDirectory() + "PrimedGun" DIR_SEP + filename;
+#else
     const std::string path = File::GetExeDirectory() + DIR_SEP "assets" DIR_SEP + filename;
+#endif
     if (!LoadPrimedGunPngFromPath(path, image))
       WARN_LOG_FMT(VIDEO, "PrimedGun: Failed to load weapon panel asset '{}'.", path);
   }
