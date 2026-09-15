@@ -251,7 +251,7 @@ object PrimedGunTabs {
             PrimedGunSettings.resetHud()
         })
         add(slider(context, R.string.primedgun_hud_distance, "metroid_hud_distance", 0.10f, 3.00f, 0.05f, 0.5f))
-        add(slider(context, R.string.primedgun_hud_size, "metroid_hud_size", 0.10f, 3.00f, 0.05f, 0.5f))
+        add(slider(context, R.string.primedgun_hud_size, "metroid_hud_size", 0.10f, 3.00f, 0.05f, 0.75f))
         add(
             slider(
                 context, R.string.primedgun_hud_vertical,
