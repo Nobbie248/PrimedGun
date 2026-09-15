@@ -270,6 +270,7 @@ constexpr uint32_t RESET_TARGETING_ACTION = 2;
 constexpr uint32_t RESET_CALIBRATION_ACTION = 3;
 constexpr uint32_t RESET_CONTROLLER_ACTION = 4;
 constexpr uint32_t RESET_MOVEMENT_ACTION = 5;
+constexpr uint32_t EXIT_GAME_ACTION = 6;
 constexpr uint32_t STATE_LOAD_ACTION = 1;
 constexpr uint32_t STATE_SAVE_ACTION = 2;
 constexpr uint32_t STATE_LOAD_NEWEST_ACTION = 3;
@@ -552,8 +553,6 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   FillRect(pixels, width, height, 0, static_cast<int>(height) - 10, static_cast<int>(width), 10,
            0xE0FFB030u);
   DrawText(pixels, width, height, "PRIMEDGUN SETTINGS", 48, 28, 4, 0xFFFFD8A0u);
-  if (s.saved_notice)
-    DrawText(pixels, width, height, "SETTINGS SAVED", 760, 34, 2, 0xFFFFE6B8u);
 
   constexpr const char* tabs[] = {"LAYOUT",   "CALIBRATION", "CONTROL",
                                   "MOVEMENT", "TEXTURES",    "STATES"};
@@ -575,6 +574,17 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
     DrawText(pixels, width, height, label, x + (w - TextWidth(label, 2)) / 2, y + 7, 2,
              0xFFFFE6B8u);
   };
+
+  // EXIT GAME sits on the title row so it is visible on every tab, including the Layout tab the
+  // menu opens on. Its hit box is in NativeRuntime.cpp, just before the tab strip test.
+  constexpr int exit_button_x = 752;
+  draw_button(s.reset_confirm_action == EXIT_GAME_ACTION ? "ARE YOU SURE?" : "EXIT GAME",
+              exit_button_x, 26, 220);
+  if (s.saved_notice)
+  {
+    DrawText(pixels, width, height, "SETTINGS SAVED",
+             exit_button_x - 16 - TextWidth("SETTINGS SAVED", 2), 34, 2, 0xFFFFE6B8u);
+  }
 
   if (s.tab == VR_MENU_LAYOUT_TAB)
   {

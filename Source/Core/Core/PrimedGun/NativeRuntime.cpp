@@ -17,11 +17,12 @@
 #include <string_view>
 #include <vector>
 
-#include "Common/CommonPaths.h"
 #include "Common/Assembler/GekkoAssembler.h"
+#include "Common/CommonPaths.h"
 #include "Common/CommonTypes.h"
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
+#include "Common/HookableEvent.h"
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
@@ -304,6 +305,8 @@ constexpr u32 VR_MENU_RESET_TARGETING_ACTION = 2;
 constexpr u32 VR_MENU_RESET_CALIBRATION_ACTION = 3;
 constexpr u32 VR_MENU_RESET_CONTROLLER_ACTION = 4;
 constexpr u32 VR_MENU_RESET_MOVEMENT_ACTION = 5;
+// Shares the reset confirmation slot so the header button gets the same press-twice guard.
+constexpr u32 VR_MENU_EXIT_GAME_ACTION = 6;
 constexpr const char* PRIMEDGUN_CANNON_GAME_ID = "GM8E01";
 constexpr const char* PRIMEDGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
 constexpr const char* PRIMEDGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
@@ -446,6 +449,10 @@ std::mutex s_settings_mutex;
 RuntimeSettings s_settings;
 u64 s_frame_counter = 0;
 bool s_game_was_active = false;
+// Resets the per-session state once the core reports Uninitialized; see
+// EnsureCoreStateHookInstalled.
+Common::EventHook s_core_state_hook;
+bool s_core_state_hook_installed = false;
 bool s_patches_applied_this_boot = false;
 bool s_scan_was_active = false;
 u32 s_scan_last_player = 0;
@@ -494,6 +501,7 @@ std::atomic_bool s_vr_state_load_newest_requested{false};
 std::atomic_bool s_vr_state_save_oldest_requested{false};
 std::atomic_int s_vr_state_slot_select_requested{0};
 std::atomic_int s_vr_state_slot_from_ui{0};
+std::atomic_bool s_vr_exit_game_requested{false};
 u32 s_vr_state_confirm_action = 0;
 u64 s_vr_state_confirm_until_frame = 0;
 u32 s_vr_reset_confirm_action = 0;
@@ -5859,6 +5867,19 @@ void SaveVrMenuSettingsNotice()
   ++s_vr_menu_generation;
 }
 
+// Asks the host to stop emulation the normal way, so the video backend shuts down and writes
+// its shader and pipeline caches. This is the only clean exit available inside the headset:
+// on Quest the universal-menu quit just kills the process, which loses those caches.
+// The stop itself is issued from OnFrameEnd, after the pending settings save has landed, so
+// changes made in the menu are persisted before the core goes away.
+void RequestVrExitGame()
+{
+  ClearVrMenuConfirmations();
+  s_vr_settings_save_requested = true;
+  s_vr_exit_game_requested.store(true, std::memory_order_release);
+  ++s_vr_menu_generation;
+}
+
 void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
 {
   RefreshVrStateConfirmation();
@@ -6112,7 +6133,18 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
     {
       const float texture_x = std::clamp(pointer_x, 0.0f, 1.0f) * VR_MENU_TEXTURE_WIDTH;
       const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * VR_MENU_TEXTURE_HEIGHT;
-      if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
+      if (pointer_active && texture_y >= 26.0f && texture_y <= 54.0f)
+      {
+        // EXIT GAME sits on the title row, to the right of the heading, so it is reachable
+        // from every tab including the Layout tab the menu opens on.
+        if (texture_x >= 752.0f && texture_x <= 972.0f)
+        {
+          if (ConfirmVrResetAction(VR_MENU_EXIT_GAME_ACTION))
+            RequestVrExitGame();
+          ++s_vr_menu_generation;
+        }
+      }
+      else if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
       {
         constexpr float tab_start_x = 22.0f;
         constexpr float tab_step = 166.0f;
@@ -8210,6 +8242,40 @@ void UpdateSpringBallInput(const Core::CPUThreadGuard& guard, const RuntimeSetti
   TryWriteU8(guard, SPRINGBALL_TRIGGER_SCRATCH, active ? 1u : 0u);
 
 }
+
+// Consumes the in-headset Exit Game request. The core has to be stopped from the host thread,
+// so this only queues the stop: on Android the host job ends Run() and Core::Shutdown, on
+// DolphinQt it behaves like closing the render window. Both reach VideoBackend::Shutdown, which
+// is where the Vulkan pipeline cache and the pipeline UID cache get written to disk.
+void ProcessPendingVrExitGameRequest()
+{
+  if (!s_vr_exit_game_requested.exchange(false, std::memory_order_acq_rel))
+    return;
+
+  INFO_LOG_FMT(CORE, "PrimedGun: Exit Game requested from the in-headset menu.");
+  Core::QueueHostJob([](Core::System& host_system) { Core::Stop(host_system); });
+}
+
+// The menu and the rest of the per-session state are file statics, so they outlive a stop, and
+// the reset in OnFrameEnd only runs while frames are still being emulated. Without this hook,
+// exiting through the menu and relaunching in the same process (which the Quest launcher always
+// does) brought the menu back up at the title screen, where it cannot be toggled and swallows
+// the Start press. Uninitialized is reported from the emu thread after the CPU thread is gone,
+// so the reset cannot race OnFrameEnd.
+void EnsureCoreStateHookInstalled()
+{
+  if (s_core_state_hook_installed)
+    return;
+
+  s_core_state_hook_installed = true;
+  s_core_state_hook = Core::AddOnStateChangedCallback([](Core::State state) {
+    if (state != Core::State::Uninitialized)
+      return;
+
+    ResetNativeRuntime();
+    s_game_was_active = false;
+  });
+}
 }  // namespace
 
 void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
@@ -8219,10 +8285,13 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   // Covers frontends that have no settings UI of their own to load these at startup; a no-op
   // once DolphinQt or the Android host has already loaded them.
   EnsureRuntimeSettingsLoaded();
+  EnsureCoreStateHookInstalled();
 
   // Persist before the early returns below so a menu save still lands when the change being
   // saved was to disable the mod, or when the game has already stopped.
   ProcessPendingVrSettingsSave();
+  // After the save on purpose: Exit Game also requests a save, and the stop must not race it.
+  ProcessPendingVrExitGameRequest();
 
   const RuntimeSettings settings = GetRuntimeSettings();
   if (!settings.enabled)
@@ -8510,6 +8579,7 @@ void ResetNativeRuntime()
     patch.applied = false;
   s_vr_state_slot_select_requested.store(0, std::memory_order_release);
   s_vr_state_slot_from_ui.store(0, std::memory_order_release);
+  s_vr_exit_game_requested.store(false, std::memory_order_release);
   s_vr_state_confirm_action = 0;
   s_vr_state_confirm_until_frame = 0;
   s_vr_reset_confirm_action = 0;

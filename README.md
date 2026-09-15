@@ -66,6 +66,7 @@ For macOS, see the [PrimedGun-Mac fork](https://github.com/gperkins345/PrimedGun
 - Click the left thumbstick to open or close the in-headset settings menu.
 - Try to stay in the centre of your play space and face forward, this mod is not roomscaled.
 - Use Save Settings after changing PrimedGun options to apply them.
+- Use Exit Game at the top right of the menu (press it twice) to leave the game. It stops the emulator cleanly and writes the shader caches. On Quest this is the only clean exit: quitting from the Meta menu kills the app before the caches are saved, so shaders recompile on every launch.
 
 ## Archipelago / MultiworldGG
 
