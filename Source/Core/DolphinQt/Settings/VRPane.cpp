@@ -377,8 +377,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
 
   m_dont_clear_screen =
       new ConfigBool(tr("Don't Clear Screen"), Config::GFX_VR_DONT_CLEAR_SCREEN);
-  m_disable_cpu_cull =
-      new ConfigBool(tr("Disable CPU Culling in VR"), Config::GFX_VR_DISABLE_CPU_CULL);
+  m_head_cpu_cull =
+      new ConfigBool(tr("Head-Rotated CPU Culling"), Config::GFX_VR_HEAD_CPU_CULL);
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_ortho_scissor_fix =
       new ConfigBool(tr("Ortho Scissor Fix"), Config::GFX_VR_ORTHO_SCISSOR_FIX);
@@ -399,7 +399,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_auto_immediate_xfb);
   hacks_group_layout->addWidget(m_lock_head_pose);
   hacks_group_layout->addWidget(m_dont_clear_screen);
-  hacks_group_layout->addWidget(m_disable_cpu_cull);
+  hacks_group_layout->addWidget(m_head_cpu_cull);
   hacks_group_layout->addWidget(m_remove_bars);
   hacks_group_layout->addWidget(m_ortho_scissor_fix);
   hacks_group_layout->addWidget(m_detect_skybox);
@@ -617,11 +617,16 @@ void VRPane::AddDescriptions()
       "looking outside the rendered area. Enable this if clearing causes visual glitches "
       "in specific games."
       "<br><br><dolphin_emphasis>If unsure, leave this unchecked.</dolphin_emphasis>");
-  static constexpr char TR_DISABLE_CPU_CULL_DESCRIPTION[] = QT_TR_NOOP(
-      "Disables CPU-side primitive culling when OpenXR VR is active."
-      "<br><br>This may fix missing geometry in some games at the cost of a small performance hit."
-      "<br><br>This only affects Dolphin's CPU culling optimization. It does not override "
-      "the game's own backface culling state.");
+  static constexpr char TR_HEAD_CPU_CULL_DESCRIPTION[] = QT_TR_NOOP(
+      "Culls world geometry on the CPU against a cone that follows your head instead of the "
+      "game's own projection, so draw calls entirely outside the headset's view are never sent "
+      "to the GPU."
+      "<br><br>The cone uses the PrimedGun culling angle (115 degrees by default) and never "
+      "narrows below the rendered field of view. HUD, visor, menu and shadow passes are left "
+      "alone, and the flat cinema screen is tested against the game's own projection. It works "
+      "alongside PrimedGun's own head-following game frustum; the in-headset \"Enable frustum "
+      "culling\" toggle turns both off."
+      "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_OPCODE_REPLAY_DESCRIPTION[] = QT_TR_NOOP(
       "Selects the expected input cadence for Opcode Replay."
       "<br><br>25 Hz and 50 Hz Input are intended for PAL games. 30 Hz and 60 Hz Input are "
@@ -792,7 +797,7 @@ void VRPane::AddDescriptions()
   m_screen_size->SetDescription(tr(TR_SCREEN_SIZE_DESCRIPTION));
   m_head_locked_curvature->SetDescription(tr(TR_HEAD_LOCKED_CURVATURE_DESCRIPTION));
   m_dont_clear_screen->SetDescription(tr(TR_DONT_CLEAR_SCREEN_DESCRIPTION));
-  m_disable_cpu_cull->SetDescription(tr(TR_DISABLE_CPU_CULL_DESCRIPTION));
+  m_head_cpu_cull->SetDescription(tr(TR_HEAD_CPU_CULL_DESCRIPTION));
   m_xr_pacing_thread->SetDescription(
       tr("Runs OpenXR frame pacing on a dedicated thread so emulation does not block in "
          "xrWaitFrame. This replaces Opcode Replay while enabled."));

@@ -432,8 +432,7 @@ void AppendLockDebugLine(std::string_view line)
 
 enum PatchGroup : u32
 {
-  PatchDisableFrustumCulling = 0,
-  PatchNoIdleSway,
+  PatchNoIdleSway = 0,
   PatchDisableArmCannonIdleFidget,
   PatchBeamProjectileTiming,
   PatchXrVisorDpadTiming,
@@ -715,8 +714,6 @@ bool ParseHexU32(std::string_view text, u32* out)
 
 u32 PatchGroupFromHeader(std::string_view line)
 {
-  if (line.find("Disable Frustum Culling") != std::string_view::npos)
-    return PatchDisableFrustumCulling;
   if (line.find("No Idle Sway") != std::string_view::npos)
     return PatchNoIdleSway;
   if (line.find("Disable Arm Cannon Idle Fidget") != std::string_view::npos)
@@ -738,8 +735,6 @@ bool PatchGroupEnabled(const RuntimeSettings& settings, u32 group)
 {
   switch (group)
   {
-  case PatchDisableFrustumCulling:
-    return settings.patch_disable_frustum_culling;
   case PatchNoIdleSway:
     return settings.patch_no_idle_sway;
   case PatchDisableArmCannonIdleFidget:
@@ -5493,7 +5488,6 @@ void ResetVrRuntimeSettings(RuntimeSettings* settings)
 {
   const bool enabled = settings->enabled;
   const bool builtin_patches_enabled = settings->builtin_patches_enabled;
-  const bool patch_disable_frustum_culling = settings->patch_disable_frustum_culling;
   const bool patch_no_idle_sway = settings->patch_no_idle_sway;
   const bool patch_disable_arm_cannon_idle_fidget = settings->patch_disable_arm_cannon_idle_fidget;
   const bool patch_beam_projectile_timing = settings->patch_beam_projectile_timing;
@@ -5504,7 +5498,6 @@ void ResetVrRuntimeSettings(RuntimeSettings* settings)
   *settings = RuntimeSettings{};
   settings->enabled = enabled;
   settings->builtin_patches_enabled = builtin_patches_enabled;
-  settings->patch_disable_frustum_culling = patch_disable_frustum_culling;
   settings->patch_no_idle_sway = patch_no_idle_sway;
   settings->patch_disable_arm_cannon_idle_fidget = patch_disable_arm_cannon_idle_fidget;
   settings->patch_beam_projectile_timing = patch_beam_projectile_timing;

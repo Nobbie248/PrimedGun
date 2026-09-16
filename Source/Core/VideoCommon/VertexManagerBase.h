@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -112,8 +113,10 @@ public:
 
   PrimitiveType GetCurrentPrimitiveType() const { return m_current_primitive_type; }
   void AddIndices(OpcodeDecoder::Primitive primitive, u32 num_vertices);
+  // With a projection (four row-major float4 rows) the test runs against it instead of the
+  // vertex shader's; the VR head cull passes its cone here.
   bool AreAllVerticesCulled(VertexLoaderBase* loader, OpcodeDecoder::Primitive primitive,
-                            const u8* src, u32 count);
+                            const u8* src, u32 count, const void* projection = nullptr);
   virtual DataReader PrepareForAdditionalData(OpcodeDecoder::Primitive primitive, u32 count,
                                               u32 stride, bool cullall);
   /// Switch cullall off after a call to PrepareForAdditionalData with cullall true
@@ -124,6 +127,11 @@ public:
 
   void Flush();
   bool HasSendableVertices() const { return !m_is_flushed && !m_cull_all; }
+
+  // VR CPU cull (Config::GFX_VR_HEAD_CPU_CULL). Returns true when the pending draw may be
+  // culled; *projection is then the head cone, or nullptr to test against the game's own
+  // projection while the flat cinema screen is shown.
+  bool ShouldVrCullDraw(const void** projection);
 
   void DoState(PointerWrap& p);
 
@@ -228,6 +236,20 @@ protected:
   IndexGenerator m_index_generator;
   CPUCull m_cpu_cull;
 
+  // PrimedGun overlay fields the vertex loader needs, refreshed once per flush and at frame
+  // end so per-batch cull decisions never take the overlay mutex.
+  bool m_overlay_frustum_culling_enabled = true;
+  float m_overlay_frustum_culling_degrees = 115.0f;
+  bool m_overlay_cinematic_screen_active = false;
+  bool m_overlay_game_menu_screen_active = false;
+  bool m_overlay_game_map_screen_active = false;
+  bool m_overlay_use_right_hand = true;
+  bool m_vr_head_cull_pending = false;       // a batch of the pending flush was VR-culled
+  bool m_vr_head_cull_frustum_only = false;  // skip the backface test for the pending draw
+  u32 m_vr_head_cull_frame_culled = 0;
+  u32 m_vr_head_cull_report_frames = 0;
+  u32 m_vr_head_cull_report_culled = 0;
+
 private:
   // Minimum number of draws per command buffer when attempting to preempt a readback operation.
   static constexpr u32 MINIMUM_DRAW_CALLS_PER_COMMAND_BUFFER_FOR_READBACK = 10;
@@ -239,6 +261,8 @@ private:
                       const AbstractPipeline* current_pipeline);
   void UpdatePipelineConfig();
   void UpdatePipelineObject();
+  void RefreshPrimedGunOverlayCache();
+  void UpdateVrHeadCullFrame();
 
   const AbstractPipeline*
   GetCustomPipeline(const CustomPixelShaderContents& custom_pixel_shader_contents,

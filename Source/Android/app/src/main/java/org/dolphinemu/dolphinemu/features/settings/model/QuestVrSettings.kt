@@ -32,7 +32,6 @@ object QuestVrSettings {
         "HeadLockedCurvature",
         "DontClearScreen",
         "LoadCustomShaders",
-        "DisableCPUCull",
         "LayerOffset",
         "ElementDepth",
         "ClearEFBCopies"
@@ -208,7 +207,7 @@ object QuestVrSettings {
 
     fun dontClearScreenSetting(): AbstractBooleanSetting = effectiveBoolean("DontClearScreen", false)
 
-    fun disableCpuCullSetting(): AbstractBooleanSetting = effectiveBoolean("DisableCPUCull", true)
+    fun headCpuCullSetting() = vrBooleanSetting("HeadCPUCull", true)
 
     fun removeBarsSetting() = vrBooleanSetting("RemoveCinematicBars", true)
 
@@ -349,7 +348,6 @@ object QuestVrSettings {
             useVulkanMultiviewSetting(),
             lockHeadPoseSetting(),
             dontClearScreenSetting(),
-            disableCpuCullSetting(),
             removeBarsSetting(),
             orthoScissorFixSetting(),
             detectSkyboxSetting(),

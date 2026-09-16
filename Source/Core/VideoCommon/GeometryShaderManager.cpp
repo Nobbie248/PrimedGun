@@ -736,6 +736,7 @@ void GeometryShaderManager::InvalidateEyeProjectionEntries()
     entry.valid = false;
   m_eye_projection_next_entry = 0;
   m_current_eye_projection_entry = -1;
+  m_vr_cull_projection_valid = false;
 }
 
 int GeometryShaderManager::LookupEyeProjection(float units_per_meter, bool apply_freelook,
@@ -780,6 +781,43 @@ int GeometryShaderManager::LookupEyeProjection(float units_per_meter, bool apply
   return static_cast<int>(slot);
 }
 #endif
+
+const float* GeometryShaderManager::GetVrCullProjection(float cone_degrees)
+{
+#ifdef ENABLE_VR
+  if (!VR::g_openxr || !VR::g_openxr->IsSessionRunning() || !VR::g_openxr->AreEyeViewsValid())
+    return nullptr;
+
+  // Same refresh rule as SetConstants, applied here first because the cull runs before the
+  // draw's constants are set. Replayed frames keep the pose their real frame used.
+  if (!VideoCommon::OpenXROpcodeReplay::IsReplaying())
+  {
+    const u64 eye_views_generation = VR::g_openxr->GetEyeViewsGeneration();
+    if (m_vr_pose_needs_refresh || (!g_ActiveConfig.VRLockHeadPoseEffective() &&
+                                    eye_views_generation != m_cached_eye_views_generation))
+    {
+      InvalidateEyeProjectionEntries();
+      m_cached_eye_views_generation = eye_views_generation;
+      m_vr_pose_needs_refresh = false;
+    }
+  }
+
+  if (!m_vr_cull_projection_valid || cone_degrees != m_vr_cull_projection_degrees)
+  {
+    if (!VR::g_openxr->GetHeadCullProjection(cone_degrees, g_ActiveConfig.vr_units_per_meter,
+                                             &m_vr_cull_projection,
+                                             &m_vr_cull_effective_degrees))
+    {
+      return nullptr;
+    }
+    m_vr_cull_projection_degrees = cone_degrees;
+    m_vr_cull_projection_valid = true;
+  }
+  return m_vr_cull_projection[0].data();
+#else
+  return nullptr;
+#endif
+}
 
 void GeometryShaderManager::InvalidateVRHeadPose()
 {

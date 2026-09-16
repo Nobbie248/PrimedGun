@@ -32,6 +32,11 @@ public:
   // SetConstants() call re-fetches it from OpenXR.  Called from BPStructs at the
   // XFB-copy boundary so a single game frame's draws all see one consistent pose.
   void InvalidateVRHeadPose();
+  // Projection for the VR head-cone CPU cull (four row-major float4 rows), rebuilt on the same
+  // pose refresh as the eye projection entries so a draw is culled against the pose it is
+  // rendered with. Returns nullptr when no OpenXR pose is available.
+  const float* GetVrCullProjection(float cone_degrees);
+  float GetVrCullEffectiveDegrees() const { return m_vr_cull_effective_degrees; }
 
   GeometryShaderConstants constants{};
   bool dirty = false;
@@ -100,6 +105,10 @@ private:
   int m_current_eye_projection_entry = -1;
   u64 m_cached_eye_views_generation = 0;
   bool m_vr_pose_needs_refresh = true;
+  std::array<std::array<float, 4>, 4> m_vr_cull_projection{};
+  float m_vr_cull_projection_degrees = 0.0f;
+  float m_vr_cull_effective_degrees = 0.0f;
+  bool m_vr_cull_projection_valid = false;
 
   void InvalidateEyeProjectionEntries();
   // Returns the entry index for this scale, computing the rows on a miss.

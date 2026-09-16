@@ -15,7 +15,6 @@ struct RuntimeSettings
 {
   bool enabled = true;
   bool builtin_patches_enabled = true;
-  bool patch_disable_frustum_culling = false;
   bool patch_no_idle_sway = true;
   bool patch_disable_arm_cannon_idle_fidget = true;
   bool patch_beam_projectile_timing = true;

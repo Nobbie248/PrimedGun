@@ -59,6 +59,7 @@
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
 #include "VideoCommon/XFStateManager.h"
+#include "VideoCommon/FreeLookCamera.h"
 
 #include "Core/ConfigManager.h"
 
@@ -1114,9 +1115,16 @@ void VertexManagerBase::AddIndices(OpcodeDecoder::Primitive primitive, u32 num_v
 
 bool VertexManagerBase::AreAllVerticesCulled(VertexLoaderBase* loader,
                                              OpcodeDecoder::Primitive primitive, const u8* src,
-                                             u32 count)
+                                             u32 count, const void* projection)
 {
-  return m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count);
+  const bool culled =
+      projection == nullptr ?
+          m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count) :
+          m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count, projection,
+                                          m_vr_head_cull_frustum_only);
+  if (culled && g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+    m_vr_head_cull_pending = true;
+  return culled;
 }
 
 DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive primitive,
@@ -1201,6 +1209,117 @@ DataReader VertexManagerBase::DisableCullAll(u32 stride)
     ResetBuffer(stride);
   }
   return DataReader(m_cur_buffer_pointer, m_end_buffer_pointer);
+}
+
+bool VertexManagerBase::ShouldVrCullDraw(const void** projection)
+{
+#ifdef ENABLE_VR
+  *projection = nullptr;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !g_ActiveConfig.vr_head_cpu_cull ||
+      !m_overlay_frustum_culling_enabled || g_freelook_camera.IsActive())
+  {
+    return false;
+  }
+  m_vr_head_cull_frustum_only = false;
+
+  // The flat cinema screen (cutscenes) and the detached pause and map screens are composed
+  // without head rotation, so the stock test against the game projection is exact for every
+  // draw there and also covers the map hologram.
+  if (m_overlay_cinematic_screen_active || m_overlay_game_menu_screen_active ||
+      m_overlay_game_map_screen_active)
+  {
+    return true;
+  }
+
+  if (xfmem.projection.type != ProjectionType::Perspective)
+    return false;
+
+  // World pass only. Small viewports are shadow and reflection passes rendered from other
+  // viewpoints. Prime's HUD, visor and menu family renders with a 4096 far plane and its gun pass
+  // with a ~3 unit one; the geometry shader re-projects those, so the head cone must not touch
+  // them. A near-zero field of view is a shadow-map pass.
+  if (std::abs(xfmem.viewport.wd) < 300.0f || std::abs(xfmem.viewport.ht) < 200.0f)
+    return false;
+  const float* game_projection = xfmem.projection.rawProjection.data();
+  const float zfar = game_projection[4] != 0.0f ? game_projection[5] / game_projection[4] : 0.0f;
+  if (zfar > 4000.0f && zfar < 4200.0f)
+  {
+    // Prime's GUI camera (HUD, visor, map, inventory). Its classified layers are drawn
+    // head-locked with the raw projection, so the game-projection test is exact for them. The
+    // classifier keys those layers on a 51-73 degree vertical FOV; anything else in this family
+    // is left alone.
+    const float vfov = game_projection[2] != 0.0f ?
+                           2.0f * std::atan(1.0f / game_projection[2]) * (180.0f / 3.14159265f) :
+                           0.0f;
+    return vfov > 51.0f && vfov < 73.0f;
+  }
+  if (!(zfar > 10.0f) || game_projection[0] > 20.0f)
+    return false;
+
+  // A mirrored position matrix (left-handed cannon) flips the winding the backface test relies
+  // on, and per-vertex matrix indices are only known once the batch is loaded. Those draws keep
+  // the frustum half of the test only.
+  if (!m_overlay_use_right_hand)
+  {
+    const NativeVertexFormat* format = VertexLoaderManager::GetCurrentVertexFormat();
+    m_vr_head_cull_frustum_only = format == nullptr ||
+                                  format->GetVertexDeclaration().posmtx.enable ||
+                                  DrawUsesMirroredPositionMatrix(format);
+  }
+
+  *projection = Core::System::GetInstance().GetGeometryShaderManager().GetVrCullProjection(
+      m_overlay_frustum_culling_degrees);
+  return *projection != nullptr;
+#else
+  *projection = nullptr;
+  return false;
+#endif
+}
+
+void VertexManagerBase::RefreshPrimedGunOverlayCache()
+{
+#ifdef ENABLE_VR
+  const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  m_overlay_frustum_culling_enabled = overlay.frustum_culling_enabled;
+  m_overlay_frustum_culling_degrees = overlay.frustum_culling_degrees;
+  m_overlay_cinematic_screen_active = overlay.cinematic_screen_active;
+  m_overlay_game_menu_screen_active =
+      overlay.game_menu_screen_enabled && overlay.game_menu_screen_active;
+  m_overlay_game_map_screen_active =
+      overlay.game_menu_screen_enabled && overlay.game_map_screen_active;
+  m_overlay_use_right_hand = overlay.use_right_hand;
+#endif
+}
+
+void VertexManagerBase::UpdateVrHeadCullFrame()
+{
+  const u32 culled = m_vr_head_cull_frame_culled;
+  m_vr_head_cull_frame_culled = 0;
+  m_vr_head_cull_pending = false;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR)
+    return;
+  RefreshPrimedGunOverlayCache();
+  if (!g_ActiveConfig.vr_head_cpu_cull)
+  {
+    m_vr_head_cull_report_frames = 0;
+    m_vr_head_cull_report_culled = 0;
+    return;
+  }
+
+  m_vr_head_cull_report_culled += culled;
+  constexpr u32 REPORT_INTERVAL_FRAMES = 60;
+  if (++m_vr_head_cull_report_frames < REPORT_INTERVAL_FRAMES)
+    return;
+  INFO_LOG_FMT(VIDEO,
+               "VR CPU cull (cone {:.0f} deg): removed {:.0f} draw calls per frame; cinema {} "
+               "menu {} map {}",
+               Core::System::GetInstance().GetGeometryShaderManager().GetVrCullEffectiveDegrees(),
+               static_cast<float>(m_vr_head_cull_report_culled) /
+                   static_cast<float>(m_vr_head_cull_report_frames),
+               m_overlay_cinematic_screen_active, m_overlay_game_menu_screen_active,
+               m_overlay_game_map_screen_active);
+  m_vr_head_cull_report_frames = 0;
+  m_vr_head_cull_report_culled = 0;
 }
 
 void VertexManagerBase::FlushData(u32 count, u32 stride)
@@ -1411,6 +1530,12 @@ void VertexManagerBase::Flush()
     return;
 
   m_is_flushed = true;
+
+  if (m_cull_all && m_vr_head_cull_pending)
+    ++m_vr_head_cull_frame_culled;
+  m_vr_head_cull_pending = false;
+  if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+    RefreshPrimedGunOverlayCache();
 
   if (m_draw_counter == 0)
   {
@@ -1625,8 +1750,7 @@ void VertexManagerBase::Flush()
     {
 #ifdef ENABLE_VR
       const bool primedgun_left_hand_mirrored_position_draw =
-          g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
-          !Common::VR::OpenXRInputState::GetPrimedGunOverlay().use_right_hand &&
+          g_ActiveConfig.stereo_mode == StereoMode::OpenXR && !m_overlay_use_right_hand &&
           DrawUsesMirroredPositionMatrix(current_vertex_format);
 #else
       constexpr bool primedgun_left_hand_mirrored_position_draw = false;
@@ -2615,6 +2739,7 @@ void VertexManagerBase::OnEndFrame()
   m_metroid_prime1_thermal_context_active = m_metroid_prime1_thermal_context_seen;
   m_metroid_prime1_thermal_context_seen = false;
   m_scheduled_command_buffer_kicks.clear();
+  UpdateVrHeadCullFrame();
 
   // If we have no CPU access at all, leave everything in the one command buffer for maximum
   // parallelism between CPU/GPU, at the cost of slightly higher latency.

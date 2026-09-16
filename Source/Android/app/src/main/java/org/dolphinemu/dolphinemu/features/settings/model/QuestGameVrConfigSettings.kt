@@ -23,7 +23,6 @@ object QuestGameVrConfigSettings {
         "HeadLockedCurvature",
         "DontClearScreen",
         "LoadCustomShaders",
-        "DisableCPUCull",
         "OpcodeReplay",
         "ForcedVBIFrequency",
         "AutoVBIFromHMD",

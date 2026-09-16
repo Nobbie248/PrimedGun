@@ -81,17 +81,52 @@ deliver 60 FPS.
 
 ## Culling and visibility
 
-Read-only inspection of the running PrimedGun settings found HMD frustum culling
-enabled with a 115-degree cone, and the blanket disable-frustum patch flag off.
-The on-disk Dolphin graphics config has `DisableCPUCull=True` and `CPUCull=False`.
-These are different culling mechanisms; the scene is not simply using every
-available culling-disable option.
+The runtime replaces Prime's own frustum with a 115-degree cone that follows the head
+(chunk and actor level, on the CPU thread), and since 2026-09-16 every submitted world draw
+is additionally culled on the video thread against the same cone (head-cone CPU cull
+below). Keep both: switching the game cone off and relying on the video-thread cull alone
+was tried the same day and measured worse, because the game then animates and submits
+actors and chunks the head cone later discards. Dolphin's stock CPU cull (`CPUCull` in the
+graphics config) is never used in OpenXR mode: it tests against the game's projection, which
+covers far less than the headset shows, so it punches head-independent holes into the view
+(blatant in morph ball). The former "Disable CPU Culling in VR" hack, which could re-enable
+it, was removed for that reason.
 
 Approximately 2,430 Vulkan draws/frame is a substantial workload, but no
 visibility-breaking culling A/B was performed, so the fraction attributable to
 the visibility patches is not established. Keep the existing visibility intact.
 Further optimization should preserve a conservative HMD-visible volume, including
 both eyes and head movement, rather than restoring the original game-camera FOV.
+
+### Head-cone CPU cull
+
+`HeadCPUCull = True` under `[VR]` (default on; VR pane: "Head-Rotated CPU Culling", Quest: VR
+hacks) runs Dolphin's CPU cull on the world pass against a symmetric cone that follows the
+head, using the PrimedGun culling angle (115 degrees) floored at the rendered per-eye FOV plus
+a margin. Draw calls whose batches are all outside the cone or fully back-facing are never
+recorded. Only main-viewport perspective draws with a world-style far plane are eligible: the
+HUD/visor/menu family (4096 far plane), the gun pass (~3 unit far plane), shadow and reflection
+passes (small viewports or near-zero FOV), orthographic draws and freelook are left alone.
+While the flat cinema screen is shown (cutscenes, pause and map screens) every draw is tested
+against the game's own projection instead, which is exact for that image and covers the map
+hologram. The cone is rebuilt on the same pose refresh the geometry shader uses, so a draw is
+culled against the pose it is rendered with. The in-headset "Enable frustum culling" toggle
+disables it together with the game-side cone. With Video logging at Info level it reports
+"VR CPU cull: removed N draw calls per frame" once per 60 frames.
+
+Measured with a count-only probe on 2026-09-16 in the open area before building it: about
+2,520 draws per frame, 24-30% of them removable, at under 1 ms of video-thread cost, while
+toggling the game-side cone changed the draw count by only about 4%.
+
+With the cull live in the busy-scene savestate (same day), a second log line
+("VR head cull projections") showed the frame's draw calls split into three projection
+families: the world pass (far 750, near 0.2, 73x55 deg FOV) at about 1,300 draw calls, of
+which the cull removed about 315 (24%); Prime's GUI camera (far 4096, near 1.0, 82x65 deg)
+at about 800 draw calls, which PrimedGun renders head-locked and the cull must not touch; and
+about 105 small-viewport shadow/reflection draws. The video thread went from ~22.4 to
+~19.6 ms per frame, but the frame rate did not move because the GPU was 99% busy at 640 MHz
+at 3x internal resolution. The GUI camera's ~800 draw calls per frame (36% of the frame) are
+the next thing to look at, after GPU headroom.
 
 After fixing submission, profile again before changing draw matching. Candidate
 work includes avoiding redundant texture hashes, descriptor/uniform updates, and

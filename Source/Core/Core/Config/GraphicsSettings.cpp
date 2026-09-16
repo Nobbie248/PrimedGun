@@ -210,7 +210,7 @@ const Info<bool> GFX_VR_DONT_CLEAR_SCREEN{{System::GFX, "VR", "DontClearScreen"}
 const Info<bool> GFX_VR_LOAD_CUSTOM_SHADERS{{System::GFX, "VR", "LoadCustomShaders"}, true};
 const Info<bool> GFX_VR_ENABLE_OPENXR_CONFIG_SCENE{{System::GFX, "VR", "EnableOpenXRConfigScene"},
                                                    true};
-const Info<bool> GFX_VR_DISABLE_CPU_CULL{{System::GFX, "VR", "DisableCPUCull"}, true};
+const Info<bool> GFX_VR_HEAD_CPU_CULL{{System::GFX, "VR", "HeadCPUCull"}, true};
 const Info<OpenXROpcodeReplayMode> GFX_VR_OPCODE_REPLAY{{System::GFX, "VR", "OpcodeReplay"},
                                                         OpenXROpcodeReplayMode::Off};
 const Info<OpenXRMirrorView> GFX_VR_MIRROR_VIEW{{System::GFX, "VR", "MirrorView"},

@@ -1540,8 +1540,8 @@ class SettingsFragmentPresenter(
             R.string.quest_dont_clear_screen, R.string.quest_dont_clear_screen_description
         )
         questSwitch(
-            sl, QuestVrSettings.disableCpuCullSetting(),
-            R.string.quest_disable_cpu_culling, R.string.quest_disable_cpu_culling_description
+            sl, QuestVrSettings.headCpuCullSetting(),
+            R.string.quest_head_cpu_culling, R.string.quest_head_cpu_culling_description
         )
         questSwitch(
             sl, QuestVrSettings.removeBarsSetting(),

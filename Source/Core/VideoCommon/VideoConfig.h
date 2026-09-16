@@ -366,7 +366,8 @@ struct VideoConfig final
   float vr_head_locked_curvature = 0.0f;
   bool vr_dont_clear_screen = false;
   bool vr_load_custom_shaders = false;
-  bool vr_disable_cpu_cull = false;
+  // Cull the world pass on the CPU against a head-rotated cone; see VertexManagerBase.
+  bool vr_head_cpu_cull = true;
   OpenXROpcodeReplayMode vr_opcode_replay_mode = OpenXROpcodeReplayMode::Off;
   OpenXRMirrorView vr_mirror_view = OpenXRMirrorView::BothEyes;
   float vr_mirror_join_separation = 0.0f;

@@ -1074,8 +1074,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_lock_head_pose_description">Samples the head pose once per emulated frame instead of once per headset refresh. Reduces reprojection artefacts in some scenes at the cost of latency.</string>
     <string name="quest_dont_clear_screen">Don\'t Clear Screen</string>
     <string name="quest_dont_clear_screen_description">Prevents clearing the OpenXR eye framebuffers before rendering each frame.</string>
-    <string name="quest_disable_cpu_culling">Disable CPU Culling in VR</string>
-    <string name="quest_disable_cpu_culling_description">Disables the CPU-side primitive culling of Dolphin while OpenXR is active.</string>
+    <string name="quest_head_cpu_culling">Head-Rotated CPU Culling</string>
+    <string name="quest_head_cpu_culling_description">Culls world geometry on the CPU against a cone that follows your head, so draw calls entirely outside the headset view are never sent to the GPU. Uses the PrimedGun culling angle; HUD, visor and menu passes are left alone, and the cinema screen is tested against the game projection.</string>
     <string name="quest_remove_cinematic_bars">Remove Cinematic Bars</string>
     <string name="quest_remove_cinematic_bars_description">Expands perspective rendering to remove cinematic letterbox bars while in VR.</string>
     <string name="quest_ortho_scissor_fix">Ortho Scissor Fix</string>
