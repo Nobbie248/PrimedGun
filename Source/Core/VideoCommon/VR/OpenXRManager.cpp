@@ -46,6 +46,9 @@ std::unique_ptr<OpenXRManager> g_openxr;
 namespace
 {
 constexpr float PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M = 1.2f;
+// Local space puts its origin at the head, so without a stage the physical floor is estimated
+// this far below the home position (a typical standing eye height).
+constexpr float PRIMEDGUN_LOCAL_SPACE_FLOOR_BELOW_HOME_M = 1.6f;
 
 struct EulerDeg
 {
@@ -1791,11 +1794,13 @@ void OpenXRManager::UpdateInputActions()
   // Use left eye orientation as a proxy for head center (negligible difference from averaged).
   std::array<XREyeView, 2> eye_views;
   XrVector3f home_position;
+  float floor_height;
   bool eye_views_valid;
   {
     std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
     eye_views = m_input_eye_views;
     home_position = m_input_home_position;
+    floor_height = m_input_floor_height;
     eye_views_valid = m_input_eye_views_valid;
   }
   Common::VR::OpenXRPoseState head_pose;
@@ -1828,7 +1833,7 @@ void OpenXRManager::UpdateInputActions()
                                                       home_position.z};
   Common::VR::OpenXRInputState::SetInteractionProfiles(interaction_profiles);
   Common::VR::OpenXRInputState::SetControllers(controllers, true, head_pose,
-                                               tracking_origin_position);
+                                               tracking_origin_position, floor_height);
   UpdateHaptics();
 }
 
@@ -1888,8 +1893,26 @@ bool OpenXRManager::PollEvents()
       return false;
 
     case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
-      INFO_LOG_FMT(OPENXR, "OpenXR: Reference space change pending.");
+    {
+      const auto& ev = *reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&event);
+      const bool ours =
+          ev.referenceSpaceType == (m_reference_space_is_stage ? XR_REFERENCE_SPACE_TYPE_STAGE :
+                                                                 XR_REFERENCE_SPACE_TYPE_LOCAL);
+      INFO_LOG_FMT(OPENXR,
+                   "OpenXR: Reference space change pending (type={}, ours={}, pose_valid={}, new "
+                   "origin in previous space=({:.3f},{:.3f},{:.3f})).",
+                   static_cast<int>(ev.referenceSpaceType), ours, ev.poseValid == XR_TRUE,
+                   ev.poseInPreviousSpace.position.x, ev.poseInPreviousSpace.position.y,
+                   ev.poseInPreviousSpace.position.z);
+      // Eye poses, the play-space origin and every floor-anchored layer are expressed in the
+      // reference space, so a stage recenter moves them together: the home position stays at
+      // the stage origin and keeps its recentered height. Local space has no fixed origin, so a
+      // home position recorded in the old space means nothing in the new one; re-derive it from
+      // the next head pose, which also recenters the height the way the system recenter did.
+      if (ours && !m_reference_space_is_stage)
+        m_home_reset_requested.store(true, std::memory_order_release);
       break;
+    }
 
     default:
       break;
@@ -2086,6 +2109,12 @@ bool OpenXRManager::LocateViews()
     m_eye_views[i].fov = m_views[i].fov;
   }
 
+  if (m_home_reset_requested.exchange(false, std::memory_order_acq_rel))
+  {
+    m_home_set = false;
+    INFO_LOG_FMT(OPENXR, "OpenXR: Local reference space recentered; re-deriving home position.");
+  }
+
   if (!m_home_set)
   {
     if (m_reference_space_is_stage)
@@ -2117,10 +2146,16 @@ bool OpenXRManager::LocateViews()
                  m_home_position.x, m_home_position.y, m_home_position.z);
   }
 
+  // Stage space has its origin on the floor; local space only knows where the head was.
+  m_floor_height = m_reference_space_is_stage ?
+                       0.0f :
+                       m_home_position.y - PRIMEDGUN_LOCAL_SPACE_FLOOR_BELOW_HOME_M;
+
   {
     std::lock_guard<std::mutex> lock(m_input_tracking_mutex);
     m_input_eye_views = m_eye_views;
     m_input_home_position = m_home_position;
+    m_input_floor_height = m_floor_height;
     m_input_eye_views_valid = m_eye_views_valid;
   }
 

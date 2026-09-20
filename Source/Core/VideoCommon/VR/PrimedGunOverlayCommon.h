@@ -14,10 +14,11 @@
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
-#include "Common/Image.h"
 #include "Common/IOFile.h"
+#include "Common/Image.h"
 #include "Common/Logging/Log.h"
 #include "Common/VR/OpenXRInputState.h"
+#include "VideoCommon/VideoConfig.h"
 
 #include <openxr/openxr.h>
 
@@ -711,6 +712,43 @@ inline std::vector<uint32_t> BuildPositionMarkerPixels(uint32_t width, uint32_t 
   DrawPngFit(pixels, width, height, LoadPrimedGunPng("position.png"), 0, 0,
              static_cast<int>(width), static_cast<int>(height), false);
   return pixels;
+}
+
+// Floor position marker: a footprint quad lying on the ground at the play-space centre.
+constexpr uint32_t POSITION_MARKER_TEXTURE_SIZE = 512;
+constexpr float POSITION_MARKER_SIZE_M = 0.356f;
+// A hair above the ground so the quad reads as lying on it rather than cutting through it.
+constexpr float POSITION_MARKER_LIFT_M = 0.005f;
+
+// Pose of the floor marker in the reference space.
+//
+// Position: the tracking origin's x/z, which is the stage origin (the runtime's play-space
+// centre) or, without a stage, the head position first seen. Height: the ground the player sees,
+// not the physical floor. The game camera is rendered at the tracking origin, so the ground under
+// the player appears position_marker_ground_units (game units) below that origin; drawing the
+// marker there keeps it on the visible floor whatever height the last recenter set, instead of
+// floating above the floor whenever the game camera sits higher than the headset does
+// physically. Until the runtime has sampled the ground (no player yet) the physical floor is
+// used. Orientation: flat, footprints' toes toward the reference space's -Z, the recentered
+// forward. Everything is expressed in the reference space, so a system recenter that moves that
+// space carries the marker along with the eye poses.
+inline XrPosef PositionMarkerPose(const Common::VR::OpenXRInputSnapshot& snapshot,
+                                  const Common::VR::PrimedGunVrOverlayState& overlay)
+{
+  float ground_y = snapshot.floor_height;
+  if (overlay.position_marker_ground_valid)
+  {
+    const float units_per_meter = std::max(g_ActiveConfig.vr_units_per_meter, 0.0001f);
+    ground_y = snapshot.tracking_origin_position[1] -
+               overlay.position_marker_ground_units / units_per_meter;
+  }
+
+  XrPosef pose{};
+  // -90 degrees about X: the quad's +Z normal points up and its texture top points to -Z.
+  pose.orientation = {-0.70710678f, 0.0f, 0.0f, 0.70710678f};
+  pose.position = {snapshot.tracking_origin_position[0], ground_y + POSITION_MARKER_LIFT_M,
+                   snapshot.tracking_origin_position[2]};
+  return pose;
 }
 
 inline XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)

@@ -1718,8 +1718,8 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   bool appended_layer = false;
   if (overlay.position_marker_visible)
   {
-    constexpr uint32_t marker_width = 512;
-    constexpr uint32_t marker_height = 512;
+    constexpr uint32_t marker_width = PGO::POSITION_MARKER_TEXTURE_SIZE;
+    constexpr uint32_t marker_height = PGO::POSITION_MARKER_TEXTURE_SIZE;
     const std::vector<uint32_t> marker_pixels =
         PGO::BuildPositionMarkerPixels(marker_width, marker_height);
     if (EnsurePrimedGunOverlaySwapchain(&m_primedgun_position_marker_swapchain, 4u, 1u,
@@ -1736,10 +1736,9 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
       m_primedgun_position_marker_layer.subImage.imageRect.offset = {0, 0};
       m_primedgun_position_marker_layer.subImage.imageRect.extent = {
           static_cast<int32_t>(marker_width), static_cast<int32_t>(marker_height)};
-      m_primedgun_position_marker_layer.pose.orientation = {-0.70710678f, 0.0f, 0.0f, 0.70710678f};
-      m_primedgun_position_marker_layer.pose.position = {
-          snapshot.tracking_origin_position[0], 0.005f, snapshot.tracking_origin_position[2]};
-      m_primedgun_position_marker_layer.size = {0.356f, 0.356f};
+      m_primedgun_position_marker_layer.pose = PGO::PositionMarkerPose(snapshot, overlay);
+      m_primedgun_position_marker_layer.size = {PGO::POSITION_MARKER_SIZE_M,
+                                                PGO::POSITION_MARKER_SIZE_M};
       layers->push_back(
           reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_primedgun_position_marker_layer));
       appended_layer = true;

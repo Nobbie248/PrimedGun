@@ -447,6 +447,7 @@ private:
   std::mutex m_input_tracking_mutex;
   std::array<XREyeView, 2> m_input_eye_views{};
   XrVector3f m_input_home_position{};
+  float m_input_floor_height = 0.0f;
   bool m_input_eye_views_valid = false;
 
   // "Home" head-center position. With stage space this remains the runtime's play-space origin;
@@ -454,7 +455,13 @@ private:
   bool m_reference_space_is_stage = false;
   mutable bool m_home_set{false};
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
+  // Reference-space height of the physical floor: the stage origin, or an estimate below the
+  // home position with the local-space fallback.
+  float m_floor_height = 0.0f;
   std::atomic<bool> m_recenter_requested{false};
+  // Set by PollEvents when the runtime recenters the local reference space (a system recenter
+  // without a stage); LocateViews then re-derives the home position in the new space.
+  std::atomic<bool> m_home_reset_requested{false};
 };
 
 // Global instance — created by the backend during VideoBackend::Initialize().

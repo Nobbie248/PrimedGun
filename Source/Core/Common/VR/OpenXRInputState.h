@@ -59,6 +59,9 @@ struct OpenXRInputSnapshot
   std::array<std::string, 2> interaction_profiles{};
   OpenXRPoseState head_pose;  // HMD head orientation for IR pointer reference
   std::array<float, 3> tracking_origin_position{};  // Offset removed from poses for game tracking.
+  // Reference-space height of the physical floor: the stage origin, or an estimate below the
+  // local-space origin when the runtime has no stage. Used until the game reports its ground.
+  float floor_height = 0.0f;
   bool runtime_active = false;
   bool session_focused = false;
   uint64_t generation = 0;
@@ -144,6 +147,12 @@ struct PrimedGunVrOverlayState
   float metroid_hud_offset_left = 0.0f;
   float metroid_hud_offset_right = 0.0f;
   bool position_marker_visible = false;
+  // Height of the game camera above the ground under the player, in game units, sampled by the
+  // runtime while the player stands on it. The game camera is rendered at the tracking origin,
+  // so the floor marker drawn this far below the origin lies on the ground the player sees and
+  // follows a height recenter. Invalid until the first sample (no player yet).
+  bool position_marker_ground_valid = false;
+  float position_marker_ground_units = 0.0f;
   float xr_dpad_head_radius = 0.18f;
   float xr_dpad_head_y_below = 0.14f;
   float xr_dpad_deadzone = 0.45f;
@@ -178,14 +187,15 @@ public:
   }
 
   static void SetControllers(const std::array<OpenXRControllerState, 2>& controllers,
-                             bool runtime_active,
-                             const OpenXRPoseState& head_pose = {},
-                             const std::array<float, 3>& tracking_origin_position = {})
+                             bool runtime_active, const OpenXRPoseState& head_pose = {},
+                             const std::array<float, 3>& tracking_origin_position = {},
+                             float floor_height = 0.0f)
   {
     std::lock_guard lk(s_state_mutex);
     s_state.controllers = controllers;
     s_state.head_pose = head_pose;
     s_state.tracking_origin_position = tracking_origin_position;
+    s_state.floor_height = floor_height;
     s_state.runtime_active = runtime_active;
     s_state.session_focused = runtime_active;
     ++s_state.generation;

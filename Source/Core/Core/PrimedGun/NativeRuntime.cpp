@@ -479,6 +479,11 @@ u32 s_cinematic_screen_generation = 0;
 bool s_game_menu_screen_active = false;
 bool s_game_map_screen_active = false;
 u64 s_game_menu_screen_release_frame = 0;
+// Height of the game camera above the ground under the player, in game units, for the floor
+// position marker. Sampled only while the player stands on the ground and kept across menus, so
+// the marker never moves while the player is airborne or a cutscene camera is active.
+bool s_position_marker_ground_valid = false;
+float s_position_marker_ground_units = 0.0f;
 bool s_snap_turn_ready = true;
 u64 s_snap_turn_cooldown_until_frame = 0;
 u32 s_vr_menu_tab = 0;
@@ -5934,6 +5939,8 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.vr_overlays_enabled = settings.vr_overlays_enabled;
   overlay.height_prompt_enabled = settings.height_prompt_enabled;
   overlay.position_marker_visible = settings.vr_overlays_enabled && settings.position_marker_enabled;
+  overlay.position_marker_ground_valid = s_position_marker_ground_valid;
+  overlay.position_marker_ground_units = s_position_marker_ground_units;
   overlay.xr_dpad_enabled = settings.xr_dpad_enabled;
   overlay.cinematic_screen_enabled = settings.cinematic_screen_enabled;
   overlay.cinematic_screen_active = s_cinematic_screen_active;
@@ -8275,6 +8282,64 @@ void EnsureCoreStateHookInstalled()
 }
 }  // namespace
 
+// Samples how high the game camera sits above the ground under the player, for the floor
+// position marker (PositionMarkerPose in PrimedGunOverlayCommon.h draws the marker that far
+// below the tracking origin, where the game camera is rendered). Only frames with the player's
+// own camera (first person or morph ball) and the player on the ground count, so jumps, falls
+// and cutscene cameras never move the marker; a short low-pass hides the first-person camera
+// bob and the ball camera's transitions. The last value is kept while no sample is available
+// (menus, map, cutscenes).
+void UpdatePositionMarkerGround(const Core::CPUThreadGuard& guard, bool have_player, u32 player)
+{
+  constexpr u32 CAMERA_STATE_FIRST_PERSON = 0;
+  constexpr u32 CAMERA_STATE_BALL = 1;
+  constexpr u32 MOVEMENT_STATE_ON_GROUND = 0;
+  constexpr float MIN_GROUND_UNITS = 0.25f;
+  constexpr float MAX_GROUND_UNITS = 20.0f;
+  constexpr float SMOOTHING = 0.1f;
+
+  if (!have_player || s_cinematic_screen_active)
+    return;
+
+  u32 camera_state = 0xffffffffu;
+  u32 movement_state = 0xffffffffu;
+  if (!TryReadU32(guard, player + 0x2F4u, &camera_state) ||
+      !TryReadU32(guard, player + PLAYER_MOVEMENT_STATE_OFFSET, &movement_state) ||
+      (camera_state != CAMERA_STATE_FIRST_PERSON && camera_state != CAMERA_STATE_BALL) ||
+      movement_state != MOVEMENT_STATE_ON_GROUND)
+  {
+    return;
+  }
+
+  u32 camera_transform = 0;
+  float camera_x = 0.0f;
+  float camera_y = 0.0f;
+  float camera_z = 0.0f;
+  float player_x = 0.0f;
+  float player_y = 0.0f;
+  float player_z = 0.0f;
+  if (!ResolveActiveCameraTransform(guard, &camera_transform) ||
+      !ReadTransformTranslation(guard, camera_transform, &camera_x, &camera_y, &camera_z) ||
+      !ReadTransformTranslation(guard, player + ADDRESS.transform_offset, &player_x, &player_y,
+                                &player_z))
+  {
+    return;
+  }
+
+  // Prime is Z-up and the player's transform origin is at the feet (the morph ball's bottom).
+  const float ground_units = camera_z - player_z;
+  if (!(ground_units > MIN_GROUND_UNITS && ground_units < MAX_GROUND_UNITS))
+    return;
+
+  if (!s_position_marker_ground_valid)
+  {
+    s_position_marker_ground_units = ground_units;
+    s_position_marker_ground_valid = true;
+    return;
+  }
+  s_position_marker_ground_units += (ground_units - s_position_marker_ground_units) * SMOOTHING;
+}
+
 void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
 {
   ++s_frame_counter;
@@ -8374,6 +8439,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
   UpdateMorphballCameraLevelHookEnabled(guard, have_player, player);
   UpdateSpringBallInput(guard, settings, player);
+  UpdatePositionMarkerGround(guard, have_player, player);
 
   bool dynamic_patch_applied = false;
   if (settings.builtin_patches_enabled)
@@ -8495,6 +8561,8 @@ void ResetNativeRuntime()
   s_frame_stall_reported = false;
   s_patches_applied_this_boot = false;
   s_frame_counter = 0;
+  s_position_marker_ground_valid = false;
+  s_position_marker_ground_units = 0.0f;
   s_thermal_orbit_candidates.clear();
   s_scan_was_active = false;
   s_scan_last_player = 0;
