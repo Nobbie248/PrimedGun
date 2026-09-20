@@ -995,7 +995,7 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_launch_in_vr">Launch games in VR</string>
     <string name="quest_launch_in_vr_description">On: renders the game in stereoscopic 3D VR. Off: shows the game on a flat screen (requires Enable OpenXR).</string>
     <string name="quest_recenter_on_launch">Recenter on launch</string>
-    <string name="quest_recenter_on_launch_description">Recenters the active OpenXR view as soon as emulation starts.</string>
+    <string name="quest_recenter_on_launch_description">Recenters the active OpenXR view as soon as emulation starts, putting you at the centre of the play space at whatever height you are standing.</string>
     <string name="quest_units_per_meter">Units Per Meter</string>
     <string name="quest_units_per_meter_description">Sets how many game world units correspond to one real-world meter. Higher values make the world feel smaller, while lower values make it feel larger.</string>
 

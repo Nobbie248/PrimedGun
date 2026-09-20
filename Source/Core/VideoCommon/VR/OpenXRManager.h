@@ -302,9 +302,12 @@ public:
       std::array<std::array<float, 4>, 2>& out_y_rows) const;
   bool RegisterCurrentAndroidThread(const char* thread_name) { return true; }
 
-  // Request a height-only recenter of the VR home position.
+  // Request a recenter of the VR home position.
   // Applied on the OpenXR render thread during LocateViews.
-  void RequestRecenter();
+  // Height only by default, which keeps the play-space origin where it is. With
+  // `include_position` the origin also moves to the head's x/z, so the player ends up at the
+  // centre of the play space wherever they happen to be standing (recenter-on-launch).
+  void RequestRecenter(bool include_position = false);
 
 private:
   bool InitializeInputActions();
@@ -450,15 +453,22 @@ private:
   float m_input_floor_height = 0.0f;
   bool m_input_eye_views_valid = false;
 
-  // "Home" head-center position. With stage space this remains the runtime's play-space origin;
-  // local-space fallback records the first usable head-center position.
+  // "Home" head-center position. With stage space this starts at the runtime's play-space origin;
+  // local-space fallback records the first usable head-center position. A recenter that includes
+  // position moves it to the head's x/z in either space.
   bool m_reference_space_is_stage = false;
   mutable bool m_home_set{false};
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
   // Reference-space height of the physical floor: the stage origin, or an estimate below the
   // home position with the local-space fallback.
   float m_floor_height = 0.0f;
-  std::atomic<bool> m_recenter_requested{false};
+  enum class RecenterRequest
+  {
+    None,
+    HeightOnly,
+    HeightAndPosition,
+  };
+  std::atomic<RecenterRequest> m_recenter_requested{RecenterRequest::None};
   // Set by PollEvents when the runtime recenters the local reference space (a system recenter
   // without a stage); LocateViews then re-derives the home position in the new space.
   std::atomic<bool> m_home_reset_requested{false};

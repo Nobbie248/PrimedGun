@@ -671,8 +671,10 @@ static void Run(JNIEnv* env, std::unique_ptr<BootParameters>&& boot, bool riivol
       std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_STEP));
 
 #ifdef ENABLE_VR
+    // Position included: on launch the play-space origin moves under the player, so they start
+    // centred wherever they are standing rather than offset by however far the guardian centre is.
     if (IsQuestRecenterOnLaunchEnabled() && VR::g_openxr)
-      VR::g_openxr->RequestRecenter();
+      VR::g_openxr->RequestRecenter(true);
 #endif
 
     // Start the hotkey dispatcher once boot has settled. Reads HotkeyManagerEmu and dispatches

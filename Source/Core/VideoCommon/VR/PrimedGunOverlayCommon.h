@@ -723,7 +723,8 @@ constexpr float POSITION_MARKER_LIFT_M = 0.005f;
 // Pose of the floor marker in the reference space.
 //
 // Position: the tracking origin's x/z, which is the stage origin (the runtime's play-space
-// centre) or, without a stage, the head position first seen. Height: the ground the player sees,
+// centre) or, without a stage, the head position first seen — and, once a recenter that includes
+// position has run, wherever the head was then. Height: the ground the player sees,
 // not the physical floor. The game camera is rendered at the tracking origin, so the ground under
 // the player appears position_marker_ground_units (game units) below that origin; drawing the
 // marker there keeps it on the visible floor whatever height the last recenter set, instead of

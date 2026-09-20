@@ -2130,20 +2130,27 @@ bool OpenXRManager::LocateViews()
     m_home_set = true;
   }
 
-  if (m_recenter_requested.exchange(false, std::memory_order_acq_rel) && view_count >= 2)
+  const RecenterRequest recenter =
+      m_recenter_requested.exchange(RecenterRequest::None, std::memory_order_acq_rel);
+  if (recenter != RecenterRequest::None && view_count >= 2)
   {
     const float center_x = 0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
     const float center_z = 0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
+    // A height-only recenter leaves the play-space origin alone: the stage origin, or whatever
+    // the local-space fallback last derived. Including position moves it under the head, which
+    // puts the player at the centre of the play space wherever they are standing.
+    const bool include_position = recenter == RecenterRequest::HeightAndPosition;
     const float old_x =
         m_home_set ? m_home_position.x : (m_reference_space_is_stage ? 0.0f : center_x);
     const float old_z =
         m_home_set ? m_home_position.z : (m_reference_space_is_stage ? 0.0f : center_z);
     m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
-    m_home_position.x = old_x;
-    m_home_position.z = old_z;
+    m_home_position.x = include_position ? center_x : old_x;
+    m_home_position.z = include_position ? center_z : old_z;
     m_home_set = true;
-    INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home height only to ({:.4f},{:.4f},{:.4f})",
-                 m_home_position.x, m_home_position.y, m_home_position.z);
+    INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home {} to ({:.4f},{:.4f},{:.4f})",
+                 include_position ? "height and position" : "height only", m_home_position.x,
+                 m_home_position.y, m_home_position.z);
   }
 
   // Stage space has its origin on the floor; local space only knows where the head was.
@@ -2268,9 +2275,11 @@ bool OpenXRManager::IsQuestOrVirtualDesktopRuntime() const
          runtime.find("virtual desktop") != std::string::npos;
 }
 
-void OpenXRManager::RequestRecenter()
+void OpenXRManager::RequestRecenter(bool include_position)
 {
-  m_recenter_requested.store(true, std::memory_order_release);
+  m_recenter_requested.store(include_position ? RecenterRequest::HeightAndPosition :
+                                                RecenterRequest::HeightOnly,
+                             std::memory_order_release);
 }
 
 void OpenXRManager::GetEyeProjectionRows(float units_per_meter,
