@@ -1257,21 +1257,29 @@ void Presenter::Present(PresentInfo* present_info)
 #endif
 
 #if defined(ANDROID) && defined(ENABLE_VR)
+  // Direct mode is configuration, not session state: with it on, the activity runs under the
+  // XR compositor and its window is never shown, so mirroring into it is wasted even while the
+  // session is down (boot, headset taken off). The backbuffer is still bound and presented
+  // then, because that submit is what recycles frame resources until the XR submission does.
+  const bool android_window_hidden = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+                                     g_ActiveConfig.vr_android_direct_to_hmd && VR::g_openxr;
   // The XR submission owns frame-resource recycling in direct mode. Presenting
   // the Android window as well would advance the resource ring twice per frame.
   const bool openxr_direct_to_hmd =
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_ActiveConfig.vr_android_direct_to_hmd &&
-      VR::g_openxr && VR::g_openxr->IsSessionRunning() && VR::g_openxr->GetSwapchain();
+      android_window_hidden && VR::g_openxr->IsSessionRunning() && VR::g_openxr->GetSwapchain();
 #else
+  constexpr bool android_window_hidden = false;
   constexpr bool openxr_direct_to_hmd = false;
 #endif
 
   g_gfx->BeginUtilityDrawing();
   const bool backbuffer_bound =
       !openxr_direct_to_hmd && g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
+  // The mirror and the OSD only draw into a window somebody can see.
+  const bool draw_window_content = backbuffer_bound && !android_window_hidden;
 
   // Render the XFB to the screen.
-  if (backbuffer_bound && m_xfb_entry)
+  if (draw_window_content && m_xfb_entry)
   {
     // Adjust the source rectangle instead of using an oversized viewport to render the XFB.
     auto render_target_rc = GetTargetRectangle();
@@ -1284,7 +1292,7 @@ void Presenter::Present(PresentInfo* present_info)
   if (m_onscreen_ui)
   {
     m_onscreen_ui->Finalize();
-    if (backbuffer_bound)
+    if (draw_window_content)
       m_onscreen_ui->DrawImGui();
   }
 

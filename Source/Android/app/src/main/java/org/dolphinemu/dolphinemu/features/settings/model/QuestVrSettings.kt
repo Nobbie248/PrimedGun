@@ -87,8 +87,6 @@ object QuestVrSettings {
 
     fun leftHandedSetting() = androidBooleanSetting("QuestLeftHanded", false)
 
-    fun showMirrorSurfaceSetting() = androidBooleanSetting("QuestShowMirrorSurface", false)
-
     fun controllerPresetSetting() =
         androidIntSetting("QuestControllerPreset", CONTROLLER_PRESET_GAMECUBE)
 
@@ -251,14 +249,6 @@ object QuestVrSettings {
     private fun controllerProfilesAppliedSetting() =
         androidBooleanSetting("QuestControllerProfilesApplied", false)
 
-    fun shouldShowMirrorSurface(): Boolean {
-        if (!BuildConfig.IS_QUEST) {
-            return true
-        }
-
-        return showMirrorSurfaceSetting().boolean || !isLaunchInVrEnabled()
-    }
-
     fun isLaunchInVrEnabled(): Boolean {
         return BuildConfig.IS_QUEST &&
             openXrEnabledSetting().boolean &&
@@ -360,7 +350,6 @@ object QuestVrSettings {
             debugPassthroughSetting(),
             arBackgroundAlphaSetting(),
             // Comfort and debug
-            showMirrorSurfaceSetting(),
             BooleanSetting.GFX_SHOW_FPS,
             androidDirectToHmdSetting(),
             cpuLevel5HintSetting(),

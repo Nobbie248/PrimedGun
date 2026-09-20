@@ -1579,10 +1579,6 @@ class SettingsFragmentPresenter(
 
     private fun addQuestVrDebugSettings(sl: ArrayList<SettingsItem>) {
         questSwitch(
-            sl, QuestVrSettings.showMirrorSurfaceSetting(),
-            R.string.quest_show_mirror_surface, R.string.quest_show_mirror_surface_description
-        )
-        questSwitch(
             sl, BooleanSetting.GFX_SHOW_FPS,
             R.string.quest_show_perf_hud, R.string.quest_show_perf_hud_description
         )

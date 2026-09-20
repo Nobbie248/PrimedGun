@@ -1092,8 +1092,6 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_ar_mode_debug">Fake AR Mode (Debug)</string>
     <string name="quest_ar_mode_debug_description">Simulates passthrough with a plain background so AR Mode can be tested without the camera feed.</string>
 
-    <string name="quest_show_mirror_surface">Show 2D mirror surface</string>
-    <string name="quest_show_mirror_surface_description">Keeps the Android surface visible while OpenXR is active for debugging and capture.</string>
     <string name="quest_show_perf_hud">Show performance HUD</string>
     <string name="quest_show_perf_hud_description">Displays Dolphin frame rate statistics in the headset mirror.</string>
     <string name="quest_android_direct_to_hmd">Android direct-to-HMD</string>

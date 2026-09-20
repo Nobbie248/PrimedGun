@@ -23,9 +23,27 @@ presents. This keeps `VKPERF` draw/submission/fence statistics available when th
 Android backbuffer is skipped.
 
 The shortcut is Android-only and requires an active OpenXR session/swapchain.
-Before the session is running, or with the setting off, the usual window path is
-used. The change retains the Android surface and normal renderer initialization;
-it does not introduce rendering without an initial Android surface.
+With the setting off, the usual window path is used. With it on but no running
+session, the backbuffer is still bound and presented so `PresentBackbuffer` keeps
+advancing the resource ring, but the mirror blits and the ImGui draw are skipped
+(`android_window_hidden` in `Presenter::Present`): the activity runs under the XR
+compositor whenever the stereo mode is OpenXR, so nothing drawn into its window is
+ever seen.
+
+That second gate is defensive, not a measured saving. On a normal Quest boot the
+XR swapchain is created during video-backend init, before the first XFB reaches
+`Present()`, so `openxr_direct_to_hmd` is already true by the first real present
+and the mirror never ran there either. A full boot-to-gameplay capture on
+2026-09-21 contained exactly one window present in the whole run — the one-time
+blank frame in `Presenter::Initialize`, which is a different code path and is
+unaffected. Sending `com.oculus.vrpowermanager.prox_open` mid-game did not put the
+session down, so the headset-off case was not reproduced on the device.
+
+The change retains the Android surface and normal renderer initialization; it does
+not introduce rendering without an initial Android surface. Dropping the window
+swapchain itself would first need `PostProcessing` decoupled from the backbuffer,
+since the eye blits go through it and `Present()` returns early on a headless
+backend.
 
 See `Quest-Open-Area-Performance.md` for the pre-change profile and explanation of
 the redundant submissions/resource-ring advances.
@@ -56,3 +74,21 @@ Artifacts are in the ignored `Source/Android/app/build/direct-hmd-validation/`
 directory (`build-1.log`, `mirror.log`, `direct.log`, `direct.png`, config backups).
 The original GFX.ini and persisted Logger.ini were restored. The current running
 process retains its diagnostic logging until its next restart.
+
+Re-validated on Quest 3, 2026-09-21, after the `android_window_hidden` split and
+the removal of the dead "Show 2D mirror surface" launcher toggle:
+
+- Boot into `GM8E01.s01` with `AndroidDirectToHMD=True`, `StereoMode=6`.
+  `WaitForShadersBeforeStarting` was effectively true: 3431 seeded UIDs read, the
+  VR progress panel ran for about three minutes at 5029 pipelines.
+- Steady gameplay reported `n=1.0/f` submissions, `draws=1827/f` at 20.6 ms/f in
+  the heavy savestate scene and 16.7 ms/f (60 fps) once it settled.
+- The one-shot `VR: First OpenXR RenderXFBToScreen` log never fired, so
+  `RenderXFBToScreen` never entered its OpenXR branch for the whole session.
+- No fatal signal, no Java exception, and no Dolphin-side error log. The two
+  `XR_ERROR_CALL_ORDER_INVALID` lines come from the system `OpenXRHelpers` process,
+  not the app, and the `xrSetAndroidApplicationThreadKHR` warnings pre-date this
+  change.
+- Stopping through `MainActivity` (the clean `Core::Stop` path) grew
+  `Vulkan-Pipeline-FC6DFF44.cache` from its 48-byte header to 44 MB and the
+  uidcache to 1,995,162 bytes, confirming a clean `VideoBackend::Shutdown`.
