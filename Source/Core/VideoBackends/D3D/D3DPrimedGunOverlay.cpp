@@ -263,6 +263,9 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
     return false;
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  // Before the early return below, so the anchor is always released when the compile ends.
+  XrPosef compile_anchor{};
+  const bool compile_anchored = PGO::CompileProgressPanelPose(overlay, &compile_anchor);
   if (!overlay.menu_visible && !PrimedGun::Overlay::PromptVisible(overlay) &&
       !overlay.weapon_panel_visible && !overlay.position_marker_visible)
     return false;
@@ -380,6 +383,11 @@ bool D3DPrimedGunOverlay::AppendLayers(std::vector<XrCompositionLayerBaseHeader*
         overlay.weapon_panel_position[1] + snapshot.tracking_origin_position[1] + offset.y,
         overlay.weapon_panel_position[2] + snapshot.tracking_origin_position[2] + offset.z};
     m_overlay_layer.size = {0.42f, 0.42f};
+  }
+  else if (compile_anchored)
+  {
+    m_overlay_layer.pose = compile_anchor;
+    m_overlay_layer.size = {PGO::COMPILE_PANEL_WIDTH, PGO::COMPILE_PANEL_HEIGHT};
   }
   else if (snapshot.head_pose.valid)
   {

@@ -746,6 +746,53 @@ inline XrQuaternionf MulQuat(const XrQuaternionf& a, const XrQuaternionf& b)
           a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
 }
 
+// Distance and size of the compile progress panel, matching the head-locked prompt it replaces.
+constexpr float COMPILE_PANEL_DISTANCE = 1.35f;
+constexpr float COMPILE_PANEL_WIDTH = 0.675f;
+constexpr float COMPILE_PANEL_HEIGHT = 0.25f;
+
+// Places the compile progress panel in the reference space instead of locking it to the head.
+// The pose is latched from the first head pose after the panel appears and released when the
+// compile ends, so looking around during a multi-minute compile no longer drags the panel along.
+// Orientation is yaw only, like the detached menu, so the panel stays upright and level.
+//
+// Called once per frame from the backend's layer append, before its early returns, so the
+// release is never missed. The snapshot is taken here rather than by the caller because that
+// only happens on the one frame that latches. Video thread only.
+inline bool CompileProgressPanelPose(const Common::VR::PrimedGunVrOverlayState& state, XrPosef* out)
+{
+  static bool anchored = false;
+  static XrPosef anchor{};
+
+  if (!state.compile_progress_visible)
+  {
+    anchored = false;
+    return false;
+  }
+
+  if (!anchored)
+  {
+    const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+    if (!snapshot.runtime_active || !snapshot.head_pose.valid)
+      return false;
+
+    const XrQuaternionf head_orientation{
+        snapshot.head_pose.orientation[0], snapshot.head_pose.orientation[1],
+        snapshot.head_pose.orientation[2], snapshot.head_pose.orientation[3]};
+    anchor.orientation = YawOnlyQuaternion(head_orientation);
+    const XrVector3f offset =
+        RotateVector(anchor.orientation, {0.0f, 0.0f, -COMPILE_PANEL_DISTANCE});
+    anchor.position = {
+        snapshot.head_pose.position[0] + snapshot.tracking_origin_position[0] + offset.x,
+        snapshot.head_pose.position[1] + snapshot.tracking_origin_position[1] + offset.y,
+        snapshot.head_pose.position[2] + snapshot.tracking_origin_position[2] + offset.z};
+    anchored = true;
+  }
+
+  *out = anchor;
+  return true;
+}
+
 struct HybridControllerPose
 {
   bool valid = false;
