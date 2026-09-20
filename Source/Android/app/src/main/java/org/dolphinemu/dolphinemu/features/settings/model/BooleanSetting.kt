@@ -763,7 +763,7 @@ enum class BooleanSetting(
         Settings.FILE_GFX,
         Settings.SECTION_GFX_SETTINGS,
         "WaitForShadersBeforeStarting",
-        false
+        true
     ),
     GFX_SAVE_TEXTURE_CACHE_TO_STATE(
         Settings.FILE_GFX,

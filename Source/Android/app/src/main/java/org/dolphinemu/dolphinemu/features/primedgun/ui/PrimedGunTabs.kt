@@ -114,7 +114,7 @@ object PrimedGunTabs {
             )
         )
         add(PrimedGunItem.Note(context.getString(R.string.primedgun_grip_inputs_use_trackpad_note)))
-        add(slider(context, R.string.primedgun_rumble_intensity, "rumble_intensity", 0.00f, 1.00f, 0.05f, 0.35f))
+        add(slider(context, R.string.primedgun_rumble_intensity, "rumble_intensity", 0.00f, 1.00f, 0.05f, 1.00f))
 
         add(header(context, R.string.primedgun_section_dpad))
         add(switch(context, R.string.primedgun_dpad_enabled, "xr_dpad_enabled", true))
@@ -207,7 +207,7 @@ object PrimedGunTabs {
                 context,
                 R.string.primedgun_cinematic_screen_enabled,
                 "cinematic_screen_enabled",
-                false
+                true
             )
         )
         add(switch(context, R.string.primedgun_vr_menu_floating, "vr_menu_floating", false))
@@ -216,7 +216,7 @@ object PrimedGunTabs {
                 context,
                 R.string.primedgun_game_menu_screen_enabled,
                 "game_menu_screen_enabled",
-                false
+                true
             )
         )
         add(switch(context, R.string.primedgun_visor_helmet_enabled, "visor_helmet_enabled", false))

@@ -36,7 +36,7 @@ struct RuntimeSettings
   bool require_trigger = false;
   float trigger_threshold = 0.5f;
   bool rumble_enabled = true;
-  float rumble_intensity = 0.35f;
+  float rumble_intensity = 1.0f;
   int rumble_hand_mode = 2;
   bool primedgun_grip_inputs_enabled = true;
   bool primedgun_grip_inputs_use_trackpad = false;
@@ -52,8 +52,8 @@ struct RuntimeSettings
   bool vr_menu_hold_left_stick = false;
   bool vr_menu_requires_head_zone = false;
   bool vr_menu_floating = false;
-  bool cinematic_screen_enabled = false;
-  bool game_menu_screen_enabled = false;
+  bool cinematic_screen_enabled = true;
+  bool game_menu_screen_enabled = true;
   bool frustum_culling_enabled = true;
   float frustum_culling_degrees = 115.0f;
   float metroid_hud_distance = 0.5f;

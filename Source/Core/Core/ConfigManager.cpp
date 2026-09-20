@@ -162,7 +162,7 @@ WaitForShadersBeforeStarting = True
 #else
   file << "EnableGPUTextureDecoding = True\n";
 #endif
-  file << R"(ShaderCompilationMode = 2
+  file << R"(ShaderCompilationMode = 0
 CPUCull = False
 UseLossless = False
 [Stereoscopy]
@@ -303,7 +303,7 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
   stereo->Set("StereoEFBMonoDepth", "False");
 
   auto* video = game_ini->GetOrCreateSection("Video_Settings");
-  video->Set("ShaderCompilationMode", "2");
+  video->Set("ShaderCompilationMode", "0");
   video->Set("MSAA", "0x00000001");
   video->Set("SSAA", "False");
 #ifdef ANDROID

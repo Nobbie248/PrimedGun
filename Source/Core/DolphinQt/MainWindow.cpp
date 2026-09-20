@@ -3499,10 +3499,10 @@ void MainWindow::ConnectStack()
     runtime->vr_menu_hold_left_stick = false;
     runtime->vr_menu_requires_head_zone = false;
     runtime->vr_menu_floating = false;
-    runtime->cinematic_screen_enabled = false;
-    runtime->game_menu_screen_enabled = false;
+    runtime->cinematic_screen_enabled = true;
+    runtime->game_menu_screen_enabled = true;
     runtime->rumble_enabled = true;
-    runtime->rumble_intensity = 0.35f;
+    runtime->rumble_intensity = 1.0f;
     runtime->rumble_hand_mode = 2;
     runtime->xr_dpad_enabled = true;
     runtime->combat_jump_use_primary_button = false;

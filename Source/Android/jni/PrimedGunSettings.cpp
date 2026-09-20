@@ -251,10 +251,10 @@ Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_resetC
   s.vr_menu_hold_left_stick = false;
   s.vr_menu_requires_head_zone = false;
   s.vr_menu_floating = false;
-  s.cinematic_screen_enabled = false;
-  s.game_menu_screen_enabled = false;
+  s.cinematic_screen_enabled = true;
+  s.game_menu_screen_enabled = true;
   s.rumble_enabled = true;
-  s.rumble_intensity = 0.35f;
+  s.rumble_intensity = 1.0f;
   s.rumble_hand_mode = 2;
   s.xr_dpad_enabled = true;
   s.combat_jump_use_primary_button = false;
