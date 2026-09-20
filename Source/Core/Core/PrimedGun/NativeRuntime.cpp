@@ -5897,6 +5897,10 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.reset_confirm_action = s_vr_reset_confirm_action;
   overlay.weapon_panel_visible = settings.vr_overlays_enabled && previous.weapon_panel_visible;
   overlay.weapon_selected_index = previous.weapon_selected_index;
+  // Owned by ShaderCache::WaitForAsyncCompiler on the video thread; keep it across republishes.
+  overlay.compile_progress_visible = previous.compile_progress_visible;
+  overlay.compile_completed = previous.compile_completed;
+  overlay.compile_total = previous.compile_total;
   overlay.weapon_panel_position = previous.weapon_panel_position;
   overlay.weapon_panel_orientation = previous.weapon_panel_orientation;
   overlay.floating_menu_pose_valid = s_vr_menu_floating_pose.valid;

@@ -348,8 +348,8 @@ bool D3D12PrimedGunOverlay::AppendLayers(
     return false;
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible &&
-      !overlay.position_marker_visible)
+  if (!overlay.menu_visible && !PrimedGun::Overlay::PromptVisible(overlay) &&
+      !overlay.weapon_panel_visible && !overlay.position_marker_visible)
   {
     return false;
   }
@@ -392,7 +392,8 @@ bool D3D12PrimedGunOverlay::AppendLayers(
     }
   }
 
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible)
+  if (!overlay.menu_visible && !PrimedGun::Overlay::PromptVisible(overlay) &&
+      !overlay.weapon_panel_visible)
     return appended_layer;
 
   const bool menu = overlay.menu_visible;
@@ -400,12 +401,13 @@ bool D3D12PrimedGunOverlay::AppendLayers(
   const uint32_t content_kind = menu ? 2u : weapon_panel ? 3u : 1u;
   const uint32_t width = menu ? 1024 : weapon_panel ? 512 : 1024;
   const uint32_t height = menu ? 512 : weapon_panel ? 512 : 384;
-  const uint32_t generation =
-      menu ? overlay.generation : weapon_panel ? 100u + overlay.weapon_selected_index : 1u;
-  const std::vector<uint32_t> pixels =
-      menu ? PGO::BuildMenuPixels(width, height, overlay) :
-      weapon_panel ? PGO::BuildWeaponPanelPixels(width, height, overlay) :
-                     PGO::BuildPromptPixels(width, height);
+  const uint32_t generation = menu         ? overlay.generation :
+                              weapon_panel ? 100u + overlay.weapon_selected_index :
+                                             PGO::PromptGeneration(overlay);
+  const std::vector<uint32_t> pixels = menu ? PGO::BuildMenuPixels(width, height, overlay) :
+                                       weapon_panel ?
+                                              PGO::BuildWeaponPanelPixels(width, height, overlay) :
+                                              PGO::BuildPromptPixels(width, height, overlay);
   if (!EnsureOverlaySwapchain(&m_overlay_swapchain, content_kind, generation, width,
                               height, pixels))
   {

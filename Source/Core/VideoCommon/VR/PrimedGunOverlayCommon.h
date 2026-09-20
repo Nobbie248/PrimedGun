@@ -497,6 +497,70 @@ inline std::vector<uint32_t> BuildPromptPixels(uint32_t width, uint32_t height)
   return pixels;
 }
 
+// Progress of the pre-start shader compile, drawn on the same head-locked panel as the height
+// prompt. The ImGui bar Dolphin draws for it only reaches the desktop mirror, so without this a
+// headset shows black for the whole precompile, which can be minutes on a fresh install.
+inline std::vector<uint32_t> BuildCompileProgressPixels(uint32_t width, uint32_t height,
+                                                        uint32_t completed, uint32_t total)
+{
+  std::vector<uint32_t> pixels(static_cast<size_t>(width) * height, 0);
+  const int w = static_cast<int>(width);
+  const int h = static_cast<int>(height);
+  FillRect(pixels, width, height, 0, 0, w, h, 0xD0100804u);
+  FillRect(pixels, width, height, 0, 0, w, 8, 0xE0FFB030u);
+  FillRect(pixels, width, height, 0, h - 8, w, 8, 0xE0FFB030u);
+
+  constexpr const char* title = "COMPILING SHADERS";
+  DrawText(pixels, width, height, title, (w - TextWidth(title, 5)) / 2, 60, 5, 0xFFFFD8A0u);
+
+  constexpr int bar_x = 112;
+  constexpr int bar_y = 160;
+  constexpr int bar_w = 800;
+  constexpr int bar_h = 56;
+  FillRect(pixels, width, height, bar_x - 4, bar_y - 4, bar_w + 8, bar_h + 8, 0xE0FFB030u);
+  FillRect(pixels, width, height, bar_x, bar_y, bar_w, bar_h, 0xF0201810u);
+  const uint32_t done = completed > total ? total : completed;
+  const int filled = total == 0 ? 0 : static_cast<int>(static_cast<uint64_t>(bar_w) * done / total);
+  if (filled > 0)
+    FillRect(pixels, width, height, bar_x, bar_y, filled, bar_h, 0xFFFFB030u);
+
+  const std::string count = std::to_string(done) + " / " + std::to_string(total);
+  DrawText(pixels, width, height, count.c_str(), (w - TextWidth(count.c_str(), 4)) / 2, 250, 4,
+           0xFFFFF0C8u);
+  constexpr const char* hint = "THIS CAN TAKE A FEW MINUTES ON THE FIRST LAUNCH";
+  DrawText(pixels, width, height, hint, (w - TextWidth(hint, 2)) / 2, 320, 2, 0xFFD8C0A0u);
+  return pixels;
+}
+
+// The prompt panel shows either the height prompt or the compile progress; the backends key
+// their swapchain upload on the generation, so it must change whenever the content does.
+inline bool PromptVisible(const Common::VR::PrimedGunVrOverlayState& s)
+{
+  return s.prompt_visible || s.compile_progress_visible;
+}
+
+inline uint32_t PromptGeneration(const Common::VR::PrimedGunVrOverlayState& s)
+{
+  if (!s.compile_progress_visible)
+    return 1u;
+
+  // Percent granularity: the backends rebuild the overlay swapchain on every generation change
+  // and the compiler reports progress about thirty times a second.
+  const uint32_t percent = s.compile_total == 0 ?
+                               0u :
+                               static_cast<uint32_t>(static_cast<uint64_t>(s.compile_completed) *
+                                                     100u / s.compile_total);
+  return 1000u + percent;
+}
+
+inline std::vector<uint32_t> BuildPromptPixels(uint32_t width, uint32_t height,
+                                               const Common::VR::PrimedGunVrOverlayState& s)
+{
+  if (s.compile_progress_visible)
+    return BuildCompileProgressPixels(width, height, s.compile_completed, s.compile_total);
+  return BuildPromptPixels(width, height);
+}
+
 inline void DrawLayoutTextPage(std::vector<uint32_t>& pixels, uint32_t width, uint32_t height)
 {
   constexpr uint32_t title_color = 0xFFFFE6B8u;

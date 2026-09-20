@@ -10,6 +10,9 @@
 #include "Common/Hash.h"
 #include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#ifdef ENABLE_VR
+#include "Common/VR/OpenXRInputState.h"
+#endif
 #include "Core/ConfigManager.h"
 
 #include "VideoCommon/AbstractGfx.h"
@@ -170,7 +173,24 @@ void ShaderCache::WaitForAsyncCompiler()
 {
   bool running = true;
 
-  constexpr auto update_ui_progress = [](size_t completed, size_t total) {
+#ifdef ENABLE_VR
+  bool vr_progress_logged = false;
+#endif
+  const auto update_ui_progress = [&](size_t completed, size_t total) {
+#ifdef ENABLE_VR
+    // Mirror the progress onto the head-locked VR panel. The ImGui bar below only reaches the
+    // desktop mirror, so a headset would otherwise sit on black for the whole precompile.
+    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+    {
+      if (!vr_progress_logged)
+      {
+        INFO_LOG_FMT(VIDEO, "Showing shader precompile progress in VR ({} pipelines).", total);
+        vr_progress_logged = true;
+      }
+      Common::VR::OpenXRInputState::SetPrimedGunCompileProgress(true, static_cast<u32>(completed),
+                                                                static_cast<u32>(total));
+    }
+#endif
     const float center_x = ImGui::GetIO().DisplaySize.x * 0.5f;
     const float center_y = ImGui::GetIO().DisplaySize.y * 0.5f;
     const float scale = ImGui::GetIO().DisplayFramebufferScale.x;
@@ -200,6 +220,10 @@ void ShaderCache::WaitForAsyncCompiler()
 
     m_async_shader_compiler->RetrieveWorkItems();
   }
+
+#ifdef ENABLE_VR
+  Common::VR::OpenXRInputState::SetPrimedGunCompileProgress(false, 0, 0);
+#endif
 
   // An extra Present to clear the screen
   g_presenter->Present();

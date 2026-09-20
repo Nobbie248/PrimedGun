@@ -1704,8 +1704,8 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
 
   namespace PGO = PrimedGun::Overlay;
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible &&
-      !overlay.position_marker_visible)
+  if (!overlay.menu_visible && !PrimedGun::Overlay::PromptVisible(overlay) &&
+      !overlay.weapon_panel_visible && !overlay.position_marker_visible)
     return false;
 
   const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
@@ -1743,7 +1743,8 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
     }
   }
 
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible)
+  if (!overlay.menu_visible && !PrimedGun::Overlay::PromptVisible(overlay) &&
+      !overlay.weapon_panel_visible)
     return appended_layer;
 
   const bool menu = overlay.menu_visible;
@@ -1753,11 +1754,11 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   const uint32_t height = menu ? 512 : weapon_panel ? 512 : 384;
   const uint32_t generation = menu         ? overlay.generation :
                               weapon_panel ? (100u + overlay.weapon_selected_index) :
-                                             1u;
+                                             PGO::PromptGeneration(overlay);
   const std::vector<uint32_t> pixels = menu ? PGO::BuildMenuPixels(width, height, overlay) :
                                        weapon_panel ?
                                               PGO::BuildWeaponPanelPixels(width, height, overlay) :
-                                              PGO::BuildPromptPixels(width, height);
+                                              PGO::BuildPromptPixels(width, height, overlay);
   if (!EnsurePrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain, content_kind, generation,
                                        width, height, pixels))
     return appended_layer;

@@ -275,7 +275,10 @@ object QuestVrSettings {
         // 3x is the highest internal resolution that holds 60fps on Quest 3; 4x produces
         // visible jitter and slow-motion.
         IntSetting.GFX_EFB_SCALE.setInt(settings, 3)
-        BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, false)
+        // Compile the seeded pipeline list before the game starts, with the progress panel the
+        // overlays draw for it. Without the wait the first frames compile their pipelines inline
+        // on the video thread anyway, which is a black screen with nothing to show.
+        BooleanSetting.GFX_WAIT_FOR_SHADERS_BEFORE_STARTING.setBoolean(settings, true)
         BooleanSetting.MAIN_SHOW_INPUT_OVERLAY.setBoolean(settings, false)
         applyRecommendedVrDefaults(settings)
         BooleanSetting.GFX_HACK_IMMEDIATE_XFB.setBoolean(settings, true)

@@ -80,6 +80,12 @@ struct PrimedGunVrOverlayState
   bool weapon_panel_visible = false;
   bool menu_pointer_active = false;
   bool saved_notice = false;
+  // Shader precompile progress ("Compile Shaders Before Starting"). Shown on the head-locked
+  // prompt panel while the video thread waits for the async compiler; written by
+  // SetPrimedGunCompileProgress and preserved across the runtime's per-frame republish.
+  bool compile_progress_visible = false;
+  uint32_t compile_completed = 0;
+  uint32_t compile_total = 0;
   uint32_t generation = 0;
   uint32_t tab = 0;
   uint32_t selected_index = 0;
@@ -244,6 +250,14 @@ public:
   {
     std::lock_guard lk(s_state_mutex);
     s_primedgun_overlay = overlay;
+  }
+
+  static void SetPrimedGunCompileProgress(bool visible, uint32_t completed, uint32_t total)
+  {
+    std::lock_guard lk(s_state_mutex);
+    s_primedgun_overlay.compile_progress_visible = visible;
+    s_primedgun_overlay.compile_completed = completed;
+    s_primedgun_overlay.compile_total = total;
   }
 
   static void SetRumble(float amplitude)
