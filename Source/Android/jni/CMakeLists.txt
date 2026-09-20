@@ -65,6 +65,9 @@ PRIVATE
     ${CMAKE_SOURCE_DIR}/Externals/VulkanMemoryAllocator/include
 )
 
+# The copies below only run at configure time. Glob Data/Sys with CONFIGURE_DEPENDS so adding or
+# removing a file there (a shader precompile seed, for instance) re-runs configure and the copy.
+file(GLOB_RECURSE android_sys_files CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/Data/Sys/*")
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/)
 file(REMOVE_RECURSE ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/Sys/)
 file(COPY ${CMAKE_SOURCE_DIR}/Data/Sys DESTINATION ${CMAKE_SOURCE_DIR}/Source/Android/app/src/main/assets/)

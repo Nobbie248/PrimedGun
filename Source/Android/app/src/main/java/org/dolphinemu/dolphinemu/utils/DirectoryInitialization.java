@@ -19,11 +19,15 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.preference.PreferenceManager;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.util.HashSet;
 
 import org.dolphinemu.dolphinemu.NativeLibrary;
 import org.dolphinemu.dolphinemu.R;
@@ -140,8 +144,136 @@ public final class DirectoryInitialization
 
     Log.debug("[DirectoryInitialization] Cache Dir: " + cacheDir.getPath());
     NativeLibrary.SetCacheDirectory(cacheDir.getPath());
+    seedPipelineUidCaches(context, cacheDir);
 
     return true;
+  }
+
+  private static final String PIPELINE_UID_SEED_FOLDER = "Sys/PipelineUIDs";
+  private static final int UIDCACHE_HEADER_SIZE = 8;  // u32 magic "PUID" + u32 UID version
+
+  /**
+   * Gives "Compile Shaders Before Starting" something to work with on a fresh install.
+   *
+   * Dolphin only precompiles the pipelines listed in Cache/<GameID>.uidcache, which starts out
+   * empty, so the first launch never benefits. The APK bundles pre-recorded lists as
+   * Sys/PipelineUIDs/<GameID>-<record size>.uidcache. When the game's own cache is missing, or
+   * is not a whole number of records (a killed session; Dolphin discards such a file at boot
+   * anyway), the seed is copied in its place; otherwise the seed records the cache lacks are
+   * appended. Dolphin then loads the file exactly like one it wrote itself, so nothing in the
+   * shader cache code changes.
+   *
+   * The record layout is compiler specific (581 bytes with the NDK, 692 with MSVC), which is
+   * why the size is part of the seed name and taken from there instead of being assumed.
+   */
+  private static void seedPipelineUidCaches(Context context, File cacheDir)
+  {
+    String[] seeds;
+    try
+    {
+      seeds = context.getAssets().list(PIPELINE_UID_SEED_FOLDER);
+    }
+    catch (IOException e)
+    {
+      return;
+    }
+    if (seeds == null)
+      return;
+
+    for (String seed : seeds)
+    {
+      if (!seed.endsWith(".uidcache"))
+        continue;
+      String stem = seed.substring(0, seed.length() - ".uidcache".length());
+      int dash = stem.lastIndexOf('-');
+      if (dash <= 0)
+        continue;
+      int recordSize;
+      try
+      {
+        recordSize = Integer.parseInt(stem.substring(dash + 1));
+      }
+      catch (NumberFormatException e)
+      {
+        continue;
+      }
+      if (recordSize <= 0)
+        continue;
+
+      String asset = PIPELINE_UID_SEED_FOLDER + "/" + seed;
+      File target = new File(cacheDir, stem.substring(0, dash) + ".uidcache");
+
+      byte[] seedBytes;
+      try (InputStream in = context.getAssets().open(asset))
+      {
+        seedBytes = readAllBytes(in);
+      }
+      catch (IOException e)
+      {
+        Log.error("[DirectoryInitialization] Failed to read seed " + asset + ": " + e.getMessage());
+        continue;
+      }
+      if (seedBytes.length < UIDCACHE_HEADER_SIZE)
+        continue;
+
+      byte[] cacheBytes = null;
+      if (target.exists())
+      {
+        try (InputStream in = new FileInputStream(target))
+        {
+          cacheBytes = readAllBytes(in);
+        }
+        catch (IOException e)
+        {
+          cacheBytes = null;
+        }
+      }
+
+      boolean cacheValid = cacheBytes != null && cacheBytes.length >= UIDCACHE_HEADER_SIZE &&
+              (cacheBytes.length - UIDCACHE_HEADER_SIZE) % recordSize == 0 &&
+              ByteBuffer.wrap(cacheBytes, 0, UIDCACHE_HEADER_SIZE)
+                      .equals(ByteBuffer.wrap(seedBytes, 0, UIDCACHE_HEADER_SIZE));
+      if (!cacheValid)
+      {
+        if (copyAsset(asset, target, context))
+          Log.debug("[DirectoryInitialization] Seeded " + target + " from " + asset);
+        continue;
+      }
+
+      HashSet<ByteBuffer> known = new HashSet<>();
+      for (int off = UIDCACHE_HEADER_SIZE; off + recordSize <= cacheBytes.length; off += recordSize)
+        known.add(ByteBuffer.wrap(cacheBytes, off, recordSize));
+
+      int added = 0;
+      try (OutputStream out = new FileOutputStream(target, true))
+      {
+        for (int off = UIDCACHE_HEADER_SIZE; off + recordSize <= seedBytes.length; off += recordSize)
+        {
+          if (known.add(ByteBuffer.wrap(seedBytes, off, recordSize)))
+          {
+            out.write(seedBytes, off, recordSize);
+            added++;
+          }
+        }
+      }
+      catch (IOException e)
+      {
+        Log.error("[DirectoryInitialization] Failed to extend " + target + ": " + e.getMessage());
+        continue;
+      }
+      Log.debug("[DirectoryInitialization] Added " + added + " pipeline UIDs from " + asset + " to " +
+              target);
+    }
+  }
+
+  private static byte[] readAllBytes(InputStream in) throws IOException
+  {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    byte[] buffer = new byte[64 * 1024];
+    int read;
+    while ((read = in.read(buffer)) != -1)
+      out.write(buffer, 0, read);
+    return out.toByteArray();
   }
 
   private static void extractSysDirectory(Context context)
