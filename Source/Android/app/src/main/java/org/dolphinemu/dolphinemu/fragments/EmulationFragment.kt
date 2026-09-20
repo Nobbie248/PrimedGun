@@ -25,6 +25,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     private var gamePaths: Array<String>? = null
     private var riivolution = false
+    private var savestatePath: String? = null
     private var runWhenSurfaceIsValid = false
     private var loadPreviousTemporaryState = false
     private var launchSystemMenu = false
@@ -53,6 +54,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
             gamePaths = getStringArray(KEY_GAMEPATHS)
             riivolution = getBoolean(KEY_RIIVOLUTION)
             launchSystemMenu = getBoolean(KEY_SYSTEM_MENU)
+            savestatePath = getString(KEY_SAVESTATE_PATH)
         }
     }
 
@@ -210,16 +212,23 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
                         "Cannot start emulation without any game paths"
                     }
                     NativeLibrary.Run(paths, riivolution, temporaryStateFilePath, true)
-                }
-                if (launchSystemMenu) {
+                } else if (launchSystemMenu) {
                     Log.debug("[EmulationFragment] Starting emulation thread for the Wii Menu.")
                     NativeLibrary.RunSystemMenu()
                 } else {
-                    Log.debug("[EmulationFragment] Starting emulation thread.")
                     val paths = requireNotNull(gamePaths) {
                         "Cannot start emulation without any game paths"
                     }
-                    NativeLibrary.Run(paths, riivolution)
+                    val savestate = savestatePath
+                    if (savestate != null) {
+                        Log.debug(
+                            "[EmulationFragment] Starting emulation thread with savestate $savestate"
+                        )
+                        NativeLibrary.Run(paths, riivolution, savestate, false)
+                    } else {
+                        Log.debug("[EmulationFragment] Starting emulation thread.")
+                        NativeLibrary.Run(paths, riivolution)
+                    }
                 }
                 EmulationActivity.stopIgnoringLaunchRequests()
             }, "NativeEmulation")
@@ -241,15 +250,20 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         private const val KEY_GAMEPATHS = "gamepaths"
         private const val KEY_RIIVOLUTION = "riivolution"
         private const val KEY_SYSTEM_MENU = "systemMenu"
+        private const val KEY_SAVESTATE_PATH = "savestatePath"
 
         fun newInstance(
-            gamePaths: Array<String>?, riivolution: Boolean, systemMenu: Boolean
+            gamePaths: Array<String>?,
+            riivolution: Boolean,
+            systemMenu: Boolean,
+            savestatePath: String? = null
         ): EmulationFragment {
             val args = Bundle()
             args.apply {
                 putStringArray(KEY_GAMEPATHS, gamePaths)
                 putBoolean(KEY_RIIVOLUTION, riivolution)
                 putBoolean(KEY_SYSTEM_MENU, systemMenu)
+                putString(KEY_SAVESTATE_PATH, savestatePath)
             }
             val fragment = EmulationFragment()
             fragment.arguments = args

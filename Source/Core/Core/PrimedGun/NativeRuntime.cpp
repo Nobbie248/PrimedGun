@@ -388,6 +388,13 @@ constexpr u32 PLAYER_VISOR_SCAN_FRAME_COLOR_IMPULSE_OFFSET = 0x550u;
 constexpr float PLAYER_VISOR_SCAN_TARGET_VALID_TIMER = 1.0f;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
+// CSamusHud::DrawHelmet(const CStateManager&, float). CInGameGuiManager::Draw calls it after the
+// HUD frames and the minimap and before the pause, save and message screens. Helmet Opacity only
+// feeds the helmet frame's pivot widget colour (CHudHelmetInterface::UpdateHelmetAlpha) and
+// CGuiModel::Draw has no zero-alpha early-out, so at opacity 0 the helmet, glow and helmet-light
+// models are still fully submitted. A blr at the entry drops the whole frame draw instead.
+constexpr u32 SAMUS_HUD_DRAW_HELMET_ADDRESS = 0x80065DC0u;
+constexpr u32 SAMUS_HUD_DRAW_HELMET_ORIGINAL = 0x9421FFE0u;  // stwu r1, -0x20(r1)
 constexpr u64 GAMEPLAY_INPUT_LOSS_HOLD_FRAMES = 18u;
 
 bool RuntimeLoggingEnabled()
@@ -615,6 +622,9 @@ DynamicPpcPatch s_combat_pitch_patches[] = {
 
 DynamicPpcPatch s_combat_elevation_pitch_patch{
     0x8000FA50u, 0xD01D01C0u, LOAD_ZERO_TO_F1, COMBAT_ELEVATION_PITCH_CAVE, false};
+
+DynamicPpcPatch s_helmet_draw_skip_patch{SAMUS_HUD_DRAW_HELMET_ADDRESS,
+                                         SAMUS_HUD_DRAW_HELMET_ORIGINAL, PPC_BLR, 0, false};
 
 DynamicPpcPatch s_scan_reticle_trace_patch{
     DRAW_NEXT_LOCK_ON_GROUP, 0, 0, SCAN_RETICLE_TRACE_CAVE, false};
@@ -1725,6 +1735,29 @@ void ApplyHelmetOpacityZero(const Core::CPUThreadGuard& guard, const RuntimeSett
   u32 current = 0;
   if (TryReadU32(guard, helmet_alpha_addr, &current) && current != 0)
     TryWriteU32(guard, helmet_alpha_addr, 0);
+}
+
+// Installs or removes the blr at CSamusHud::DrawHelmet. Re-reads the game each frame so a
+// savestate carrying either version is corrected; only the known prologue word or our blr is
+// ever touched. Returns true when an instruction was written (caller invalidates the icache).
+bool UpdateHelmetDrawSkipPatch(const Core::CPUThreadGuard& guard, bool skip)
+{
+  DynamicPpcPatch& patch = s_helmet_draw_skip_patch;
+  u32 current = 0;
+  if (!TryReadU32(guard, patch.address, &current))
+    return false;
+  if (current != patch.original && current != patch.replacement)
+  {
+    patch.applied = false;
+    return false;
+  }
+
+  patch.applied = current == patch.replacement;
+  const u32 wanted = skip ? patch.replacement : patch.original;
+  if (current == wanted || !TryWriteInstruction(guard, patch.address, wanted))
+    return false;
+  patch.applied = skip;
+  return true;
 }
 
 bool Normalize3(float& x, float& y, float& z)
@@ -8371,6 +8404,11 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     s_gameplay_input_hold_until_frame = 0;
     s_gameplay_input_active.store(false, std::memory_order_relaxed);
     s_orbit_lock_active.store(false, std::memory_order_relaxed);
+    if (s_helmet_draw_skip_patch.applied && IsMetroidPrimeRev0(guard) &&
+        UpdateHelmetDrawSkipPatch(guard, false))
+    {
+      InvalidatePrimedGunPatchICache(system);
+    }
     return;
   }
 
@@ -8475,6 +8513,16 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     s_gameplay_input_hold_until_frame = 0;
 
   const bool scan_active = have_player && !default_controls_active && ScanVisorActive(guard, player);
+
+  // The helmet frame is the last GUI-camera item of a first-person frame, so dropping it there
+  // leaves every HUD and minimap draw where the video-side element classifier expects it. In
+  // the pause, map, save and message screens the frame precedes their draws, so it is restored
+  // to keep their sequence unchanged; in morph ball the game skips it on its own.
+  const bool skip_helmet_draw =
+      settings.builtin_patches_enabled && !settings.visor_helmet_enabled &&
+      settings.visor_helmet_skip_hidden_draw && have_player && !default_controls_active;
+  if (UpdateHelmetDrawSkipPatch(guard, skip_helmet_draw))
+    InvalidatePrimedGunPatchICache(system);
   if (settings.builtin_patches_enabled && have_player)
     FlattenActiveMorphballCameraTransform(guard, player);
 
@@ -8678,6 +8726,7 @@ void ResetNativeRuntime()
   for (DynamicPpcPatch& patch : s_combat_pitch_patches)
     patch.applied = false;
   s_combat_elevation_pitch_patch.applied = false;
+  s_helmet_draw_skip_patch.applied = false;
   for (ProjectileTransformPatch& patch : s_projectile_transform_patches)
   {
     patch.applied = false;

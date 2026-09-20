@@ -81,6 +81,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     private var paths: Array<String>? = null
     private var riivolution = false
     private var launchSystemMenu = false
+    private var savestatePath: String? = null
     private var menuToastShown = false
 
     private var skylanderData = Skylander(-1, -1, "Slot")
@@ -194,6 +195,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             paths = intent.getStringArrayExtra(EXTRA_SELECTED_GAMES)
             riivolution = intent.getBooleanExtra(EXTRA_RIIVOLUTION, false)
             launchSystemMenu = intent.getBooleanExtra(EXTRA_SYSTEM_MENU, false)
+            savestatePath = intent.getStringExtra(EXTRA_SAVESTATE_PATH)
             hasUserPausedEmulation =
                 intent.getBooleanExtra(EXTRA_USER_PAUSED_EMULATION, false)
             menuToastShown = false
@@ -218,7 +220,8 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         emulationFragment = supportFragmentManager
             .findFragmentById(R.id.frame_emulation_fragment) as EmulationFragment?
         if (emulationFragment == null) {
-            emulationFragment = EmulationFragment.newInstance(paths, riivolution, launchSystemMenu)
+            emulationFragment =
+                EmulationFragment.newInstance(paths, riivolution, launchSystemMenu, savestatePath)
             supportFragmentManager.beginTransaction()
                 .add(R.id.frame_emulation_fragment, emulationFragment!!)
                 .commit()
@@ -255,6 +258,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
 
         outState.apply {
             putStringArray(EXTRA_SELECTED_GAMES, paths)
+            putString(EXTRA_SAVESTATE_PATH, savestatePath)
             putBoolean(EXTRA_USER_PAUSED_EMULATION, hasUserPausedEmulation)
             putBoolean(EXTRA_MENU_TOAST_SHOWN, menuToastShown)
             putInt(EXTRA_SKYLANDER_SLOT, skylanderSlot)
@@ -271,6 +275,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     fun restoreState(savedInstanceState: Bundle) {
         savedInstanceState.apply {
             paths = getStringArray(EXTRA_SELECTED_GAMES)
+            savestatePath = getString(EXTRA_SAVESTATE_PATH)
             hasUserPausedEmulation = getBoolean(EXTRA_USER_PAUSED_EMULATION)
             menuToastShown = savedInstanceState.getBoolean(EXTRA_MENU_TOAST_SHOWN)
             skylanderSlot = savedInstanceState.getInt(EXTRA_SKYLANDER_SLOT)
@@ -1030,6 +1035,9 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
         private val buttonsActionsMap = SparseIntArray()
 
         const val EXTRA_SELECTED_GAMES = "SelectedGames"
+        // Optional savestate to load once the game has booted (the Qt build's "-s"), so a scene
+        // can be reproduced from adb: --es SavestatePath /path/to/GM8E01.s01
+        const val EXTRA_SAVESTATE_PATH = "SavestatePath"
         const val EXTRA_RIIVOLUTION = "Riivolution"
         const val EXTRA_SYSTEM_MENU = "SystemMenu"
         const val EXTRA_USER_PAUSED_EMULATION = "sUserPausedEmulation"

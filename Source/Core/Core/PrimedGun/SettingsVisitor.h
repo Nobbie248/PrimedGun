@@ -50,6 +50,7 @@ void VisitPersistedSettings(RuntimeSettings& s, Visitor&& visit)
   visit("gun_targeting_distance", s.gun_targeting_distance);
   visit("gun_targeting_radius", s.gun_targeting_radius);
   visit("visor_helmet_enabled", s.visor_helmet_enabled);
+  visit("visor_helmet_skip_hidden_draw", s.visor_helmet_skip_hidden_draw);
   visit("vr_overlays_enabled", s.vr_overlays_enabled);
   visit("height_prompt_enabled", s.height_prompt_enabled);
   visit("position_marker_enabled", s.position_marker_enabled);
