@@ -140,7 +140,7 @@ struct PrimedGunVrOverlayState
   bool game_map_screen_active = false;
   bool frustum_culling_enabled = true;
   float frustum_culling_degrees = 115.0f;
-  float metroid_hud_distance = 0.5f;
+  float metroid_hud_distance = 0.75f;
   float metroid_hud_size = 0.75f;
   float metroid_hud_offset_up = 0.0f;
   float metroid_hud_offset_down = 0.0f;
