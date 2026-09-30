@@ -49,6 +49,9 @@ constexpr float PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M = 1.2f;
 // Local space puts its origin at the head, so without a stage the physical floor is estimated
 // this far below the home position (a typical standing eye height).
 constexpr float PRIMEDGUN_LOCAL_SPACE_FLOOR_BELOW_HOME_M = 1.6f;
+// Creating a reference space also raises a change-pending event, reporting an origin that has not
+// moved. Anything shifting less than this is that, not a recenter.
+constexpr float PRIMEDGUN_RECENTER_EVENT_MIN_SHIFT_M = 0.001f;
 
 struct EulerDeg
 {
@@ -1837,28 +1840,65 @@ void OpenXRManager::UpdateInputActions()
   UpdateHaptics();
 }
 
+XrReferenceSpaceType OpenXRManager::OurReferenceSpaceType() const
+{
+  switch (m_reference_space_kind)
+  {
+  case ReferenceSpaceKind::LocalFloor:
+    return XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR;
+  case ReferenceSpaceKind::Stage:
+    return XR_REFERENCE_SPACE_TYPE_STAGE;
+  default:
+    return XR_REFERENCE_SPACE_TYPE_LOCAL;
+  }
+}
+
 bool OpenXRManager::CreateReferenceSpace()
 {
   XrReferenceSpaceCreateInfo space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
   space_info.poseInReferenceSpace = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+  char result_string[XR_MAX_RESULT_STRING_SIZE]{};
 
-  // Prefer stage space so PrimedGun starts from the runtime's play-space origin instead of the
-  // first HMD pose seen during boot.
-  space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+  // Prefer local-floor space: its origin is on the physical floor like the stage's, but the runtime
+  // re-anchors it under the player, facing the way they face, whenever they recenter. The stage
+  // never moves — it is the fixed play area — so on a stage a recenter cannot reset either the
+  // player's position or their forward direction.
+  // LOCAL_FLOOR is core in OpenXR 1.1, which is what we ask for; a runtime that only speaks 1.0
+  // (where it is the XR_EXT_local_floor extension, which we do not enable) simply fails here and
+  // gets the stage instead, exactly as before.
+  space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR;
   XrResult result = xrCreateReferenceSpace(m_session, &space_info, &m_reference_space);
   if (XR_SUCCEEDED(result))
   {
-    m_reference_space_is_stage = true;
+    m_reference_space_kind = ReferenceSpaceKind::LocalFloor;
     m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     m_home_set = true;
     INFO_LOG_FMT(OPENXR,
-                 "OpenXR: Using stage reference space for PrimedGun play-space origin with default "
-                 "startup height {:.2f}m.",
+                 "OpenXR: Using local-floor reference space for PrimedGun play-space origin with "
+                 "default startup height {:.2f}m; recentering will follow the player's facing.",
                  PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M);
     return true;
   }
 
-  char result_string[XR_MAX_RESULT_STRING_SIZE]{};
+  xrResultToString(m_instance, result, result_string);
+  WARN_LOG_FMT(OPENXR,
+               "OpenXR: Local-floor reference space unavailable ({}); trying stage space.",
+               result_string);
+
+  space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+  result = xrCreateReferenceSpace(m_session, &space_info, &m_reference_space);
+  if (XR_SUCCEEDED(result))
+  {
+    m_reference_space_kind = ReferenceSpaceKind::Stage;
+    m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
+    m_home_set = true;
+    INFO_LOG_FMT(OPENXR,
+                 "OpenXR: Using stage reference space for PrimedGun play-space origin with default "
+                 "startup height {:.2f}m; recentering cannot reset facing.",
+                 PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M);
+    return true;
+  }
+
   xrResultToString(m_instance, result, result_string);
   WARN_LOG_FMT(OPENXR,
                "OpenXR: Stage reference space unavailable ({}); falling back to local space.",
@@ -1866,7 +1906,7 @@ bool OpenXRManager::CreateReferenceSpace()
 
   space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
   XR_CHECK(xrCreateReferenceSpace(m_session, &space_info, &m_reference_space));
-  m_reference_space_is_stage = false;
+  m_reference_space_kind = ReferenceSpaceKind::Local;
   m_home_set = false;
   m_home_position = {0.0f, 0.0f, 0.0f};
   return true;
@@ -1895,22 +1935,65 @@ bool OpenXRManager::PollEvents()
     case XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING:
     {
       const auto& ev = *reinterpret_cast<const XrEventDataReferenceSpaceChangePending*>(&event);
-      const bool ours =
-          ev.referenceSpaceType == (m_reference_space_is_stage ? XR_REFERENCE_SPACE_TYPE_STAGE :
-                                                                 XR_REFERENCE_SPACE_TYPE_LOCAL);
+      const bool ours = ev.referenceSpaceType == OurReferenceSpaceType();
       INFO_LOG_FMT(OPENXR,
                    "OpenXR: Reference space change pending (type={}, ours={}, pose_valid={}, new "
                    "origin in previous space=({:.3f},{:.3f},{:.3f})).",
                    static_cast<int>(ev.referenceSpaceType), ours, ev.poseValid == XR_TRUE,
                    ev.poseInPreviousSpace.position.x, ev.poseInPreviousSpace.position.y,
                    ev.poseInPreviousSpace.position.z);
-      // Eye poses, the play-space origin and every floor-anchored layer are expressed in the
-      // reference space, so a stage recenter moves them together: the home position stays at
-      // the stage origin and keeps its recentered height. Local space has no fixed origin, so a
-      // home position recorded in the old space means nothing in the new one; re-derive it from
-      // the next head pose, which also recenters the height the way the system recenter did.
-      if (ours && !m_reference_space_is_stage)
-        m_home_reset_requested.store(true, std::memory_order_release);
+      // Creating a space raises this event too, reporting an origin that has not moved; that is not
+      // a recenter, and one that moved nothing has nothing for us to correct either way.
+      const XrVector3f& shift = ev.poseInPreviousSpace.position;
+      const bool origin_moved = ev.poseValid != XR_TRUE ||
+                                std::abs(shift.x) > PRIMEDGUN_RECENTER_EVENT_MIN_SHIFT_M ||
+                                std::abs(shift.y) > PRIMEDGUN_RECENTER_EVENT_MIN_SHIFT_M ||
+                                std::abs(shift.z) > PRIMEDGUN_RECENTER_EVENT_MIN_SHIFT_M;
+
+      switch (m_reference_space_kind)
+      {
+      case ReferenceSpaceKind::LocalFloor:
+        // The runtime has re-anchored our own space under the player and turned it to face the way
+        // they face, so their position *and* forward direction are already correct — the origin is
+        // where they stand. All that is left is to drop any x/z offset an earlier position recenter
+        // put on the home position. Nothing is read from the head here, so this cannot race the
+        // event's changeTime the way sampling a pose would.
+        if (ours && origin_moved)
+        {
+          INFO_LOG_FMT(OPENXR, "OpenXR: Reference space re-anchored by the runtime; recentering.");
+          m_recenter_requested.store(RecenterRequest::SpaceOriginRecentered,
+                                     std::memory_order_release);
+        }
+        break;
+
+      case ReferenceSpaceKind::Stage:
+        // A system recenter moves the runtime's LOCAL and LOCAL_FLOOR spaces but leaves the stage
+        // where it is, because the stage origin is the fixed play area. Nothing we render is
+        // expressed in those spaces, so without this the user's recenter does nothing at all and
+        // they just press it again. Put them back at the centre, as recenter-on-launch does —
+        // position only, since the stage cannot re-face. Ours moving counts too: the home position
+        // can be a point in the stage frame rather than the stage origin, so it does not survive
+        // that frame shifting underneath it. The LOCAL and LOCAL_FLOOR pair that one recenter
+        // emits collapses into a single pending request.
+        if (origin_moved && (ours || ev.referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL ||
+                             ev.referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR))
+        {
+          INFO_LOG_FMT(
+              OPENXR,
+              "OpenXR: System recenter detected (type={}); recentering the play-space origin.",
+              static_cast<int>(ev.referenceSpaceType));
+          RequestRecenter(true);
+        }
+        break;
+
+      case ReferenceSpaceKind::Local:
+        // Plain local space has no fixed origin, so a home position recorded in the old space means
+        // nothing in the new one; re-derive it from the next head pose, which also recenters the
+        // height the way the system recenter did.
+        if (ours)
+          m_home_reset_requested.store(true, std::memory_order_release);
+        break;
+      }
       break;
     }
 
@@ -2117,7 +2200,7 @@ bool OpenXRManager::LocateViews()
 
   if (!m_home_set)
   {
-    if (m_reference_space_is_stage)
+    if (IsFloorAnchoredSpace())
     {
       m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     }
@@ -2132,18 +2215,27 @@ bool OpenXRManager::LocateViews()
 
   const RecenterRequest recenter =
       m_recenter_requested.exchange(RecenterRequest::None, std::memory_order_acq_rel);
-  if (recenter != RecenterRequest::None && view_count >= 2)
+  if (recenter == RecenterRequest::SpaceOriginRecentered)
+  {
+    // The runtime already put the origin under the player and faced it their way, so the home
+    // position only has to stop carrying an offset from an earlier position recenter. A recenter
+    // does not change how tall they are, so the height the last height reset chose still stands.
+    m_home_position.x = 0.0f;
+    m_home_position.z = 0.0f;
+    m_home_set = true;
+    INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home to the re-anchored origin (0.0000,{:.4f},0.0000)",
+                 m_home_position.y);
+  }
+  else if (recenter != RecenterRequest::None && view_count >= 2)
   {
     const float center_x = 0.5f * (m_eye_views[0].pose.position.x + m_eye_views[1].pose.position.x);
     const float center_z = 0.5f * (m_eye_views[0].pose.position.z + m_eye_views[1].pose.position.z);
-    // A height-only recenter leaves the play-space origin alone: the stage origin, or whatever
-    // the local-space fallback last derived. Including position moves it under the head, which
-    // puts the player at the centre of the play space wherever they are standing.
+    // A height-only recenter leaves the play-space origin alone: the floor-anchored origin, or
+    // whatever the plain-local fallback last derived. Including position moves it under the head,
+    // which puts the player at the centre of the play space wherever they are standing.
     const bool include_position = recenter == RecenterRequest::HeightAndPosition;
-    const float old_x =
-        m_home_set ? m_home_position.x : (m_reference_space_is_stage ? 0.0f : center_x);
-    const float old_z =
-        m_home_set ? m_home_position.z : (m_reference_space_is_stage ? 0.0f : center_z);
+    const float old_x = m_home_set ? m_home_position.x : (IsFloorAnchoredSpace() ? 0.0f : center_x);
+    const float old_z = m_home_set ? m_home_position.z : (IsFloorAnchoredSpace() ? 0.0f : center_z);
     m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
     m_home_position.x = include_position ? center_x : old_x;
     m_home_position.z = include_position ? center_z : old_z;
@@ -2153,8 +2245,8 @@ bool OpenXRManager::LocateViews()
                  m_home_position.y, m_home_position.z);
   }
 
-  // Stage space has its origin on the floor; local space only knows where the head was.
-  m_floor_height = m_reference_space_is_stage ?
+  // A floor-anchored space has its origin on the floor; plain local only knows where the head was.
+  m_floor_height = IsFloorAnchoredSpace() ?
                        0.0f :
                        m_home_position.y - PRIMEDGUN_LOCAL_SPACE_FLOOR_BELOW_HOME_M;
 
@@ -2298,7 +2390,7 @@ void OpenXRManager::GetEyeProjectionRows(float units_per_meter,
 
   if (!m_home_set)
   {
-    if (m_reference_space_is_stage)
+    if (IsFloorAnchoredSpace())
     {
       m_home_position = {0.0f, PRIMEDGUN_DEFAULT_STANDING_HEIGHT_M, 0.0f};
     }

@@ -453,24 +453,46 @@ private:
   float m_input_floor_height = 0.0f;
   bool m_input_eye_views_valid = false;
 
-  // "Home" head-center position. With stage space this starts at the runtime's play-space origin;
-  // local-space fallback records the first usable head-center position. A recenter that includes
-  // position moves it to the head's x/z in either space.
-  bool m_reference_space_is_stage = false;
+  // Which reference space the session got, in preference order. LOCAL_FLOOR is preferred: its
+  // origin sits on the floor like the stage's, but the runtime re-anchors it — position *and*
+  // facing — whenever the user recenters from the system menu or the Meta button, which the stage
+  // deliberately never does. That is the only way a recenter can reset the player's forward
+  // direction, because the home position is a translation and cannot rotate anything.
+  enum class ReferenceSpaceKind
+  {
+    LocalFloor,
+    Stage,
+    Local,
+  };
+  ReferenceSpaceKind m_reference_space_kind = ReferenceSpaceKind::Local;
+  // The reference space type we created, for matching change-pending events against.
+  XrReferenceSpaceType OurReferenceSpaceType() const;
+  // Local-floor and stage put their origin on the physical floor, so its height is simply 0.
+  bool IsFloorAnchoredSpace() const
+  {
+    return m_reference_space_kind != ReferenceSpaceKind::Local;
+  }
+
+  // "Home" head-center position. In a floor-anchored space this starts directly above the origin;
+  // the plain-local fallback records the first usable head-center position. A recenter that
+  // includes position moves it to the head's x/z in either space.
   mutable bool m_home_set{false};
   mutable XrVector3f m_home_position{0.f, 0.f, 0.f};
-  // Reference-space height of the physical floor: the stage origin, or an estimate below the
-  // home position with the local-space fallback.
+  // Reference-space height of the physical floor: the origin in a floor-anchored space, or an
+  // estimate below the home position with the plain-local fallback.
   float m_floor_height = 0.0f;
   enum class RecenterRequest
   {
     None,
     HeightOnly,
     HeightAndPosition,
+    // The runtime re-anchored our own space under the player, so their position and facing are
+    // already right and only the home position's x/z offset has to be dropped.
+    SpaceOriginRecentered,
   };
   std::atomic<RecenterRequest> m_recenter_requested{RecenterRequest::None};
-  // Set by PollEvents when the runtime recenters the local reference space (a system recenter
-  // without a stage); LocateViews then re-derives the home position in the new space.
+  // Set by PollEvents when the runtime recenters a plain-local reference space; LocateViews then
+  // re-derives the home position in the new space.
   std::atomic<bool> m_home_reset_requested{false};
 };
 
