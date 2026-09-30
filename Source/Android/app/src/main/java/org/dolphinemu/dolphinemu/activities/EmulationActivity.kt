@@ -42,6 +42,8 @@ import org.dolphinemu.dolphinemu.features.infinitybase.ui.FigureSlot
 import org.dolphinemu.dolphinemu.features.infinitybase.ui.FigureSlotAdapter
 import org.dolphinemu.dolphinemu.features.input.model.ControllerInterface
 import org.dolphinemu.dolphinemu.features.input.model.DolphinSensorEventListener
+import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSelectedGame
+import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSettings
 import org.dolphinemu.dolphinemu.features.settings.model.BooleanSetting
 import org.dolphinemu.dolphinemu.features.settings.model.IntSetting
 import org.dolphinemu.dolphinemu.features.settings.model.QuestVrSettings
@@ -328,7 +330,7 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
     fun onTitleChanged() {
         if (!menuToastShown) {
             // The reason why this doesn't run earlier is because we want to be sure the boot succeeded.
-            Toast.makeText(this, R.string.emulation_menu_help, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, menuHelpText(), Toast.LENGTH_LONG).show()
             menuToastShown = true
         }
 
@@ -342,6 +344,42 @@ class EmulationActivity : AppCompatActivity(), ThemeProvider {
             // Most likely the core delivered an onTitleChanged while emulation was shutting down.
             // Let's just ignore it, since we're about to shut down anyway.
         }
+    }
+
+    /**
+     * Back cannot reach Dolphin's menu while Metroid Prime runs immersively, so point at the
+     * in-headset PrimedGun menu instead. It opens from the thumbstick of the hand not holding the
+     * cannon (UpdateVrMenu in NativeRuntime.cpp) and exists only while the mod and its VR
+     * overlays are on; everything else keeps Dolphin's hint.
+     */
+    private fun menuHelpText(): String {
+        val dolphinHelp = getString(R.string.emulation_menu_help)
+        if (!QuestVrSettings.isLaunchInVrEnabled())
+            return dolphinHelp
+
+        val gameId = try {
+            NativeLibrary.GetCurrentGameID()
+        } catch (_: IllegalStateException) {
+            return dolphinHelp
+        }
+        if (gameId != PrimedGunSelectedGame.METROID_PRIME_GAME_ID ||
+            !PrimedGunSettings.getBoolean("enabled", true) ||
+            !PrimedGunSettings.getBoolean("vr_overlays_enabled", true)
+        ) {
+            return dolphinHelp
+        }
+
+        val hand = getString(
+            if (PrimedGunSettings.getBoolean("use_right_hand", true))
+                R.string.primedgun_vr_menu_help_left
+            else
+                R.string.primedgun_vr_menu_help_right
+        )
+        val help = if (PrimedGunSettings.getBoolean("vr_menu_hold_left_stick", false))
+            R.string.primedgun_vr_menu_help_hold
+        else
+            R.string.primedgun_vr_menu_help_click
+        return getString(help, hand)
     }
 
     override fun onDestroy() {

@@ -78,6 +78,11 @@
     <string name="primedgun_left_hand">Left hand</string>
     <string name="primedgun_vr_menu_hold_left_stick">Longer held press for VR menu</string>
     <string name="primedgun_vr_menu_requires_head_zone">VR menu requires controller near head to activate</string>
+    <!-- Launch toast in VR, replacing Dolphin's "Press Back to access the menu". %1$s is left/right. -->
+    <string name="primedgun_vr_menu_help_click">Click the %1$s thumbstick to open the PrimedGun menu.\nExit Game is in that menu.</string>
+    <string name="primedgun_vr_menu_help_hold">Hold the %1$s thumbstick to open the PrimedGun menu.\nExit Game is in that menu.</string>
+    <string name="primedgun_vr_menu_help_left">left</string>
+    <string name="primedgun_vr_menu_help_right">right</string>
     <string name="primedgun_combat_jump_use_primary_button">Use A button for jump</string>
 
     <string name="primedgun_section_rumble_grip">Rumble / Grip Inputs</string>
