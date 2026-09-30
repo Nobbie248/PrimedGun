@@ -302,12 +302,20 @@ public:
       std::array<std::array<float, 4>, 2>& out_y_rows) const;
   bool RegisterCurrentAndroidThread(const char* thread_name) { return true; }
 
+  // What a recenter should move. Height is separate from position because the eyes swing about the
+  // neck as the head pitches: sampling the height from a head that is looking up or down bakes that
+  // swing into the camera and shifts the horizon. A recenter the player triggers while looking
+  // around must therefore leave the height alone — the height reset is its own gesture.
+  enum class RecenterMode
+  {
+    HeightOnly,
+    PositionOnly,
+    HeightAndPosition,
+  };
+
   // Request a recenter of the VR home position.
   // Applied on the OpenXR render thread during LocateViews.
-  // Height only by default, which keeps the play-space origin where it is. With
-  // `include_position` the origin also moves to the head's x/z, so the player ends up at the
-  // centre of the play space wherever they happen to be standing (recenter-on-launch).
-  void RequestRecenter(bool include_position = false);
+  void RequestRecenter(RecenterMode mode = RecenterMode::HeightOnly);
 
 private:
   bool InitializeInputActions();
@@ -485,6 +493,7 @@ private:
   {
     None,
     HeightOnly,
+    PositionOnly,
     HeightAndPosition,
     // The runtime re-anchored our own space under the player, so their position and facing are
     // already right and only the home position's x/z offset has to be dropped.

@@ -1978,11 +1978,14 @@ bool OpenXRManager::PollEvents()
         if (origin_moved && (ours || ev.referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL ||
                              ev.referenceSpaceType == XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR))
         {
+          // Position only. The player is recentering with their head wherever it happens to be
+          // pointing, and taking the height from a pitched head would move the horizon. The facing
+          // reset comes from the runtime re-anchoring the space itself, not from anything here.
           INFO_LOG_FMT(
               OPENXR,
               "OpenXR: System recenter detected (type={}); recentering the play-space origin.",
               static_cast<int>(ev.referenceSpaceType));
-          RequestRecenter(true);
+          RequestRecenter(RecenterMode::PositionOnly);
         }
         break;
 
@@ -2233,16 +2236,24 @@ bool OpenXRManager::LocateViews()
     // A height-only recenter leaves the play-space origin alone: the floor-anchored origin, or
     // whatever the plain-local fallback last derived. Including position moves it under the head,
     // which puts the player at the centre of the play space wherever they are standing.
-    const bool include_position = recenter == RecenterRequest::HeightAndPosition;
+    // Height is left alone unless asked for: the eyes swing about the neck by several centimetres
+    // as the head pitches, so taking it from a head that is looking up or down would drop the
+    // camera and move the horizon with it.
+    const bool include_position = recenter == RecenterRequest::HeightAndPosition ||
+                                  recenter == RecenterRequest::PositionOnly;
+    const bool include_height = recenter == RecenterRequest::HeightAndPosition ||
+                                recenter == RecenterRequest::HeightOnly;
     const float old_x = m_home_set ? m_home_position.x : (IsFloorAnchoredSpace() ? 0.0f : center_x);
     const float old_z = m_home_set ? m_home_position.z : (IsFloorAnchoredSpace() ? 0.0f : center_z);
-    m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
+    if (include_height)
+      m_home_position.y = 0.5f * (m_eye_views[0].pose.position.y + m_eye_views[1].pose.position.y);
     m_home_position.x = include_position ? center_x : old_x;
     m_home_position.z = include_position ? center_z : old_z;
     m_home_set = true;
-    INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home {} to ({:.4f},{:.4f},{:.4f})",
-                 include_position ? "height and position" : "height only", m_home_position.x,
-                 m_home_position.y, m_home_position.z);
+    const char* what = include_height ? (include_position ? "height and position" : "height only") :
+                                        "position only";
+    INFO_LOG_FMT(OPENXR, "OpenXR: Recentered home {} to ({:.4f},{:.4f},{:.4f})", what,
+                 m_home_position.x, m_home_position.y, m_home_position.z);
   }
 
   // A floor-anchored space has its origin on the floor; plain local only knows where the head was.
@@ -2367,11 +2378,21 @@ bool OpenXRManager::IsQuestOrVirtualDesktopRuntime() const
          runtime.find("virtual desktop") != std::string::npos;
 }
 
-void OpenXRManager::RequestRecenter(bool include_position)
+void OpenXRManager::RequestRecenter(RecenterMode mode)
 {
-  m_recenter_requested.store(include_position ? RecenterRequest::HeightAndPosition :
-                                                RecenterRequest::HeightOnly,
-                             std::memory_order_release);
+  RecenterRequest request = RecenterRequest::HeightOnly;
+  switch (mode)
+  {
+  case RecenterMode::PositionOnly:
+    request = RecenterRequest::PositionOnly;
+    break;
+  case RecenterMode::HeightAndPosition:
+    request = RecenterRequest::HeightAndPosition;
+    break;
+  case RecenterMode::HeightOnly:
+    break;
+  }
+  m_recenter_requested.store(request, std::memory_order_release);
 }
 
 void OpenXRManager::GetEyeProjectionRows(float units_per_meter,
