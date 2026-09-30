@@ -1071,6 +1071,15 @@ void InvalidatePrimedGunPatchICache(Core::System& system)
   jit.InvalidateICache(PATCH_CODE_ARENA_BASE, PATCH_CODE_ARENA_SIZE, true);
 }
 
+// Drops only the JIT blocks holding one patched instruction; the block cache also finds blocks
+// that reached it through branch following. Use this for patches toggled during play: the
+// full invalidation above makes the JIT recompile the whole game, which stalls emulation for
+// about a second on Quest.
+void InvalidatePrimedGunPatchedInstruction(Core::System& system, u32 address)
+{
+  system.GetJitInterface().InvalidateICache(address & ~0x1fu, 32, true);
+}
+
 bool InstallBranchAfterCaveWrite(const Core::CPUThreadGuard& guard, u32 patch_address,
                                  u32 cave_address, std::initializer_list<HookWrite> cave_writes)
 {
@@ -5730,7 +5739,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->gun_targeting_enabled = true;
       settings->gun_targeting_distance = 60.0f;
       settings->gun_targeting_radius = 4.0f;
-      settings->visor_helmet_enabled = false;
+      settings->visor_helmet_enabled = true;
     }
     else if (actual_index == 18)
       settings->position_marker_enabled = !settings->position_marker_enabled;
@@ -8407,7 +8416,7 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
     if (s_helmet_draw_skip_patch.applied && IsMetroidPrimeRev0(guard) &&
         UpdateHelmetDrawSkipPatch(guard, false))
     {
-      InvalidatePrimedGunPatchICache(system);
+      InvalidatePrimedGunPatchedInstruction(system, s_helmet_draw_skip_patch.address);
     }
     return;
   }
@@ -8521,8 +8530,9 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   const bool skip_helmet_draw =
       settings.builtin_patches_enabled && !settings.visor_helmet_enabled &&
       settings.visor_helmet_skip_hidden_draw && have_player && !default_controls_active;
+  // This toggles on every morph ball and menu transition, so it must not flush the whole JIT.
   if (UpdateHelmetDrawSkipPatch(guard, skip_helmet_draw))
-    InvalidatePrimedGunPatchICache(system);
+    InvalidatePrimedGunPatchedInstruction(system, s_helmet_draw_skip_patch.address);
   if (settings.builtin_patches_enabled && have_player)
     FlattenActiveMorphballCameraTransform(guard, player);
 

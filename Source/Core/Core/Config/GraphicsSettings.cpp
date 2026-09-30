@@ -237,9 +237,11 @@ const Info<int> GFX_VR_OPCODE_REPLAY_TARGET_REFRESH_RATE{
 #if defined(__ANDROID__) && defined(ENABLE_VR)
 constexpr bool DEFAULT_VR_ANDROID_DIRECT_TO_HMD = true;
 constexpr bool DEFAULT_IMMEDIATE_XFB = true;
+constexpr bool DEFAULT_VR_USE_VULKAN_MULTIVIEW = true;
 #else
 constexpr bool DEFAULT_VR_ANDROID_DIRECT_TO_HMD = false;
 constexpr bool DEFAULT_IMMEDIATE_XFB = false;
+constexpr bool DEFAULT_VR_USE_VULKAN_MULTIVIEW = false;
 #endif
 
 const Info<int> GFX_VR_FORCED_VBI_FREQUENCY{{System::GFX, "VR", "ForcedVBIFrequency"}, 0};
@@ -262,9 +264,10 @@ const Info<bool> GFX_VR_AR_MODE_DEBUG{{System::GFX, "VR", "ARModeDebug"}, false}
 const Info<float> GFX_VR_AR_BACKGROUND_ALPHA{{System::GFX, "VR", "ARBackgroundAlpha"}, 0.0f};
 const Info<float> GFX_VR_GAMMA{{System::GFX, "VR", "Gamma"}, 1.0f};
 const Info<int> GFX_VR_CLEAR_EFB_COPIES{{System::GFX, "VR", "ClearEFBCopies"}, 0};
-// Off by default on every platform: PrimedGun's multiview path renders the wrong eye
-// (confirmed on Quest 3). Opt in only for testing until that is fixed.
-const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"}, false};
+// On by default on Quest, where the multiview port (docs/Quest-Multiview-Port.md) is the tested
+// path. Desktop Vulkan multiview has not been device-tested, so it stays opt-in there.
+const Info<bool> GFX_VR_USE_VULKAN_MULTIVIEW{{System::GFX, "VR", "UseVulkanMultiview"},
+                                             DEFAULT_VR_USE_VULKAN_MULTIVIEW};
 const Info<bool> GFX_VR_ANDROID_DIRECT_TO_HMD{{System::GFX, "VR", "AndroidDirectToHMD"},
                                               DEFAULT_VR_ANDROID_DIRECT_TO_HMD};
 const Info<bool> GFX_VR_QUEST_CPU_LEVEL_5_HINT{{System::GFX, "VR", "QuestCpuLevel5Hint"}, false};

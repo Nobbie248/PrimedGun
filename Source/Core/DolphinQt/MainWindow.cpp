@@ -3531,7 +3531,7 @@ void MainWindow::ConnectStack()
     runtime->gun_targeting_enabled = true;
     runtime->gun_targeting_distance = 60.0f;
     runtime->gun_targeting_radius = 4.0f;
-    runtime->visor_helmet_enabled = false;
+    runtime->visor_helmet_enabled = true;
     refresh_visible_settings();
     apply_runtime();
   });

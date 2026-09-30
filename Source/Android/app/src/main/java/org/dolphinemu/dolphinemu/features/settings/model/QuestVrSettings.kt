@@ -197,7 +197,7 @@ object QuestVrSettings {
     // ---------- VR hacks ----------
 
     fun useVulkanMultiviewSetting(): AbstractBooleanSetting =
-        object : AbstractBooleanSetting by vrBooleanSetting("UseVulkanMultiview", false) {
+        object : AbstractBooleanSetting by vrBooleanSetting("UseVulkanMultiview", true) {
             override val isRuntimeEditable: Boolean = false
         }
 

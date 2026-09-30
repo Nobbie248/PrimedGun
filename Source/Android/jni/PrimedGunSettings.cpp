@@ -300,7 +300,7 @@ Java_org_dolphinemu_dolphinemu_features_primedgun_model_PrimedGunSettings_resetT
   s.gun_targeting_enabled = true;
   s.gun_targeting_distance = 60.0f;
   s.gun_targeting_radius = 4.0f;
-  s.visor_helmet_enabled = false;
+  s.visor_helmet_enabled = true;
   PrimedGun::SetRuntimeSettings(s);
 }
 
