@@ -17,6 +17,7 @@
     <string name="primedgun_tab_cannon_textures">Cannon Textures</string>
     <string name="primedgun_tab_layout">Layout</string>
     <string name="primedgun_tab_dolphin_config">Dolphin Config</string>
+    <string name="primedgun_tab_about">About</string>
 
     <!-- Shared controls -->
     <string name="primedgun_minus">−</string>
@@ -231,4 +232,22 @@
     <string name="primedgun_ram_dump_title">RAM Dump</string>
     <string name="primedgun_ram_dump_failed">Failed to dump RAM: memory is not available. Start the game first.</string>
     <string name="primedgun_ram_dump_done">RAM dumped to:\n%1$s</string>
+
+    <!-- About tab. The credits mirror the Credits section of README.md; keep the two in step. -->
+    <string name="primedgun_section_about">PrimedGun</string>
+    <string name="primedgun_about_summary">Metroid Prime as a native VR game, built on Dolphin ReduX and the Dolphin emulator.</string>
+    <string name="primedgun_about_version">Version: %1$s</string>
+    <string name="primedgun_about_build">Build: %1$s %2$s, revision %3$s</string>
+    <string name="primedgun_about_game">Supported game: Metroid Prime NTSC-U Revision 0 (1.0), game ID GM8E01</string>
+    <string name="primedgun_about_user_folder">User folder: %1$s</string>
+    <string name="primedgun_about_license">PrimedGun is free software, licensed under the GNU GPL version 2 or later.</string>
+    <string name="primedgun_section_useful_info">Useful Information</string>
+    <string name="primedgun_about_useful_info_text">• Use Exit Game at the top right of the in-headset menu (press it twice) to leave the game. It stops the emulator cleanly and saves the shader caches. Quitting from the Meta menu closes the app before the caches are saved, so shaders compile again on the next launch.\n\n• After installing a new version, shaders are compiled again before the game starts. This can take a few minutes; later launches are faster.\n\n• Your memory cards are in the GC folder and your PrimedGun settings in the Config folder of the user folder shown above.</string>
+    <string name="primedgun_section_links">Links</string>
+    <string name="primedgun_about_github">PrimedGun on GitHub</string>
+    <string name="primedgun_about_discord">Dolphin VR Discord</string>
+    <string name="primedgun_about_discord_note">For further enhancements to your VR experience, join the Dolphin VR Discord.</string>
+    <string name="primedgun_about_no_browser">No browser available. Visit %1$s</string>
+    <string name="primedgun_section_credits">Credits</string>
+    <string name="primedgun_about_credits_text">• Created by Nobbie.\n\n• Huge thank you to iChris4, who made Dolphin ReduX for PC and Quest, ported PrimedGun to the Quest, and early on helped fix the visor effects and ported the Metroid Prime override from the old Dolphin Hydra.\n\n• Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.\n\n• Development references include the Metroid Prime decompilation project, Metaforce, and PrimeHack. Codex was used to assist with debugging, system integration, and iterative development.\n\n• Thank you to the Dolphin team.\n\n• Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, Samevi, Mochu, VideoGameEsoterica and VRified Games.\n\n• Thank you to budwheizzah for helping test the Quest version.</string>
 </resources>

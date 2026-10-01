@@ -22,7 +22,7 @@ import org.dolphinemu.dolphinemu.utils.ThreadUtil
 
 /**
  * The launcher's tabs, in the order MainWindow::ConnectStack() adds them, and the row lists for
- * the tabs that are plain settings lists.
+ * the tabs that are plain settings lists. About, the last tab, has no Qt counterpart.
  *
  * Order, labels, ranges and step sizes are taken from MainWindow::ConnectStack() so the Quest UI
  * and the Qt launcher stay the same product. Defaults repeat the RuntimeSettings struct defaults
@@ -39,7 +39,8 @@ object PrimedGunTabs {
         CALIBRATION(R.string.primedgun_tab_calibration),
         CANNON_TEXTURES(R.string.primedgun_tab_cannon_textures),
         LAYOUT(R.string.primedgun_tab_layout),
-        DOLPHIN_CONFIG(R.string.primedgun_tab_dolphin_config)
+        DOLPHIN_CONFIG(R.string.primedgun_tab_dolphin_config),
+        ABOUT(R.string.primedgun_tab_about)
     }
 
     /** Rows for the list-based tabs. The other tabs have their own fragments. */
@@ -47,7 +48,7 @@ object PrimedGunTabs {
         Tab.CONTROLLER -> controllerItems(context)
         Tab.CALIBRATION -> calibrationItems(context)
         Tab.DOLPHIN_CONFIG -> dolphinConfigItems(context)
-        Tab.SETUP, Tab.CANNON_TEXTURES, Tab.LAYOUT -> emptyList()
+        Tab.SETUP, Tab.CANNON_TEXTURES, Tab.LAYOUT, Tab.ABOUT -> emptyList()
     }
 
     private fun controllerItems(context: Context): List<PrimedGunItem> = buildList {

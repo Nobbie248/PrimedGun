@@ -20,6 +20,7 @@ import org.dolphinemu.dolphinemu.NativeLibrary
 import org.dolphinemu.dolphinemu.R
 import org.dolphinemu.dolphinemu.databinding.ActivityMainBinding
 import org.dolphinemu.dolphinemu.features.primedgun.model.PrimedGunSettings
+import org.dolphinemu.dolphinemu.features.primedgun.ui.PrimedGunAboutFragment
 import org.dolphinemu.dolphinemu.features.primedgun.ui.PrimedGunCannonTexturesFragment
 import org.dolphinemu.dolphinemu.features.primedgun.ui.PrimedGunLayoutFragment
 import org.dolphinemu.dolphinemu.features.primedgun.ui.PrimedGunRefreshable
@@ -66,7 +67,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setInsets()
 
-        val version = versionLabel()
+        val version = PrimedGunSettings.getVersionLabel()
         binding.mainToolbar.title = getString(R.string.primedgun_window_title, version)
         binding.mainCredit.text = getString(R.string.primedgun_credit, version)
 
@@ -129,11 +130,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun versionLabel(): String {
-        val description = PrimedGunSettings.getVersion()
-        return if (description.startsWith("v", ignoreCase = true)) description else "v$description"
-    }
-
     private fun setupTabs(savedInstanceState: Bundle?) {
         val tabLayout = binding.mainTabs
         tabs.forEach { tab -> tabLayout.addTab(tabLayout.newTab().setText(tab.titleId)) }
@@ -171,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         PrimedGunTabs.Tab.SETUP -> PrimedGunSetupFragment()
         PrimedGunTabs.Tab.CANNON_TEXTURES -> PrimedGunCannonTexturesFragment()
         PrimedGunTabs.Tab.LAYOUT -> PrimedGunLayoutFragment()
+        PrimedGunTabs.Tab.ABOUT -> PrimedGunAboutFragment()
         PrimedGunTabs.Tab.CONTROLLER,
         PrimedGunTabs.Tab.CALIBRATION,
         PrimedGunTabs.Tab.DOLPHIN_CONFIG -> PrimedGunSettingsFragment.newInstance(tab)

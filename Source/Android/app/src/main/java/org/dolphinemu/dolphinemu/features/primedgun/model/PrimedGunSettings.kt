@@ -64,6 +64,12 @@ object PrimedGunSettings {
     @JvmStatic
     external fun getVersion(): String
 
+    /** [getVersion] as the launcher displays it, always with a leading "v". */
+    fun getVersionLabel(): String {
+        val description = getVersion()
+        return if (description.startsWith("v", ignoreCase = true)) description else "v$description"
+    }
+
     /** Path of the slot A memory card for NTSC-U games: the file the old-save transfer replaces. */
     @JvmStatic
     external fun getMemoryCardPath(): String
