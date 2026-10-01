@@ -46,7 +46,7 @@ struct RuntimeSettings
   bool gun_targeting_enabled = true;
   float gun_targeting_distance = 60.0f;
   float gun_targeting_radius = 4.0f;
-  bool visor_helmet_enabled = true;
+  bool visor_helmet_enabled = false;
   // With the helmet disabled the runtime zeroes Prime's Helmet Opacity option, but the game
   // still submits the helmet frame's models at alpha 0. This skips that draw at the source
   // (CSamusHud::DrawHelmet) during first-person play; off keeps the invisible draws for A/B.

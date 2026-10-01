@@ -5739,7 +5739,7 @@ void ActivateVrMenuSelection(RuntimeSettings* settings)
       settings->gun_targeting_enabled = true;
       settings->gun_targeting_distance = 60.0f;
       settings->gun_targeting_radius = 4.0f;
-      settings->visor_helmet_enabled = true;
+      settings->visor_helmet_enabled = false;
     }
     else if (actual_index == 18)
       settings->position_marker_enabled = !settings->position_marker_enabled;

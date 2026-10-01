@@ -220,7 +220,7 @@ object PrimedGunTabs {
                 true
             )
         )
-        add(switch(context, R.string.primedgun_visor_helmet_enabled, "visor_helmet_enabled", true))
+        add(switch(context, R.string.primedgun_visor_helmet_enabled, "visor_helmet_enabled", false))
         add(PrimedGunItem.Note(context.getString(R.string.primedgun_visor_helmet_note)))
         add(
             switch(
