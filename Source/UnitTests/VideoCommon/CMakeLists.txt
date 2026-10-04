@@ -1,6 +1,8 @@
 add_dolphin_test(VertexLoaderTest VertexLoaderTest.cpp)
 add_dolphin_test(GenerationCounterTableTest GenerationCounterTableTest.cpp)
 if(ENABLE_VR)
+  add_dolphin_test(HeadCullProjectionTest HeadCullProjectionTest.cpp)
+  target_include_directories(HeadCullProjectionTest PRIVATE ${PROJECT_SOURCE_DIR}/Externals/OpenXR/include)
   add_dolphin_test(PrimedGunOverlayTest PrimedGunOverlayTest.cpp)
   target_include_directories(PrimedGunOverlayTest PRIVATE ${PROJECT_SOURCE_DIR}/Externals/OpenXR/include)
 endif()

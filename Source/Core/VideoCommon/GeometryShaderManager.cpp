@@ -186,6 +186,8 @@ PerspectiveHudTransform CalculatePerspectiveHudTransform(const Projection::Raw& 
 
 void GeometryShaderManager::Init()
 {
+  m_vr_pose_needs_refresh = true;
+  m_vr_cull_projection_valid = false;
   constants = {};
   m_vr_hud_shared_reference_valid = false;
   m_vr_hud_shared_reference_context = 0;
@@ -203,6 +205,8 @@ void GeometryShaderManager::Init()
 
 void GeometryShaderManager::Dirty()
 {
+  m_vr_pose_needs_refresh = true;
+  m_vr_cull_projection_valid = false;
   // This function is called after a savestate is loaded.
   // Any constants that can changed based on settings should be re-calculated
   m_projection_changed = true;
@@ -287,51 +291,7 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
 
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
-          // When the head-pose lock is on, only re-fetch the head pose from OpenXR when
-          // we've been explicitly invalidated (at the XFB-copy frame boundary).  This
-          // prevents mid-frame LocateViews() updates from desynchronising different draw
-          // calls within the same game frame.  When OFF, refetch every call (legacy
-          // behavior — kept as an escape hatch).
-          // During opcode replay, never refresh: the real frame's cache is already
-          // correct, and BPStructs' XFB-copy LocateViews has mutated m_eye_views
-          // between real-frame draws and replay-frame draws.  Refreshing here would
-          // render the replay with a different pose than the real frame it pairs
-          // with, producing alternating-frame flicker on head rotation.
-          const bool is_replay = VideoCommon::OpenXROpcodeReplay::IsReplaying();
-          const bool upm_changed = std::abs(upm - m_cached_units_per_meter) > 0.0001f;
-          const bool need_refresh =
-              !is_replay && (upm_changed || !g_ActiveConfig.VRLockHeadPoseEffective() ||
-                             m_vr_pose_needs_refresh);
-          if (need_refresh)
-          {
-            std::array<std::array<float, 4>, 4> eye_projection_rows{};
-            std::array<std::array<float, 4>, 2> eye_z_rows{};
-            VR::g_openxr->GetEyeProjectionRows(upm, eye_projection_rows, eye_z_rows);
-
-            // OpenXR stereo path bypasses the classic cproj path, so apply freelook here too.
-            if (perspective && g_freelook_camera.IsActive())
-            {
-              const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
-              ApplyRowTransform(&eye_projection_rows, freelook_view);
-              ApplyRowTransform(&eye_z_rows, freelook_view);
-            }
-
-            m_cached_eye_projection = eye_projection_rows;
-            m_cached_eye_z_row = eye_z_rows;
-            m_cached_units_per_meter = upm;
-
-            // Unrotated per-eye projection rows for head-locked content.
-            std::array<std::array<float, 4>, 4> head_proj_rows{};
-            VR::g_openxr->GetRawEyeProjectionRows(upm, head_proj_rows);
-            m_cached_head_projection = head_proj_rows;
-
-            // Snapshot the pose the cache was built from.  SubmitFrame will use
-            // this snapshot so render_pose == submit_pose regardless of any
-            // later LocateViews that may clobber m_eye_views before xrEndFrame.
-            VR::g_openxr->RecordRenderedEyeViews();
-
-            m_vr_pose_needs_refresh = false;
-          }
+          RefreshVRProjectionCache(upm, perspective);
 
           constants.eye_projection[0] = m_cached_eye_projection[0];
           constants.eye_projection[1] = m_cached_eye_projection[1];
@@ -740,6 +700,83 @@ void GeometryShaderManager::SetViewportChanged()
 void GeometryShaderManager::SetProjectionChanged()
 {
   m_projection_changed = true;
+}
+
+void GeometryShaderManager::RefreshVRProjectionCache(float upm, bool perspective)
+{
+#ifdef ENABLE_VR
+  // When the head-pose lock is on, only re-fetch the head pose from OpenXR when
+  // we've been explicitly invalidated (at the XFB-copy frame boundary).  This
+  // prevents mid-frame LocateViews() updates from desynchronising different draw
+  // calls within the same game frame.  When OFF, refetch every call (legacy
+  // behavior — kept as an escape hatch).
+  // During opcode replay, never refresh: the real frame's cache is already
+  // correct, and BPStructs' XFB-copy LocateViews has mutated m_eye_views
+  // between real-frame draws and replay-frame draws.  Refreshing here would
+  // render the replay with a different pose than the real frame it pairs
+  // with, producing alternating-frame flicker on head rotation.
+  const bool is_replay = VideoCommon::OpenXROpcodeReplay::IsReplaying();
+  const bool upm_changed = std::abs(upm - m_cached_units_per_meter) > 0.0001f;
+  const bool need_refresh =
+      !is_replay && (upm_changed || !g_ActiveConfig.VRLockHeadPoseEffective() ||
+                     m_vr_pose_needs_refresh);
+  if (need_refresh)
+  {
+    std::array<std::array<float, 4>, 4> eye_projection_rows{};
+    std::array<std::array<float, 4>, 2> eye_z_rows{};
+    VR::g_openxr->GetEyeProjectionRows(upm, eye_projection_rows, eye_z_rows);
+
+    // OpenXR stereo path bypasses the classic cproj path, so apply freelook here too.
+    if (perspective && g_freelook_camera.IsActive())
+    {
+      const Common::Matrix44 freelook_view = g_freelook_camera.GetView();
+      ApplyRowTransform(&eye_projection_rows, freelook_view);
+      ApplyRowTransform(&eye_z_rows, freelook_view);
+    }
+
+    m_cached_eye_projection = eye_projection_rows;
+    m_cached_eye_z_row = eye_z_rows;
+    m_cached_units_per_meter = upm;
+
+    // Unrotated per-eye projection rows for head-locked content.
+    std::array<std::array<float, 4>, 4> head_proj_rows{};
+    VR::g_openxr->GetRawEyeProjectionRows(upm, head_proj_rows);
+    m_cached_head_projection = head_proj_rows;
+
+    // Snapshot the pose the cache was built from.  SubmitFrame will use
+    // this snapshot so render_pose == submit_pose regardless of any
+    // later LocateViews that may clobber m_eye_views before xrEndFrame.
+    VR::g_openxr->RecordRenderedEyeViews();
+
+    m_vr_cull_projection_valid = g_ActiveConfig.vr_head_cpu_cull &&
+        VR::g_openxr->GetHeadCullProjection(m_vr_cull_projection_degrees, upm,
+                                            &m_vr_cull_projection,
+                                            &m_vr_cull_effective_degrees);
+    m_vr_pose_needs_refresh = false;
+  }
+#endif
+}
+
+const float* GeometryShaderManager::GetVrCullProjection(float cone_degrees)
+{
+#ifdef ENABLE_VR
+  if (!VR::g_openxr || !VR::g_openxr->IsSessionRunning() ||
+      !VR::g_openxr->AreEyeViewsValid() || VideoCommon::OpenXROpcodeReplay::IsReplaying())
+    return nullptr;
+
+  if (m_vr_cull_projection_degrees != cone_degrees)
+  {
+    m_vr_cull_projection_degrees = cone_degrees;
+    m_vr_pose_needs_refresh = true;
+  }
+  const float upm = std::max(g_ActiveConfig.vr_units_per_meter, 0.0001f);
+  if (!m_vr_cull_projection_valid)
+    m_vr_pose_needs_refresh = true;
+  RefreshVRProjectionCache(upm, true);
+  return m_vr_cull_projection_valid ? m_vr_cull_projection[0].data() : nullptr;
+#else
+  return nullptr;
+#endif
 }
 
 void GeometryShaderManager::InvalidateVRHeadPose()

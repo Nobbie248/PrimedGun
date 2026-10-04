@@ -59,6 +59,8 @@
 #include "VideoCommon/ShaderHunter.h"
 #include "VideoCommon/TextureElementManager.h"
 #include "VideoCommon/XFStateManager.h"
+#include "VideoCommon/FreeLookCamera.h"
+#include "VideoCommon/OpenXROpcodeReplay.h"
 
 #include "Core/ConfigManager.h"
 
@@ -1114,9 +1116,16 @@ void VertexManagerBase::AddIndices(OpcodeDecoder::Primitive primitive, u32 num_v
 
 bool VertexManagerBase::AreAllVerticesCulled(VertexLoaderBase* loader,
                                              OpcodeDecoder::Primitive primitive, const u8* src,
-                                             u32 count)
+                                             u32 count, const void* projection)
 {
-  return m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count);
+  const bool culled =
+      projection == nullptr ?
+          m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count) :
+          m_cpu_cull.AreAllVerticesCulled(loader, primitive, src, count, projection,
+                                          m_vr_head_cull_frustum_only);
+  if (culled && g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_ActiveConfig.vr_head_cpu_cull)
+    m_vr_head_cull_pending = true;
+  return culled;
 }
 
 DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive primitive,
@@ -1201,6 +1210,115 @@ DataReader VertexManagerBase::DisableCullAll(u32 stride)
     ResetBuffer(stride);
   }
   return DataReader(m_cur_buffer_pointer, m_end_buffer_pointer);
+}
+
+bool VertexManagerBase::ShouldVrCullDraw(const void** projection)
+{
+#ifdef ENABLE_VR
+  *projection = nullptr;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !g_ActiveConfig.vr_head_cpu_cull ||
+      g_freelook_camera.IsActive() || VideoCommon::OpenXROpcodeReplay::IsReplaying() ||
+      !ElementsGroupManager::GetInstance().IsMetroidPrime1GCProfileActive())
+  {
+    return false;
+  }
+  // Read before the decision, not at the previous flush: menu transitions can change mid-frame.
+  RefreshPrimedGunOverlayCache();
+  if (!m_overlay_frustum_culling_enabled)
+    return false;
+  m_vr_head_cull_frustum_only = true;
+  if (std::abs(xfmem.viewport.wd) < 300.0f || std::abs(xfmem.viewport.ht) < 200.0f)
+    return false;
+
+  // The flat cinema screen (cutscenes) and the detached pause and map screens are composed
+  // without head rotation, so the stock test against the game projection is exact for every
+  // draw there and also covers the map hologram.
+  if (m_overlay_cinematic_screen_active || m_overlay_game_menu_screen_active ||
+      m_overlay_game_map_screen_active)
+  {
+    auto& system = Core::System::GetInstance();
+    auto& vs = system.GetVertexShaderManager();
+    vs.SetProjectionMatrix(system.GetXFStateManager());
+    *projection = vs.constants.projection.data();
+    return true;
+  }
+
+  if (xfmem.projection.type != ProjectionType::Perspective)
+    return false;
+
+  // World pass only. Prime's HUD, visor and menu family renders with a 4096 far plane and its gun pass
+  // with a ~3 unit one; the geometry shader re-projects those, so the head cone must not touch
+  // them. A near-zero field of view is a shadow-map pass.
+  const float* game_projection = xfmem.projection.rawProjection.data();
+  const float zfar = game_projection[4] != 0.0f ? game_projection[5] / game_projection[4] : 0.0f;
+  if (zfar > 4000.0f && zfar < 4200.0f)
+  {
+    // Desktop HUD calibration and shader overrides can move these outside the game projection.
+    return false;
+  }
+  if (!(zfar > 10.0f) || game_projection[0] <= 0.0f || game_projection[0] > 20.0f)
+    return false;
+
+  // Skybox draws omit positional offsets in the GPU projection.
+  if (g_ActiveConfig.vr_detect_skybox)
+  {
+    const u32 idx = g_main_cp_state.matrix_index_a.PosNormalMtxIdx & 0x3f;
+    const float* matrix = &xfmem.posMatrices[idx * 4];
+    if (matrix[3] == 0.0f && matrix[7] == 0.0f && matrix[11] == 0.0f)
+      return false;
+  }
+
+  *projection = Core::System::GetInstance().GetGeometryShaderManager().GetVrCullProjection(
+      m_overlay_frustum_culling_degrees);
+  return *projection != nullptr;
+#else
+  *projection = nullptr;
+  return false;
+#endif
+}
+
+void VertexManagerBase::RefreshPrimedGunOverlayCache()
+{
+#ifdef ENABLE_VR
+  const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  m_overlay_frustum_culling_enabled = overlay.frustum_culling_enabled;
+  m_overlay_frustum_culling_degrees = overlay.frustum_culling_degrees;
+  m_overlay_cinematic_screen_active = overlay.cinematic_screen_active;
+  m_overlay_game_menu_screen_active =
+      overlay.game_menu_screen_enabled && overlay.game_menu_screen_active;
+  m_overlay_game_map_screen_active =
+      overlay.game_menu_screen_enabled && overlay.game_map_screen_active;
+#endif
+}
+
+void VertexManagerBase::UpdateVrHeadCullFrame()
+{
+  const u32 culled = m_vr_head_cull_frame_culled;
+  m_vr_head_cull_frame_culled = 0;
+  m_vr_head_cull_pending = false;
+  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR)
+    return;
+  if (!g_ActiveConfig.vr_head_cpu_cull)
+  {
+    m_vr_head_cull_report_frames = 0;
+    m_vr_head_cull_report_culled = 0;
+    return;
+  }
+
+  m_vr_head_cull_report_culled += culled;
+  constexpr u32 REPORT_INTERVAL_FRAMES = 60;
+  if (++m_vr_head_cull_report_frames < REPORT_INTERVAL_FRAMES)
+    return;
+  INFO_LOG_FMT(VIDEO,
+               "VR CPU cull (cone {:.0f} deg): removed {:.0f} draw calls per frame; cinema {} "
+               "menu {} map {}",
+               Core::System::GetInstance().GetGeometryShaderManager().GetVrCullEffectiveDegrees(),
+               static_cast<float>(m_vr_head_cull_report_culled) /
+                   static_cast<float>(m_vr_head_cull_report_frames),
+               m_overlay_cinematic_screen_active, m_overlay_game_menu_screen_active,
+               m_overlay_game_map_screen_active);
+  m_vr_head_cull_report_frames = 0;
+  m_vr_head_cull_report_culled = 0;
 }
 
 void VertexManagerBase::FlushData(u32 count, u32 stride)
@@ -1411,6 +1529,10 @@ void VertexManagerBase::Flush()
     return;
 
   m_is_flushed = true;
+
+  if (m_cull_all && m_vr_head_cull_pending)
+    ++m_vr_head_cull_frame_culled;
+  m_vr_head_cull_pending = false;
 
   if (m_draw_counter == 0)
   {
@@ -2614,6 +2736,7 @@ void VertexManagerBase::OnEndFrame()
   m_metroid_prime1_thermal_context_active = m_metroid_prime1_thermal_context_seen;
   m_metroid_prime1_thermal_context_seen = false;
   m_scheduled_command_buffer_kicks.clear();
+  UpdateVrHeadCullFrame();
 
   // If we have no CPU access at all, leave everything in the one command buffer for maximum
   // parallelism between CPU/GPU, at the cost of slightly higher latency.

@@ -441,6 +441,13 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
     bool can_cpu_cull = g_ActiveConfig.bCPUCull && cpu_cull_allowed_in_vr &&
                         primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES &&
                         !g_vertex_manager->HasSendableVertices();
+    const void* cull_projection = nullptr;
+    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && g_ActiveConfig.vr_head_cpu_cull)
+    {
+      can_cpu_cull = primitive < OpcodeDecoder::Primitive::GX_DRAW_LINES &&
+                     !g_vertex_manager->HasSendableVertices() &&
+                     g_vertex_manager->ShouldVrCullDraw(&cull_projection);
+    }
 
     // if cull mode is CULL_ALL, tell VertexManager to skip triangles and quads.
     // They still need to go through vertex loading, because we need to calculate a zfreeze
@@ -462,8 +469,8 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
 
       if (can_cpu_cull && !cullall)
       {
-        const bool all_culled =
-            g_vertex_manager->AreAllVerticesCulled(loader, primitive, dst.GetPointer(), num_loaded);
+        const bool all_culled = g_vertex_manager->AreAllVerticesCulled(
+            loader, primitive, dst.GetPointer(), num_loaded, cull_projection);
         if (!all_culled)
         {
           DataReader new_dst = g_vertex_manager->DisableCullAll(stride);

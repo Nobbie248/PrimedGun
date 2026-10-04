@@ -32,6 +32,8 @@ public:
   // SetConstants() call re-fetches it from OpenXR.  Called from BPStructs at the
   // XFB-copy boundary so a single game frame's draws all see one consistent pose.
   void InvalidateVRHeadPose();
+  const float* GetVrCullProjection(float cone_degrees);
+  float GetVrCullEffectiveDegrees() const { return m_vr_cull_effective_degrees; }
 
   GeometryShaderConstants constants{};
   bool dirty = false;
@@ -88,6 +90,11 @@ private:
   std::array<std::array<float, 4>, 4> m_cached_head_projection{};
   float m_cached_units_per_meter = 0.0f;
   bool m_vr_pose_needs_refresh = true;
+  alignas(16) std::array<std::array<float, 4>, 4> m_vr_cull_projection{};
+  float m_vr_cull_projection_degrees = 115.0f;
+  float m_vr_cull_effective_degrees = 0.0f;
+  bool m_vr_cull_projection_valid = false;
+  void RefreshVRProjectionCache(float upm, bool perspective);
 
   // Shared reference depth for the headlocked perspective HUD (-3) path. Stable body layers choose
   // the next frame's anchor; all coherent draws in a frame reuse one anchor so they share one

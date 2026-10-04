@@ -379,6 +379,8 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
       new ConfigBool(tr("Don't Clear Screen"), Config::GFX_VR_DONT_CLEAR_SCREEN);
   m_disable_cpu_cull =
       new ConfigBool(tr("Disable CPU Culling in VR"), Config::GFX_VR_DISABLE_CPU_CULL);
+  m_head_cpu_cull = new ConfigBool(tr("HMD CPU Culling (Experimental)"),
+                                   Config::GFX_VR_HEAD_CPU_CULL);
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_ortho_scissor_fix =
       new ConfigBool(tr("Ortho Scissor Fix"), Config::GFX_VR_ORTHO_SCISSOR_FIX);
@@ -400,6 +402,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_lock_head_pose);
   hacks_group_layout->addWidget(m_dont_clear_screen);
   hacks_group_layout->addWidget(m_disable_cpu_cull);
+  hacks_group_layout->addWidget(m_head_cpu_cull);
   hacks_group_layout->addWidget(m_remove_bars);
   hacks_group_layout->addWidget(m_ortho_scissor_fix);
   hacks_group_layout->addWidget(m_detect_skybox);
@@ -790,6 +793,14 @@ void VRPane::AddDescriptions()
   m_head_locked_curvature->SetDescription(tr(TR_HEAD_LOCKED_CURVATURE_DESCRIPTION));
   m_dont_clear_screen->SetDescription(tr(TR_DONT_CLEAR_SCREEN_DESCRIPTION));
   m_disable_cpu_cull->SetDescription(tr(TR_DISABLE_CPU_CULL_DESCRIPTION));
+  m_head_cpu_cull->SetDescription(tr(
+      "Adds HMD-aware CPU culling for Metroid Prime world draws and projection-aware culling "
+      "for detached cinema, pause and map screens. May reduce rendering overhead."
+      "<br><br>Uses the PrimedGun culling angle with a minimum covering the headset view. "
+      "Works alongside game-side culling; disabling PrimedGun frustum culling disables this too."
+      "<br><br>Overrides the legacy CPU-culling option above while enabled. Turning this off "
+      "restores the previous behavior. Disable if geometry disappears."
+      "<br><br><dolphin_emphasis>Experimental; enabled by default.</dolphin_emphasis>"));
   m_xr_pacing_thread->SetDescription(
       tr("Runs OpenXR frame pacing on a dedicated thread so emulation does not block in "
          "xrWaitFrame. This replaces Opcode Replay while enabled."));

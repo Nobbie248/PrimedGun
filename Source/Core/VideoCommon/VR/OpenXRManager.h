@@ -231,6 +231,15 @@ public:
   void GetRawEyeProjectionRows(
       float units_per_meter,
       std::array<std::array<float, 4>, 4>& out_proj_rows) const;
+  // Symmetric perspective projection of `cone_degrees` on both axes that follows the head the
+  // same way GetEyeProjectionRows does, padded to enclose both eye origins. The
+  // cone never narrows below the rendered per-eye FOV plus a margin. Canted views are skipped.
+  // Row-major, clip = M * viewPos with
+  // w = -z_eye; only the x, y and w rows matter, the z row is eye-space depth. Used by the VR
+  // head-cone CPU cull. Returns false until eye views and the home position exist.
+  bool GetHeadCullProjection(float cone_degrees, float units_per_meter,
+                             std::array<std::array<float, 4>, 4>* out_matrix,
+                             float* out_effective_degrees = nullptr) const;
   bool GetLegacyViewMatrix(float units_per_meter, Common::Matrix44* out_view_matrix) const;
   void GetLegacyProjectionAdjustments(
       float units_per_meter, float game_projection_x_scale, float game_projection_x_offset,

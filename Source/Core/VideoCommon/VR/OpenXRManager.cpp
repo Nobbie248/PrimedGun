@@ -4,6 +4,7 @@
 #ifdef ENABLE_VR
 
 #include "VideoCommon/VR/OpenXRManager.h"
+#include "VideoCommon/VR/HeadCullProjection.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1807,6 +1808,23 @@ void OpenXRManager::GetRawEyeProjectionRows(
     out_proj_rows[eye * 2 + 0] = {p0x, 0.0f, p0z, pw0};
     out_proj_rows[eye * 2 + 1] = {0.0f, p1y, p1z, pw1};
   }
+}
+
+bool OpenXRManager::GetHeadCullProjection(float cone_degrees, float units_per_meter,
+                                          std::array<std::array<float, 4>, 4>* out_matrix,
+                                          float* out_effective_degrees) const
+{
+  if (!m_eye_views_valid || !m_home_set)
+    return false;
+  std::array<XrView, 2> views{};
+  for (size_t eye = 0; eye < views.size(); ++eye)
+  {
+    views[eye].pose = m_eye_views[eye].pose;
+    views[eye].fov = m_eye_views[eye].fov;
+  }
+  return BuildHeadCullProjection(views, m_home_position, cone_degrees, units_per_meter,
+                                 g_ActiveConfig.vr_lean_back_angle, g_ActiveConfig.vr_camera_forward,
+                                 out_matrix, out_effective_degrees);
 }
 
 bool OpenXRManager::GetLegacyViewMatrix(float units_per_meter,
