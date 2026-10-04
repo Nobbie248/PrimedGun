@@ -382,6 +382,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   m_remove_bars = new ConfigBool(tr("Remove Cinematic Bars"), Config::GFX_VR_REMOVE_BARS);
   m_ortho_scissor_fix =
       new ConfigBool(tr("Ortho Scissor Fix"), Config::GFX_VR_ORTHO_SCISSOR_FIX);
+  m_detect_skybox = new ConfigBool(tr("Detect Skybox"), Config::GFX_VR_DETECT_SKYBOX);
   m_metroid_visor_fix =
       new ConfigBool(tr("Metroid Prime Visor Fix"), Config::GFX_VR_METROID_VISOR_FIX);
   m_metroid_visor_fix->setToolTip(
@@ -401,6 +402,7 @@ VRPane::VRPane(QWidget* parent) : QWidget(parent)
   hacks_group_layout->addWidget(m_disable_cpu_cull);
   hacks_group_layout->addWidget(m_remove_bars);
   hacks_group_layout->addWidget(m_ortho_scissor_fix);
+  hacks_group_layout->addWidget(m_detect_skybox);
   hacks_group_layout->addWidget(m_metroid_visor_fix);
   hack_layout->addWidget(hacks_group);
 
@@ -710,6 +712,12 @@ void VRPane::AddDescriptions()
       "Double Dash!!."
       "<br><br>Disable this if a game needs its original orthographic scissor clipping."
       "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
+  static constexpr char TR_DETECT_SKYBOX_DESCRIPTION[] = QT_TR_NOOP(
+      "Detects skybox draws using camera-origin transforms and removes their positional/IPD "
+      "offset, making the sky appear distant rather than close to your head."
+      "<br><br>Head rotation still affects the view of the sky."
+      "<br><br>Disable this if it incorrectly affects non-sky geometry."
+      "<br><br><dolphin_emphasis>If unsure, leave this checked.</dolphin_emphasis>");
   static constexpr char TR_LOCK_HEAD_POSE_DESCRIPTION[] = QT_TR_NOOP(
       "Snaps OpenXR head-tracking updates to game-frame boundaries (XFB copies) so every draw "
       "call within a single game frame uses one consistent head pose."
@@ -795,6 +803,7 @@ void VRPane::AddDescriptions()
   m_clear_efb_slider->SetDescription(tr(TR_CLEAR_EFB_COPIES_DESCRIPTION));
   m_remove_bars->SetDescription(tr(TR_REMOVE_BARS_DESCRIPTION));
   m_ortho_scissor_fix->SetDescription(tr(TR_ORTHO_SCISSOR_FIX_DESCRIPTION));
+  m_detect_skybox->SetDescription(tr(TR_DETECT_SKYBOX_DESCRIPTION));
   m_lock_head_pose->SetDescription(tr(TR_LOCK_HEAD_POSE_DESCRIPTION));
   m_vr_gamma->SetDescription(tr(TR_VR_GAMMA_DESCRIPTION));
   m_auto_layer_spread->SetDescription(tr(TR_AUTO_LAYER_SPREAD_DESCRIPTION));
