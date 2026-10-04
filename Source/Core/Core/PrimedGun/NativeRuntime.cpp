@@ -302,6 +302,8 @@ constexpr u32 VR_MENU_RESET_TARGETING_ACTION = 2;
 constexpr u32 VR_MENU_RESET_CALIBRATION_ACTION = 3;
 constexpr u32 VR_MENU_RESET_CONTROLLER_ACTION = 4;
 constexpr u32 VR_MENU_RESET_MOVEMENT_ACTION = 5;
+// Shares the reset confirmation slot so the header button gets the same press-twice guard.
+constexpr u32 VR_MENU_EXIT_GAME_ACTION = 6;
 constexpr const char* PRIMEDGUN_CANNON_GAME_ID = "GM8E01";
 constexpr const char* PRIMEDGUN_CANNON_PACK_FOLDER = "000_PrimedGunCannon";
 constexpr const char* PRIMEDGUN_CANNON_LIBRARY_FOLDER = "PrimedGun" DIR_SEP "CannonTextures";
@@ -383,6 +385,8 @@ constexpr u32 PLAYER_VISOR_SCAN_FRAME_COLOR_IMPULSE_OFFSET = 0x550u;
 constexpr float PLAYER_VISOR_SCAN_TARGET_VALID_TIMER = 1.0f;
 constexpr u32 GP_GAME_STATE = 0x805A8C40u;
 constexpr u32 GAME_OPTIONS_HELMET_ALPHA_OFFSET = 0x17Cu + 0x64u;
+constexpr u32 SAMUS_HUD_DRAW_HELMET_ADDRESS = 0x80065DC0u;
+constexpr u32 SAMUS_HUD_DRAW_HELMET_ORIGINAL = 0x9421FFE0u;
 constexpr u64 GAMEPLAY_INPUT_LOSS_HOLD_FRAMES = 18u;
 
 bool RuntimeLoggingEnabled()
@@ -494,6 +498,7 @@ std::atomic_bool s_vr_state_save_oldest_requested{false};
 std::atomic_int s_vr_state_slot_select_requested{0};
 std::atomic_int s_vr_state_slot_from_ui{0};
 u32 s_vr_state_slot = 1;
+std::atomic_bool s_vr_exit_game_requested{false};
 u32 s_vr_state_confirm_action = 0;
 u64 s_vr_state_confirm_until_frame = 0;
 u32 s_vr_reset_confirm_action = 0;
@@ -1717,6 +1722,23 @@ void ApplyHelmetOpacityZero(const Core::CPUThreadGuard& guard, const RuntimeSett
   u32 current = 0;
   if (TryReadU32(guard, helmet_alpha_addr, &current) && current != 0)
     TryWriteU32(guard, helmet_alpha_addr, 0);
+}
+
+// Skip only the invisible helmet frame, and only overwrite the known Rev 0 prologue or our blr.
+// Restore it for menus so their draw-sequence classification remains unchanged.
+void UpdateHelmetDrawSkipPatch(Core::System& system, const Core::CPUThreadGuard& guard, bool skip)
+{
+  u32 current = 0;
+  if (!TryReadU32(guard, SAMUS_HUD_DRAW_HELMET_ADDRESS, &current) ||
+      (current != SAMUS_HUD_DRAW_HELMET_ORIGINAL && current != PPC_BLR))
+    return;
+
+  const u32 wanted = skip ? PPC_BLR : SAMUS_HUD_DRAW_HELMET_ORIGINAL;
+  if (current != wanted && TryWriteInstruction(guard, SAMUS_HUD_DRAW_HELMET_ADDRESS, wanted))
+  {
+    // Invalidate just this instruction's cache line, not the entire JIT on menu transitions.
+    system.GetJitInterface().InvalidateICache(SAMUS_HUD_DRAW_HELMET_ADDRESS & ~0x1fu, 32, true);
+  }
 }
 
 bool Normalize3(float& x, float& y, float& z)
@@ -5859,6 +5881,18 @@ void SaveVrMenuSettingsNotice()
   ++s_vr_menu_generation;
 }
 
+// Asks the host to stop emulation the normal way, so the video backend shuts down and writes
+// its shader and pipeline caches. This is the only clean exit available inside the headset:
+// on Quest the universal-menu quit just kills the process, which loses those caches.
+// The desktop host consumes this after saving settings, then stops the core normally.
+void RequestVrExitGame()
+{
+  ClearVrMenuConfirmations();
+  s_vr_settings_save_requested = true;
+  s_vr_exit_game_requested.store(true, std::memory_order_release);
+  ++s_vr_menu_generation;
+}
+
 void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
 {
   RefreshVrStateConfirmation();
@@ -5883,6 +5917,10 @@ void PublishVrOverlayState(const RuntimeSettings& settings, bool prompt_visible)
   overlay.reset_confirm_action = s_vr_reset_confirm_action;
   overlay.weapon_panel_visible = settings.vr_overlays_enabled && previous.weapon_panel_visible;
   overlay.weapon_selected_index = previous.weapon_selected_index;
+  // Owned by ShaderCache::WaitForAsyncCompiler on the video thread; keep it across republishes.
+  overlay.compile_progress_visible = previous.compile_progress_visible;
+  overlay.compile_completed = previous.compile_completed;
+  overlay.compile_total = previous.compile_total;
   overlay.weapon_panel_position = previous.weapon_panel_position;
   overlay.weapon_panel_orientation = previous.weapon_panel_orientation;
   overlay.floating_menu_pose_valid = s_vr_menu_floating_pose.valid;
@@ -6112,7 +6150,18 @@ void UpdateVrMenu(const Common::VR::OpenXRInputSnapshot& snapshot, RuntimeSettin
     {
       const float texture_x = std::clamp(pointer_x, 0.0f, 1.0f) * VR_MENU_TEXTURE_WIDTH;
       const float texture_y = std::clamp(pointer_y, 0.0f, 1.0f) * VR_MENU_TEXTURE_HEIGHT;
-      if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
+      if (pointer_active && texture_y >= 26.0f && texture_y <= 54.0f)
+      {
+        // EXIT GAME sits on the title row, to the right of the heading, so it is reachable
+        // from every tab including the Layout tab the menu opens on.
+        if (texture_x >= 752.0f && texture_x <= 972.0f)
+        {
+          if (ConfirmVrResetAction(VR_MENU_EXIT_GAME_ACTION))
+            RequestVrExitGame();
+          ++s_vr_menu_generation;
+        }
+      }
+      else if (pointer_active && texture_y >= 64.0f && texture_y <= 102.0f)
       {
         constexpr float tab_start_x = 22.0f;
         constexpr float tab_step = 166.0f;
@@ -8219,6 +8268,8 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   const RuntimeSettings settings = GetRuntimeSettings();
   if (!settings.enabled)
   {
+    if (IsMetroidPrimeRev0(guard))
+      UpdateHelmetDrawSkipPatch(system, guard, false);
     s_frame_completion_watchdog = {};
     s_frame_stall_reported = false;
     TryWriteU8(guard, SPRINGBALL_TRIGGER_SCRATCH, 0u);
@@ -8331,6 +8382,10 @@ void OnFrameEnd(Core::System& system, const Core::CPUThreadGuard& guard)
   }
 
   const bool default_controls_active = have_player && PlayerIsInMenuMapOrMorphball(guard, player);
+  UpdateHelmetDrawSkipPatch(system, guard,
+                           settings.builtin_patches_enabled && !settings.visor_helmet_enabled &&
+                               have_player && !default_controls_active &&
+                               PlayerIsFirstPersonUnmorphed(guard, player));
   if (default_controls_active)
     s_gameplay_input_hold_until_frame = 0;
 
@@ -8417,6 +8472,7 @@ bool IsOrbitLockActive()
 
 void ResetNativeRuntime()
 {
+  s_vr_exit_game_requested.store(false, std::memory_order_release);
   s_frame_completion_watchdog = {};
   s_frame_stall_reported = false;
   s_patches_applied_this_boot = false;
@@ -8685,6 +8741,11 @@ void ApplySamusArmPreset()
 void SetVrStateSlot(int slot)
 {
   s_vr_state_slot_from_ui.store(static_cast<int>(ClampVrStateSlot(slot)), std::memory_order_release);
+}
+
+bool ConsumeVrExitGameRequest()
+{
+  return s_vr_exit_game_requested.exchange(false, std::memory_order_acq_rel);
 }
 
 bool ConsumeVrSettingsSaveRequest()

@@ -2561,10 +2561,18 @@ void MainWindow::ConnectStack()
   load_primedgun_runtime_settings();
   auto* primedgun_vr_save_timer = new QTimer(this);
   connect(primedgun_vr_save_timer, &QTimer::timeout, this, [this, save_primedgun_runtime_settings] {
-    if (PrimedGun::ConsumeVrSettingsSaveRequest())
+    const bool exit_game = PrimedGun::ConsumeVrExitGameRequest();
+    if (PrimedGun::ConsumeVrSettingsSaveRequest() || exit_game)
     {
       save_primedgun_runtime_settings(PrimedGun::GetRuntimeSettings());
       PrimedGun::MarkVrSettingsSaved();
+    }
+
+    if (exit_game)
+    {
+      // The headset already confirmed twice. Stop on the host thread after persisting settings.
+      Core::Stop(m_system);
+      return;
     }
 
     PrimedGun::SetVrStateSlot(m_state_slot);
@@ -3702,7 +3710,7 @@ void MainWindow::ConnectStack()
   auto* footer = new QHBoxLayout;
   auto* reset_all = new QPushButton(tr("Reset All"), game_tab);
   auto* save_settings_button = new QPushButton(tr("Save Settings"), game_tab);
-  auto* credit = new QLabel(tr("By Nobbie   %1").arg(primedgun_version), game_tab);
+  auto* credit = new QLabel(tr("By Nobbie and iChris4   %1").arg(primedgun_version), game_tab);
   credit->setObjectName(QStringLiteral("PrimedGunMuted"));
   footer->addWidget(reset_all);
   footer->addWidget(save_settings_button);
@@ -4444,6 +4452,7 @@ void MainWindow::TogglePause()
 
 void MainWindow::OnStopComplete()
 {
+  PrimedGun::ResetNativeRuntime();
   m_stop_requested = false;
   HideRenderWidget(!m_exit_requested, m_exit_requested);
   SetFullScreenResolution(false);

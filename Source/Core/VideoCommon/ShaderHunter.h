@@ -99,7 +99,19 @@ public:
   static ShaderHunter& GetInstance();
 
   // --- Video thread ---
+  // hash is the CRC32 of the complete UID bytes; non-pixel families reuse it.
   u64 RegisterShader(ShaderType type, u64 hash, const u8* uid_data, size_t uid_size);
+  // Registers a draw's vertex, pixel and geometry shaders under one lock. Equivalent to three
+  // RegisterShader calls; the family signatures come back in the same order.
+  struct DrawShaderFamilies
+  {
+    u64 vs = 0;
+    u64 ps = 0;
+    u64 gs = 0;
+  };
+  DrawShaderFamilies RegisterDrawShaders(u64 vs_hash, const u8* vs_uid, size_t vs_uid_size,
+                                         u64 ps_hash, const u8* ps_uid, size_t ps_uid_size,
+                                         u64 gs_hash, const u8* gs_uid, size_t gs_uid_size);
   void RegisterDrawCombination(u64 vs_hash, u64 ps_hash, u64 gs_hash);
   void OnFrameEnd();
   bool ShouldSkipDraw(u64 vs_hash, u64 ps_hash, u64 gs_hash);
@@ -292,6 +304,9 @@ private:
   ShaderHunter() = default;
 
   static constexpr int TYPE_COUNT = static_cast<int>(ShaderType::Count);
+
+  u64 RegisterShaderLocked(ShaderType type, u64 hash, u64 family_signature, const u8* uid_data,
+                           size_t uid_size);
 
   mutable std::mutex m_mutex;
   bool m_enabled = false;

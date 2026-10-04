@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "Common/BitSet.h"
@@ -211,6 +212,10 @@ protected:
   Slope m_zslope = {};
 
   VideoCommon::GXPipelineUid m_current_pipeline_config;
+  // Prime override hashes use the complete UID bytes, just like ShaderUid's equality check.
+  std::optional<u64> m_current_vs_override_hash;
+  std::optional<u64> m_current_ps_override_hash;
+  std::optional<u64> m_current_gs_override_hash;
   VideoCommon::GXUberPipelineUid m_current_uber_pipeline_config;
   const AbstractPipeline* m_current_pipeline_object = nullptr;
   PrimitiveType m_current_primitive_type = PrimitiveType::Points;

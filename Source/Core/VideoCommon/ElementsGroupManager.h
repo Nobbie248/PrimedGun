@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "VideoCommon/GenerationCounterTable.h"
 #include "VideoCommon/MetroidElementClassifier.h"
 #include "VideoCommon/ShaderHunter.h"
 
@@ -198,6 +199,22 @@ public:
   float GetOverrideElementDepth(const DrawRecord& draw) const;
   float GetOverrideUnitsPerMeter(const DrawRecord& draw) const;
 
+  // Per-draw decisions resolved under a single lock. Equivalent to calling RegisterDraw,
+  // RegisterFlagsForDraw and AdvanceOverrideDrawCounters, then, when overrides are loaded,
+  // ShouldSkipByOverride, GetOverrideHandling and the layer/depth or units-per-meter query that
+  // matches the handling, in that order. The video thread makes one call per draw instead of
+  // taking the mutex for each query.
+  struct DrawResolution
+  {
+    PreviewAction preview = PreviewAction::None;
+    bool skip = false;
+    HandlingType handling = HandlingType::Skip;
+    int layer = -1;
+    float element_depth = -1.0f;
+    float units_per_meter = -1.0f;
+  };
+  DrawResolution ResolveDraw(const DrawRecord& draw);
+
 private:
   ElementsGroupManager() = default;
 
@@ -240,7 +257,15 @@ private:
   bool MatchesSelectedMatchFilterLocked(const DrawRecord& draw) const;
   bool MatchesSelectedMatchFilterSignatureLocked(const SelectedSubgroupSignature& signature) const;
   std::vector<CurrentMatchCandidate> ResolveSelectedMatchDisplayDrawsLocked() const;
-  StableSubMatchSignature GetStableSubMatchSignatureLocked(const DrawRecord& draw) const;
+  void EnsureStableSubMatchSignatureLocked(const DrawRecord& draw) const;
+  PreviewAction RegisterDrawLocked(const DrawRecord& draw);
+  void AdvanceOverrideDrawCountersLocked(const DrawRecord& draw);
+  void RegisterFlagsForDrawLocked(const DrawRecord& draw);
+  bool ShouldSkipByOverrideLocked(const DrawRecord& draw) const;
+  HandlingType GetOverrideHandlingLocked(const DrawRecord& draw) const;
+  int GetOverrideLayerLocked(const DrawRecord& draw) const;
+  float GetOverrideElementDepthLocked(const DrawRecord& draw) const;
+  float GetOverrideUnitsPerMeterLocked(const DrawRecord& draw) const;
   std::pair<int, int> ResolveElementRange(const ElementGroupOverride& entry,
                                           const DrawRecord& draw) const;
   bool DoesEntryMatchForRange(const ElementGroupOverride& entry, const DrawRecord& draw) const;
@@ -256,6 +281,7 @@ private:
   std::atomic_bool m_has_overrides = false;
   bool m_hunt_enabled = false;
   std::atomic_bool m_has_profile_overrides = false;
+  std::atomic_bool m_prime1_gc_profile_active = false;
   HuntingOption m_hunting_option = HuntingOption::Skip;
   RuntimeElementSignature m_seed_signature{};
   RuntimeElementSignature m_seed_group_signature{};
@@ -287,6 +313,7 @@ private:
   mutable std::unordered_map<CounterKey, int, CounterKeyHasher> m_draw_counters;
   mutable std::unordered_map<CounterKey, int, CounterKeyHasher> m_draw_totals_prev;
   mutable std::unordered_map<CounterKey, int, CounterKeyHasher> m_current_draw_indices;
-  mutable std::unordered_map<u64, int> m_stable_submatch_occurrence_counters;
+  // Cleared every frame; a flat generation table avoids re-allocating thousands of map nodes.
+  mutable VideoCommon::GenerationCounterTable m_stable_submatch_occurrence_counters;
   mutable StableSubMatchContext m_current_stable_submatch;
 };

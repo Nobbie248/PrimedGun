@@ -66,6 +66,7 @@ For macOS, see the [PrimedGun-Mac fork](https://github.com/gperkins345/PrimedGun
 - Click the left thumbstick to open or close the in-headset settings menu.
 - Try to stay in the centre of your play space and face forward, this mod is not roomscaled.
 - Use Save Settings after changing PrimedGun options to apply them.
+- Use Exit Game at the top right of the menu (press it twice) to leave the game. It stops the emulator cleanly and writes the shader caches. On Quest this is the only clean exit: quitting from the Meta menu kills the app before the caches are saved, so shaders recompile on every launch.
 
 ## Archipelago / MultiworldGG
 
@@ -105,8 +106,10 @@ To change bindings in Dolphin, open Dolphin Settings, go to Controllers, then ch
 ## Credits
 
 - Created by Nobbie.
+- Huge thank you to iChris4, who made Dolphin ReduX for PC and Quest, ported PrimedGun to the Quest, and early on helped fix the visor effects and ported the Metroid Prime override from the old Dolphin Hydra.
 - Thank you to the Metroid Prime modding community for the resources and research that helped make this possible.
 - Development references include the Metroid Prime decompilation project, Metaforce, and PrimeHack. Codex was used to assist with debugging, system integration, and iterative development.
-- Huge thank you to iChris4 for Dolphin ReduX development, and to the Dolphin team.
+- Thank you to the Dolphin team.
 - Thank you to the early testers: GeekyGami, Lucaspec72, TorchRing, detective_yoshi, PHA3ESH1FTGAMES, retrovideogamer, Samevi, Mochu, VideoGameEsoterica and VRified Games.
+- Thank you to budwheizzah for helping test the Quest version.
 - For further enhancements to your VR experience, join the Dolphin VR Discord: https://discord.gg/GdmffzCTrh

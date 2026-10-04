@@ -86,6 +86,7 @@ void ResetCalibrationOffsets();
 void ApplySamusArmPreset();
 void SetVrStateSlot(int slot);
 bool ConsumeVrSettingsSaveRequest();
+bool ConsumeVrExitGameRequest();
 void MarkVrSettingsSaved();
 int ConsumeVrStateSlotSelectRequest();
 bool ConsumeVrStateLoadRequest();

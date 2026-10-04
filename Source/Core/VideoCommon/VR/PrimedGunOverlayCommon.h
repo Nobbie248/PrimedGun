@@ -264,6 +264,7 @@ constexpr uint32_t RESET_TARGETING_ACTION = 2;
 constexpr uint32_t RESET_CALIBRATION_ACTION = 3;
 constexpr uint32_t RESET_CONTROLLER_ACTION = 4;
 constexpr uint32_t RESET_MOVEMENT_ACTION = 5;
+constexpr uint32_t EXIT_GAME_ACTION = 6;
 constexpr uint32_t STATE_LOAD_ACTION = 1;
 constexpr uint32_t STATE_SAVE_ACTION = 2;
 constexpr uint32_t STATE_LOAD_NEWEST_ACTION = 3;
@@ -490,6 +491,70 @@ inline std::vector<uint32_t> BuildPromptPixels(uint32_t width, uint32_t height)
   return pixels;
 }
 
+// Progress of the pre-start shader compile, drawn on the same head-locked panel as the height
+// prompt. The ImGui bar Dolphin draws for it only reaches the desktop mirror, so without this a
+// headset shows black for the whole precompile, which can be minutes on a fresh install.
+inline std::vector<uint32_t> BuildCompileProgressPixels(uint32_t width, uint32_t height,
+                                                        uint32_t completed, uint32_t total)
+{
+  std::vector<uint32_t> pixels(static_cast<size_t>(width) * height, 0);
+  const int w = static_cast<int>(width);
+  const int h = static_cast<int>(height);
+  FillRect(pixels, width, height, 0, 0, w, h, 0xD0100804u);
+  FillRect(pixels, width, height, 0, 0, w, 8, 0xE0FFB030u);
+  FillRect(pixels, width, height, 0, h - 8, w, 8, 0xE0FFB030u);
+
+  constexpr const char* title = "COMPILING SHADERS";
+  DrawText(pixels, width, height, title, (w - TextWidth(title, 5)) / 2, 60, 5, 0xFFFFD8A0u);
+
+  constexpr int bar_x = 112;
+  constexpr int bar_y = 160;
+  constexpr int bar_w = 800;
+  constexpr int bar_h = 56;
+  FillRect(pixels, width, height, bar_x - 4, bar_y - 4, bar_w + 8, bar_h + 8, 0xE0FFB030u);
+  FillRect(pixels, width, height, bar_x, bar_y, bar_w, bar_h, 0xF0201810u);
+  const uint32_t done = completed > total ? total : completed;
+  const int filled = total == 0 ? 0 : static_cast<int>(static_cast<uint64_t>(bar_w) * done / total);
+  if (filled > 0)
+    FillRect(pixels, width, height, bar_x, bar_y, filled, bar_h, 0xFFFFB030u);
+
+  const std::string count = std::to_string(done) + " / " + std::to_string(total);
+  DrawText(pixels, width, height, count.c_str(), (w - TextWidth(count.c_str(), 4)) / 2, 250, 4,
+           0xFFFFF0C8u);
+  constexpr const char* hint = "THIS CAN TAKE A FEW MINUTES ON THE FIRST LAUNCH";
+  DrawText(pixels, width, height, hint, (w - TextWidth(hint, 2)) / 2, 320, 2, 0xFFD8C0A0u);
+  return pixels;
+}
+
+// The prompt panel shows either the height prompt or the compile progress; the backends key
+// their swapchain upload on the generation, so it must change whenever the content does.
+inline bool PromptVisible(const Common::VR::PrimedGunVrOverlayState& s)
+{
+  return s.prompt_visible || s.compile_progress_visible;
+}
+
+inline uint32_t PromptGeneration(const Common::VR::PrimedGunVrOverlayState& s)
+{
+  if (!s.compile_progress_visible)
+    return 1u;
+
+  // Percent granularity: the backends rebuild the overlay swapchain on every generation change
+  // and the compiler reports progress about thirty times a second.
+  const uint32_t percent = s.compile_total == 0 ?
+                               0u :
+                               static_cast<uint32_t>(static_cast<uint64_t>(s.compile_completed) *
+                                                     100u / s.compile_total);
+  return 1000u + percent;
+}
+
+inline std::vector<uint32_t> BuildPromptPixels(uint32_t width, uint32_t height,
+                                               const Common::VR::PrimedGunVrOverlayState& s)
+{
+  if (s.compile_progress_visible)
+    return BuildCompileProgressPixels(width, height, s.compile_completed, s.compile_total);
+  return BuildPromptPixels(width, height);
+}
+
 inline void DrawLayoutTextPage(std::vector<uint32_t>& pixels, uint32_t width, uint32_t height)
 {
   constexpr uint32_t title_color = 0xFFFFE6B8u;
@@ -546,8 +611,6 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
   FillRect(pixels, width, height, 0, static_cast<int>(height) - 10, static_cast<int>(width), 10,
            0xE0FFB030u);
   DrawText(pixels, width, height, "PRIMEDGUN SETTINGS", 48, 28, 4, 0xFFFFD8A0u);
-  if (s.saved_notice)
-    DrawText(pixels, width, height, "SETTINGS SAVED", 760, 34, 2, 0xFFFFE6B8u);
 
   constexpr const char* tabs[] = {"LAYOUT",   "CALIBRATION", "CONTROL",
                                   "MOVEMENT", "TEXTURES",    "STATES"};
@@ -569,6 +632,17 @@ inline std::vector<uint32_t> BuildMenuPixels(uint32_t width, uint32_t height,
     DrawText(pixels, width, height, label, x + (w - TextWidth(label, 2)) / 2, y + 7, 2,
              0xFFFFE6B8u);
   };
+
+  // EXIT GAME sits on the title row so it is visible on every tab, including the Layout tab the
+  // menu opens on. Its hit box is in NativeRuntime.cpp, just before the tab strip test.
+  constexpr int exit_button_x = 752;
+  draw_button(s.reset_confirm_action == EXIT_GAME_ACTION ? "ARE YOU SURE?" : "EXIT GAME",
+              exit_button_x, 26, 220);
+  if (s.saved_notice)
+  {
+    DrawText(pixels, width, height, "SETTINGS SAVED",
+             exit_button_x - 16 - TextWidth("SETTINGS SAVED", 2), 34, 2, 0xFFFFE6B8u);
+  }
 
   if (s.tab == VR_MENU_LAYOUT_TAB)
   {
@@ -664,6 +738,53 @@ inline XrQuaternionf MulQuat(const XrQuaternionf& a, const XrQuaternionf& b)
           a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
           a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
           a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+// Distance and size of the compile progress panel, matching the head-locked prompt it replaces.
+constexpr float COMPILE_PANEL_DISTANCE = 1.35f;
+constexpr float COMPILE_PANEL_WIDTH = 0.675f;
+constexpr float COMPILE_PANEL_HEIGHT = 0.25f;
+
+// Places the compile progress panel in the reference space instead of locking it to the head.
+// The pose is latched from the first head pose after the panel appears and released when the
+// compile ends, so looking around during a multi-minute compile no longer drags the panel along.
+// Orientation is yaw only, like the detached menu, so the panel stays upright and level.
+//
+// Called once per frame from the backend's layer append, before its early returns, so the
+// release is never missed. The snapshot is taken here rather than by the caller because that
+// only happens on the one frame that latches. Video thread only.
+inline bool CompileProgressPanelPose(const Common::VR::PrimedGunVrOverlayState& state, XrPosef* out)
+{
+  static bool anchored = false;
+  static XrPosef anchor{};
+
+  if (!state.compile_progress_visible)
+  {
+    anchored = false;
+    return false;
+  }
+
+  if (!anchored)
+  {
+    const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+    if (!snapshot.runtime_active || !snapshot.head_pose.valid)
+      return false;
+
+    const XrQuaternionf head_orientation{
+        snapshot.head_pose.orientation[0], snapshot.head_pose.orientation[1],
+        snapshot.head_pose.orientation[2], snapshot.head_pose.orientation[3]};
+    anchor.orientation = YawOnlyQuaternion(head_orientation);
+    const XrVector3f offset =
+        RotateVector(anchor.orientation, {0.0f, 0.0f, -COMPILE_PANEL_DISTANCE});
+    anchor.position = {
+        snapshot.head_pose.position[0] + snapshot.tracking_origin_position[0] + offset.x,
+        snapshot.head_pose.position[1] + snapshot.tracking_origin_position[1] + offset.y,
+        snapshot.head_pose.position[2] + snapshot.tracking_origin_position[2] + offset.z};
+    anchored = true;
+  }
+
+  *out = anchor;
+  return true;
 }
 
 struct HybridControllerPose

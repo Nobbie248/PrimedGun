@@ -1528,7 +1528,10 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
 
   namespace PGO = PrimedGun::Overlay;
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible &&
+  // Before the early return below, so the anchor is always released when the compile ends.
+  XrPosef compile_anchor{};
+  const bool compile_anchored = PGO::CompileProgressPanelPose(overlay, &compile_anchor);
+  if (!overlay.menu_visible && !PGO::PromptVisible(overlay) && !overlay.weapon_panel_visible &&
       !overlay.position_marker_visible)
     return false;
 
@@ -1569,7 +1572,7 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
     }
   }
 
-  if (!overlay.menu_visible && !overlay.prompt_visible && !overlay.weapon_panel_visible)
+  if (!overlay.menu_visible && !PGO::PromptVisible(overlay) && !overlay.weapon_panel_visible)
     return appended_layer;
 
   const bool menu = overlay.menu_visible;
@@ -1579,10 +1582,10 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
   const uint32_t height = menu ? 512 : weapon_panel ? 512 : 384;
   const uint32_t generation = menu ? overlay.generation :
                               weapon_panel ? (100u + overlay.weapon_selected_index) :
-                                             1u;
+                                             PGO::PromptGeneration(overlay);
   const std::vector<uint32_t> pixels = menu        ? PGO::BuildMenuPixels(width, height, overlay) :
                                        weapon_panel ? PGO::BuildWeaponPanelPixels(width, height, overlay) :
-                                                      PGO::BuildPromptPixels(width, height);
+                                                      PGO::BuildPromptPixels(width, height, overlay);
   if (!EnsurePrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain, content_kind, generation,
                                        width, height, pixels))
     return appended_layer;
@@ -1647,6 +1650,11 @@ bool VulkanOpenXR::AppendPrimedGunOverlayLayers(std::vector<XrCompositionLayerBa
         overlay.weapon_panel_position[1] + snapshot.tracking_origin_position[1] + offset.y,
         overlay.weapon_panel_position[2] + snapshot.tracking_origin_position[2] + offset.z};
     m_primedgun_overlay_layer.size = {0.42f, 0.42f};
+  }
+  else if (compile_anchored)
+  {
+    m_primedgun_overlay_layer.pose = compile_anchor;
+    m_primedgun_overlay_layer.size = {PGO::COMPILE_PANEL_WIDTH, PGO::COMPILE_PANEL_HEIGHT};
   }
   else if (snapshot.head_pose.valid)
   {

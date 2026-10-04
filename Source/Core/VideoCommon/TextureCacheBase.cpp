@@ -1112,28 +1112,25 @@ static u64 ParseXXH64FromTextureName(const std::string& name)
   return std::strtoull(hex.c_str(), nullptr, 16);
 }
 
+void TCacheEntry::SetTextureInfoName(std::string name)
+{
+  m_texture_name_hash = ParseXXH64FromTextureName(name);
+  m_texture_info_name = std::move(name);
+}
+
 u64 TextureCacheBase::GetBoundTextureHash(u32 stage) const
 {
   if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
     return 0;
 
-  // Return the XXH64 hash from the texture dump name if available (matches dump filenames).
-  // Fall back to internal hash if name is empty or unparseable.
-  const auto& name = m_bound_textures[stage]->texture_info_name;
-  if (!name.empty())
-  {
-    const u64 xxh = ParseXXH64FromTextureName(name);
-    if (xxh != 0)
-      return xxh;
-  }
-  return m_bound_textures[stage]->hash;
+  return m_bound_textures[stage]->GetOverrideHash();
 }
 
 std::string TextureCacheBase::GetBoundTextureName(u32 stage) const
 {
   if (stage >= m_bound_textures.size() || !m_bound_textures[stage])
     return {};
-  return m_bound_textures[stage]->texture_info_name;
+  return m_bound_textures[stage]->GetTextureInfoName();
 }
 
 bool TextureCacheBase::IsBoundTextureEfbCopy(u32 stage) const
@@ -1421,15 +1418,15 @@ TCacheEntry* TextureCacheBase::LoadImpl(u32 stage, bool force_reload)
     return nullptr;
 
   entry->frameCount = FRAMECOUNT_INVALID;
-  if (entry->texture_info_name.empty())
+  if (entry->GetTextureInfoName().empty())
   {
-    entry->texture_info_name = texture_info.CalculateTextureName().GetFullName();
+    entry->SetTextureInfoName(texture_info.CalculateTextureName().GetFullName());
 
     if (g_ActiveConfig.bGraphicMods)
     {
-      GraphicsModActionData::TextureLoad texture_load{entry->texture_info_name};
+      GraphicsModActionData::TextureLoad texture_load{entry->GetTextureInfoName()};
       for (const auto& action :
-           g_graphics_mod_manager->GetTextureLoadActions(entry->texture_info_name))
+           g_graphics_mod_manager->GetTextureLoadActions(entry->GetTextureInfoName()))
       {
         action->OnTextureLoad(&texture_load);
       }
@@ -1744,7 +1741,7 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
                          has_arbitrary_mipmaps, skip_texture_dump);
   entry->hires_texture = std::move(hires_texture);
   entry->last_load_time = load_time;
-  entry->texture_info_name = std::move(texture_name);
+  entry->SetTextureInfoName(std::move(texture_name));
   return entry;
 }
 
@@ -2023,7 +2020,7 @@ RcTcacheEntry TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height
     const std::string id = fmt::format("{}x{}", width, height);
     if (g_ActiveConfig.bGraphicMods)
     {
-      entry->texture_info_name = fmt::format("{}_{}", XFB_DUMP_PREFIX, id);
+      entry->SetTextureInfoName(fmt::format("{}_{}", XFB_DUMP_PREFIX, id));
     }
 
     if (g_ActiveConfig.bDumpXFBTarget)
@@ -2493,7 +2490,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(
         const std::string id = fmt::format("{}x{}", tex_w, tex_h);
         if (g_ActiveConfig.bGraphicMods)
         {
-          entry->texture_info_name = fmt::format("{}_{}", XFB_DUMP_PREFIX, id);
+          entry->SetTextureInfoName(fmt::format("{}_{}", XFB_DUMP_PREFIX, id));
         }
 
         if (g_ActiveConfig.bDumpXFBTarget)
@@ -2509,7 +2506,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(
         const std::string id = fmt::format("{}x{}_{}", tex_w, tex_h, static_cast<int>(baseFormat));
         if (g_ActiveConfig.bGraphicMods)
         {
-          entry->texture_info_name = fmt::format("{}_{}", EFB_DUMP_PREFIX, id);
+          entry->SetTextureInfoName(fmt::format("{}_{}", EFB_DUMP_PREFIX, id));
         }
 
         if (g_ActiveConfig.bDumpEFBTarget)
