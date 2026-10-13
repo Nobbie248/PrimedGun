@@ -1,3 +1,4 @@
 # Known false positives of frame/tools/privacy-check.sh: PATH_REGEX<TAB>TEXT_REGEX.
 # Text matching TEXT_REGEX on a line of a file whose path matches PATH_REGEX is
 # blanked before that line is scanned.  Nothing personal belongs in this file.
+^frame/test-installer\.sh$	192\.168\.1\.20

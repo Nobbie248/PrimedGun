@@ -213,7 +213,7 @@ check "run directly (no %command%): the app's own binary" has "$PRIMEFRAME_HOME/
 
 # ---- collect-logs.sh masks what it should ----
 mkdir -p "$W/logs"; export PRIMEFRAME_LOG_DIR=$W/logs
-printf 'host user /home/someone/x 192.168.1.20 aa:bb:cc:dd:ee:01 me@example.org\n' >> "$PRIMEFRAME_HOME/sessions/latest/launch.log"
+printf 'host user /home/someone/x 192.0.2.20 aa:bb:cc:dd:ee:01 me@example.org\n' >> "$PRIMEFRAME_HOME/sessions/latest/launch.log"
 mkdir -p "$PRIMEFRAME_HOME/user/Config"; printf '[Analytics]\nID = 0123456789abcdef0123456789abcdef\n' > "$PRIMEFRAME_HOME/user/Config/Dolphin.ini"
 "$HERE/collect-logs.sh" > "$W/collect.out" 2>&1
 TB=$(ls "$W/logs"/primeframe-logs-*.tar.gz 2> /dev/null | head -1)

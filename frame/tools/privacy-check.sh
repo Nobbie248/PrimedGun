@@ -1,10 +1,16 @@
 #!/bin/bash
 # Looks for personal data before anything is published. GPLv3 (adapted from
 # Moonlight XR Native's tools/privacy-check.sh).
-#   tools/privacy-check.sh              the tracked files (git ls-files), third_party/ excluded
-#   tools/privacy-check.sh --history    the lines every commit on the current branch added, and
-#                                       the commits' authors, committers and messages
-#   tools/privacy-check.sh DIR|TAR      every file under DIR, or inside a release tarball
+#   privacy-check.sh              our own additions: the files changed or added on this branch since
+#                                 upstream (git diff --name-only main...HEAD) plus every tracked file
+#                                 under frame/ and our three docs, plus the README, licence and notice
+#                                 files. Upstream Dolphin has about 1100 author e-mails and MAC
+#                                 addresses in its own code; they are out of scope.
+#   privacy-check.sh --history    the lines every commit after main (main is upstream v1.1.7) added,
+#                                 and those commits' authors, committers and messages
+#   privacy-check.sh DIR|TAR      every file under DIR, or inside a release tarball, except upstream's
+#                                 Sys/ data (skipped by path, see SKIP_TREES below)
+# PF_BASE=REF changes the upstream reference (default main).
 # Prints each finding (never the matched text itself) and exits 1 when there is one.
 #
 # Built-in checks (generic, safe to keep in the repository): access tokens and
@@ -30,12 +36,17 @@ PAT="${PF_PRIVACY_PATTERNS:-${MLXR_PRIVACY_PATTERNS:-$HOME/.config/moonlight-xr-
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 MODE=files
 if [ $# -eq 0 ]; then
-    git ls-files -z | grep -zv -e '^third_party/' > "$TMP/list"
+    BASEREF=${PF_BASE:-main}
+    { git diff --name-only -z --diff-filter=d "$BASEREF"...HEAD
+      git ls-files -z -- frame docs/RELEASE_NOTES_v1.0.0.md docs/CHANGELOG.md docs/TECHNICAL_NOTES.md README.md README.upstream.md THIRD-PARTY-NOTICES.md COPYING; } |
+        tr '\0' '\n' | sort -u | tr '\n' '\0' | grep -zv -e '^third_party/' -e '^Externals/' > "$TMP/list"
+    # a file listed but missing in the work tree (deleted, submodule) is skipped by the scanner
     BASE=.
 elif [ "$1" = "--history" ]; then
     MODE=history; BASE=.
-    git log --format='@@@%H%n%an <%ae>%n%cn <%ce>%n%B%n@@@END' > "$TMP/meta"
-    git log -p -U0 --no-color --no-ext-diff --format='@@@COMMIT %H' > "$TMP/diffs"
+    RANGE=${PF_BASE:-main}..HEAD
+    git log --format='@@@%H%n%an <%ae>%n%cn <%ce>%n%B%n@@@END' "$RANGE" > "$TMP/meta"
+    git log -p -U0 --no-color --no-ext-diff --format='@@@COMMIT %H' "$RANGE" > "$TMP/diffs"
     : > "$TMP/list"
 elif [ -f "$1" ]; then
     mkdir "$TMP/x" && tar -xf "$1" -C "$TMP/x" || { echo "cannot unpack $1"; exit 2; }
@@ -94,6 +105,8 @@ def report(where, hits):
         found += 1
         print("  %s: %s" % (where, h))   # never the matched value itself
 SKIP = ("third_party/",)
+# Upstream's own data inside a release tarball or directory scan, allowed by path (never by pattern).
+SKIP_TREES = ("Sys/",) if mode == "files" else ()
 allow = []
 ap = os.path.join("frame", "tools", "privacy-allow.txt")   # the script runs from the repository root
 if os.path.isfile(ap):
@@ -133,10 +146,12 @@ if mode == "history":
         report("commit %s %s" % (commit, path), scan(clean(path, line[1:]), "", generic))
     print("privacy-check: %d commits, %d added lines" % (n, added))
 else:
-    nfiles = 0
+    nfiles = 0; skipped = 0
     for f in files:
         rel = f.decode("utf-8", "replace")
         if rel.startswith("./"): rel = rel[2:]
+        if rel.startswith(SKIP_TREES):
+            skipped += 1; continue
         p = os.path.join(base, rel)
         try: data = open(p, "rb").read()
         except OSError: continue
@@ -147,7 +162,7 @@ else:
             text = data.decode("utf-8", "replace"); checks = generic
         for n, line in enumerate(text.splitlines(), 1):
             report("%s:%d" % (rel, n), scan(clean(rel, line), "", checks))
-    print("privacy-check: %d files" % nfiles)
+    print("privacy-check: %d files scanned, %d skipped by path (%s)" % (nfiles, skipped, ", ".join(SKIP_TREES) or "none"))
 print("privacy-check: %d finding(s)" % found)
 sys.exit(1 if found else 0)
 PY
