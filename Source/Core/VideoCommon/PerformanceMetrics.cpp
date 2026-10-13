@@ -80,6 +80,12 @@ void PerformanceMetrics::CountPerformanceMarker(s64 core_ticks, u32 ticks_per_se
   m_max_speed.store(elapsed_core_time / (work_time - oldest.work_time), std::memory_order_relaxed);
 }
 
+void PerformanceMetrics::UpdateCounters()
+{
+  m_fps_counter.UpdateStats();
+  m_vps_counter.UpdateStats();
+}
+
 double PerformanceMetrics::GetFPS() const
 {
   return m_fps_counter.GetHzAvg();

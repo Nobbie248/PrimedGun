@@ -40,6 +40,9 @@ public:
   // Getter Functions. May be called from any thread.
   double GetFPS() const;
   double GetVPS() const;
+  // Folds the counted frames into GetFPS()/GetVPS(); the OSD does it when it is drawn. Call from
+  // one thread only (the GPU thread).
+  void UpdateCounters();
   double GetSpeed() const;
   double GetMaxSpeed() const;
 

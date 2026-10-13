@@ -29,6 +29,7 @@
 #include "VideoBackends/Vulkan/StateTracker.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoCommon/PerformanceMetrics.h"
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/VR/OpenXRManager.h"
@@ -203,6 +204,34 @@ uint64_t ElapsedUs(uint64_t start_us, uint64_t end_us)
 
   return end_us - start_us;
 }
+
+#if !defined(ANDROID)
+// One INFO line a second (OpenXR log category) with the numbers the pacing work is judged by:
+// eye sets submitted, the time SubmitFrame spent draining the GPU (PRIMEDGUN_XR_WAIT_GPU=1;
+// 0 when off), the eye size and the game's own frame and vblank rates.
+void NoteSubmittedFrame(uint64_t drain_us, uint32_t width, uint32_t height)
+{
+  static uint64_t window_start_us = 0, drain_sum_us = 0, drain_max_us = 0;
+  static uint32_t frames = 0;
+  const uint64_t now_us = Common::Timer::NowUs();
+  if (window_start_us == 0)
+    window_start_us = now_us;
+  frames++;
+  drain_sum_us += drain_us;
+  drain_max_us = std::max(drain_max_us, drain_us);
+  if (now_us - window_start_us < 1000000)
+    return;
+  g_perf_metrics.UpdateCounters();
+  INFO_LOG_FMT(OPENXR,
+               "XRSTATS submitted={} drain_avg_ms={:.2f} drain_max_ms={:.2f} eye={}x{} "
+               "game_fps={:.1f} game_vps={:.1f}",
+               frames, drain_sum_us / 1000.0 / frames, drain_max_us / 1000.0, width, height,
+               g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
+  window_start_us = now_us;
+  drain_sum_us = drain_max_us = 0;
+  frames = 0;
+}
+#endif
 
 static void AppendOptionalOpenXRExtensions(std::vector<const char*>* extensions)
 {
@@ -2049,7 +2078,10 @@ bool VulkanOpenXR::SubmitFrame()
         s_force_wait_for_completion ||
         (!g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
          VR::g_openxr->IsQuestOrVirtualDesktopRuntime());
+    const uint64_t drain_start_us = Common::Timer::NowUs();
     g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
+    NoteSubmittedFrame(wait_for_completion ? ElapsedUs(drain_start_us, Common::Timer::NowUs()) : 0,
+                       m_eye_swapchains[0].width, m_eye_swapchains[0].height);
     StateTracker::GetInstance()->InvalidateCachedState();
 
     const uint64_t perf_release_start_us = Common::Timer::NowUs();
