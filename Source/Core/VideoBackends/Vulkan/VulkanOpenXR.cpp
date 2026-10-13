@@ -2855,6 +2855,10 @@ bool VulkanOpenXR::LocateNextFramePose()
     {
       m_slack_frames = 0;
     }
+    // Never a single refresh after the previous set while the game runs at most ~80 fps
+    // (a 1-refresh hold is a 3:1 or 1:3 judder): two refreshes at least.
+    const int64_t min_step = interval_ms * 1e6 >= 1.5 * period ? 2 : 1;
+    target = std::max(target, m_last_target + min_step * period);
   }
   m_last_target = target;
   m_target_time = target;
