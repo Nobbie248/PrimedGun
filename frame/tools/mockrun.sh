@@ -19,6 +19,16 @@
 #   --platform P  dolphin-nogui window platform (default x11, in the private Xvfb; headless never presents VR frames)
 #   --tag NAME    suffix of the run directory
 #   --stacks N    debugging: list the game threads (ps -L: cpu, state, wait channel; ptrace is not available) in threads.txt after N s
+#   --eye N       MOCK_XR_EYE=NxN (the eye image size the mock recommends; default 1728)
+#   --sysmem      TU_DEBUG=sysmem (Turnip renders straight to memory instead of tiling through GMEM)
+#   --tudebug V   TU_DEBUG=V (any Turnip debug flags, e.g. gmem); overrides --sysmem
+#   --set F:S.K=V edit the scratch user dir after seeding (repeatable): F is GFX, Dolphin or a game
+#                 ini (GM8E01), S the section, K the key, V the value; the key is replaced or added.
+#                 A game ini value wins over GFX.ini (InternalResolution, ShaderCompilationMode live there)
+#   --clocklog    log the GPU clock (devfreq), its thermal cap, GPU and CPU temperatures and CPU clocks
+#                 once a second to clock.log in the run dir, and summarise them over the window
+#   --cool C      before the game starts, wait (up to 10 min) until every GPU thermal zone is below C
+#                 degrees Celsius, so runs start from the same temperature
 #
 # Environment: MOCK_XR_* settings of xrmock (MOCK_XR_HZ default 120, MOCK_XR_EYE default 1728x1728,
 # MOCK_XR_BUSY_MS default 4: the exact released-unfinished check, MOCK_XR_SKIP default late: a late
@@ -43,6 +53,7 @@ if [ -z "${PF_MOCKRUN_LOCKED:-}" ]; then
   PF_MOCKRUN_LOCKED=1 exec flock "$LOCK" "$0" "$@"
 fi
 STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=x11; TAG=""; STACKS=""; PACING=""; NOWAIT=0; WINDOW=0
+EYE=""; TUDEBUG=""; SETS=(); CLOCKLOG=0; COOL=""
 EXE=${PF_BUILD:-$REPO/build-linux}/Binaries/dolphin-nogui
 while [ $# -gt 0 ]; do
   case $1 in
@@ -58,6 +69,12 @@ while [ $# -gt 0 ]; do
     --platform) PLATFORM=$2; shift ;;
     --tag) TAG=$2; shift ;;
     --stacks) STACKS=$2; shift ;;
+    --eye) EYE=$2; shift ;;
+    --sysmem) TUDEBUG=${TUDEBUG:-sysmem} ;;
+    --tudebug) TUDEBUG=$2; shift ;;
+    --set) SETS+=("$2"); shift ;;
+    --clocklog) CLOCKLOG=1 ;;
+    --cool) COOL=$2; shift ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -95,6 +112,32 @@ cp -r "$SRC_USER/Config" "$SRC_USER/GameSettings" "$USERDIR/"
 [ -d "$USERDIR/GC" ] || cp -r "$SRC_USER/GC" "$USERDIR/"
 [ -d "$USERDIR/StateSaves" ] || cp -r "$SRC_USER/StateSaves" "$USERDIR/"
 sed -i '/^ID *=/d' "$USERDIR/Config/Dolphin.ini"
+# --set: per-run ini edits (GFX, Dolphin -> Config/<F>.ini, anything else -> GameSettings/<F>.ini).
+for SET in ${SETS[@]+"${SETS[@]}"}; do
+  F=${SET%%:*}; KV=${SET#*:}
+  case $F in GFX|Dolphin) INI=$USERDIR/Config/$F.ini ;; *) INI=$USERDIR/GameSettings/$F.ini ;; esac
+  python3 -I - "$INI" "$KV" <<'PY2' || die "bad --set $SET"
+import os, re, sys
+path, kv = sys.argv[1], sys.argv[2]
+sk, val = kv.split("=", 1); sec, key = sk.split(".", 1)
+lines = open(path).read().splitlines() if os.path.exists(path) else []
+out, cur, done, seen = [], None, False, False
+for l in lines:
+    m = re.match(r"\s*\[(.+)\]\s*$", l)
+    if m:
+        if cur == sec and not done: out.append(f"{key} = {val}"); done = True
+        cur = m.group(1); seen = seen or cur == sec
+    elif cur == sec and re.match(r"\s*" + re.escape(key) + r"\s*=", l):
+        if not done: out.append(f"{key} = {val}"); done = True
+        continue
+    out.append(l)
+if not done:
+    if not seen: out.append(f"[{sec}]")
+    out.append(f"{key} = {val}")
+open(path, "w").write("\n".join(out) + "\n")
+PY2
+  echo "set: $SET" >> "$RUN/sets.txt"
+done
 # Dolphin's own log file: the OpenXR and Video categories at INFO level (the statistics line, the
 # OpenXR setup), Core for the state load.
 mkdir -p "$USERDIR/Logs"
@@ -147,6 +190,18 @@ export XR_RUNTIME_JSON=$MOCK_DIR/runtime.json
 LIBPATH=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime"]["library_path"])' "$XR_RUNTIME_JSON")
 [ -s "$LIBPATH" ] || die "mock runtime library missing or empty: $LIBPATH"
 TOTAL=$((SECS + WARMUP))
+[ -n "$EYE" ] && export MOCK_XR_EYE=${EYE}x${EYE}
+[ -n "$TUDEBUG" ] && export TU_DEBUG=$TUDEBUG
+# --cool: the GPU clock comes down when it is hot; start every run from the same temperature.
+GPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q "^gpuss" "$z/type" 2>/dev/null && echo "$z/temp"; done; true)
+CPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q "^cpu[0-9]" "$z/type" 2>/dev/null && echo "$z/temp"; done; true)
+maxtemp() { cat $1 2>/dev/null | sort -n | tail -1; }
+if [ -n "$COOL" ] && [ -n "$GPU_ZONES" ]; then
+  for _ in $(seq 60); do
+    T=$(maxtemp "$GPU_ZONES"); [ "$T" -lt $((COOL * 1000)) ] && break
+    echo "mockrun: GPU at $((T / 1000)) C, cooling to $COOL C" >&2; sleep 10
+  done
+fi
 export MOCK_XR_SECONDS=${MOCK_XR_SECONDS:-$TOTAL}
 export MOCK_XR_HZ=${MOCK_XR_HZ:-120}
 export MOCK_XR_BUSY_MS=${MOCK_XR_BUSY_MS:-4}
@@ -161,12 +216,37 @@ CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Au
 {
   echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
   echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
+  echo "TU_DEBUG: ${TU_DEBUG:-unset}${GPU_ZONES:+  gpu temp at start: $(( $(maxtemp "$GPU_ZONES") / 1000 )) C}"
+  [ ! -s "$RUN/sets.txt" ] || cat "$RUN/sets.txt"
 } | tee "$RUN/info.txt"
 echo "mockrun: run dir $RUN"
 set +e
 LOG=$RUN/stdout.log
 "${CMD[@]}" > "$LOG" 2>&1 &
 PID=$!
+# --clocklog: one line a second, Dolphin's log clock (MM:SS:mmm) first so it can be joined with XRSTATS.
+CLOCKPID=""
+if [ $CLOCKLOG = 1 ]; then
+  GDF=$(ls -d /sys/class/devfreq/*.gpu 2>/dev/null | head -1)
+  GCD=$(grep -l "devfreq-$(basename "${GDF:-none}")" /sys/class/thermal/cooling_device*/type 2>/dev/null | head -1)
+  # gpu_avg_mhz: mean GPU clock over the last second from devfreq's time in each state (the governor
+  # lowers the clock when the GPU is not saturated, and busy time per frame grows with it).
+  ( PREV=""
+    while kill -0 $PID 2>/dev/null; do
+      CUR=$(awk '/^[ *]*[0-9]+:/{gsub(/[*:]/,""); printf "%d:%s ", $1/1000000, $NF}' "$GDF/trans_stat" 2>/dev/null)
+      AVG=$(awk -v a="$PREV" -v b="$CUR" 'BEGIN{n=split(a,x," "); split(b,y," "); s=0; w=0
+            for(i=1;i<=n;i++){split(x[i],p,":"); split(y[i],q,":"); d=q[2]-p[2]; s+=d*q[1]; w+=d}
+            if(w>0) printf "%.0f", s/w; else printf "0"}')
+      PREV=$CUR
+      printf '%s gpu_mhz=%d gpu_avg_mhz=%s gpu_cap_mhz=%d gpu_cdev=%s gpu_c=%.1f cpu_c=%.1f cpu_mhz=%s\n' "$(date +%M:%S:%3N)" \
+        $(( $(cat "$GDF/cur_freq" 2>/dev/null || echo 0) / 1000000 )) "$AVG" $(( $(cat "$GDF/max_freq" 2>/dev/null || echo 0) / 1000000 )) \
+        "$(cat "$(dirname "${GCD:-/x}")/cur_state" 2>/dev/null || echo -)" \
+        "$(maxtemp "$GPU_ZONES")e-3" "$(maxtemp "$CPU_ZONES")e-3" \
+        "$(for p in /sys/devices/system/cpu/cpufreq/policy*; do printf '%d,' $(( $(cat $p/scaling_cur_freq) / 1000 )); done)"
+      sleep 1
+    done ) > "$RUN/clock.log" 2>/dev/null &
+  CLOCKPID=$!
+fi
 # The mock ends the XR session after MOCK_XR_SECONDS; the game is stopped shortly after.
 ( sleep $((MOCK_XR_SECONDS + 40)); kill -TERM $PID 2>/dev/null; sleep 15; kill -KILL $PID 2>/dev/null ) &
 WATCH=$!
@@ -192,6 +272,7 @@ while kill -0 $PID 2>/dev/null; do
 done
 wait $PID; RC=$?
 kill $WATCH 2>/dev/null
+[ -n "$CLOCKPID" ] && kill $CLOCKPID 2>/dev/null
 if [ -n "$INVALID" ]; then
   echo "mockrun: INVALID run, headset in use ($(cat "$INUSE" 2>/dev/null)); the game was stopped" | tee "$RUN/result.txt" >&2
   exit 3
@@ -209,12 +290,13 @@ echo "== session states (mock events the game polled)"
 NAMES=(0 IDLE READY SYNCHRONIZED VISIBLE FOCUSED STOPPING LOSS_PENDING EXITING)
 for s in $(grep -a 'event sessionState=' "$RUN/mock.trace" | sed 's/.*sessionState=//' | tr '\n' ' '); do printf '%s ' "${NAMES[$s]:-$s}"; done; echo
 echo "== statistics (XRSTATS, first $SECS seconds)"
-python3 -I - "$DL" "$SECS" <<'PY'
-import re, statistics, sys
-rows = []
+python3 -I - "$DL" "$SECS" "$RUN/clock.log" <<'PY'
+import os, re, statistics, sys
+rows, stamps = [], []
 for line in open(sys.argv[1], errors="replace"):
     if "XRSTATS" in line:
         rows.append({k: v for k, v in re.findall(r"(\w+)=(\S+)", line)})
+        stamps.append(line.split()[0])
 rows = rows[:int(sys.argv[2])]
 if not rows:
     print("no XRSTATS lines"); sys.exit()
@@ -233,6 +315,16 @@ print("steady (after 10 s): submitted_per_s avg=%.1f min=%d | game_fps avg=%.1f 
       % (statistics.mean(f("submitted", steady)), min(f("submitted", steady)), statistics.mean(f("game_fps", steady)),
          min(f("game_fps", steady)), avg("gpu_ms", steady), avg("late", steady)))
 print("slow seconds (submitted < 90%% of the median): %d, worst %d submitted" % (len(slow), min(sub)))
+# --clocklog: the samples inside the measured window (Dolphin's MM:SS:mmm clock, wraps each hour).
+if os.path.exists(sys.argv[3]) and stamps:
+    sec = lambda t: int(t.split(":")[0]) * 60 + int(t.split(":")[1])
+    a, b = sec(stamps[0]), sec(stamps[len(rows) - 1])
+    inwin = lambda t: (a <= t <= b) if a <= b else (t >= a or t <= b)
+    cl = [dict(re.findall(r"(\w+)=(\S+)", l)) for l in open(sys.argv[3]) if l[:2].isdigit() and inwin(sec(l.split()[0]))]
+    g = lambda k: [float(x[k]) for x in cl if k in x]
+    if cl:
+        print("clock (window, %d samples): gpu_avg_mhz avg=%.0f min=%.0f | gpu_cap_mhz min=%.0f | gpu_c max=%.1f | cpu_c max=%.1f"
+              % (len(cl), statistics.mean(g("gpu_avg_mhz") or g("gpu_mhz")), min(g("gpu_avg_mhz") or g("gpu_mhz")), min(g("gpu_cap_mhz")), max(g("gpu_c")), max(g("cpu_c"))))
 PY
 echo "== stall file: $([ -s "$RUN/PrimedGunFrameStall.txt" ] && echo "WRITTEN (the frame-completion watchdog paused the game)" || echo none)"
 } | tee "$RUN/result.txt"
