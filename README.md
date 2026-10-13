@@ -114,9 +114,15 @@ See the [technical notes](docs/TECHNICAL_NOTES.md) and [frame/DEV.md](frame/DEV.
 
 ## Support
 
-PrimeFrame exists because of Nobbie's PrimedGun. If you want to support someone, support Nobbie first: star and follow [PrimedGun](https://github.com/Nobbie248/PrimedGun), report what you find there, and send improvements upstream.
+PrimeFrame exists because of the people who made PrimedGun and the VR builds of Dolphin it grew from. If you want to support someone, support them first:
 
-If you would like more Steam Frame ports, you can also [buy me a coffee](https://ko-fi.com/sana748653). It pays for the Claude API credits these ports are built with, spent as carefully as I can.
+- Nobbie made [PrimedGun](https://github.com/Nobbie248/PrimedGun). I could not find a donation page, so star and follow the project, report what you find there, and send improvements upstream.
+- iChris4 made Dolphin ReduX, the VR build of Dolphin that PrimedGun is based on, and ported PrimedGun to the Quest. You can [sponsor iChris4 on GitHub](https://github.com/sponsors/iChris4).
+- The Dolphin team builds the emulator all of this runs on. Their site, [dolphin-emu.org](https://dolphin-emu.org), is the place to follow and help them.
+
+The credits below name everyone else.
+
+If you would like more Steam Frame ports, you can also [buy me a coffee](https://ko-fi.com/sana748653). That link is only for my Steam Frame work. It pays for the Claude API credits these ports are built with, spent as carefully as I can.
 
 ## Credits
 
