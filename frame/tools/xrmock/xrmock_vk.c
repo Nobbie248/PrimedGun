@@ -1,6 +1,8 @@
-// Mock OpenXR runtime, Vulkan side (xrmock_gfx.h): XR_KHR_vulkan_enable2.
-// The instance and device are made with the app's own vkGetInstanceProcAddr
-// (no libvulkan link); swapchain images are VkImages on the app's device.
+// Mock OpenXR runtime, Vulkan side (xrmock_gfx.h): XR_KHR_vulkan_enable2 and XR_KHR_vulkan_enable.
+// With enable2 the instance and device are made with the app's own vkGetInstanceProcAddr
+// (no libvulkan link); with enable (v1) the app makes them itself and hands them over in the
+// session's graphics binding (the loader's vkGetInstanceProcAddr is found with dlsym).
+// Swapchain images are VkImages on the app's device.
 // At each release the mock checks that the GPU had finished the app's work
 // (SteamVR on the Frame shows a released image at once, finished or not):
 // it waits for the app's queue to go idle and reports a release that had to
@@ -8,6 +10,7 @@
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #define XR_USE_GRAPHICS_API_VULKAN
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,18 +42,37 @@ static int gImageCount = 0;
 #define DEV(name) ((PFN_##name)gGdpa(gDevice, #name))
 #define INST(name) ((PFN_##name)gGipa(gInstance, #name))
 
+// XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR and ..._VULKAN2_KHR are one type value and one layout.
 static int ownsBinding(XrStructureType t) { return t == XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR; }
+
+static int gV1 = 0;  // the app made its own instance and device (XR_KHR_vulkan_enable)
+
+// With enable (v1) nothing passed the app's loader entry point to the mock: take it from the
+// loader already in the process (the app's own libvulkan).
+static void ensureGipa(void) {
+    if (gGipa) return;
+    void* h = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_NOLOAD);
+    if (!h) h = dlopen("libvulkan.so.1", RTLD_NOW);
+    if (h) gGipa = (PFN_vkGetInstanceProcAddr)dlsym(h, "vkGetInstanceProcAddr");
+}
 
 static int describeBinding(const XrBaseInStructure* n, char* out, size_t cap) {
     const XrGraphicsBindingVulkan2KHR* b = (const XrGraphicsBindingVulkan2KHR*)n;
+    if (!gDevice && b->device) {  // enable (v1): the app's own handles
+        gV1 = 1;
+        ensureGipa();
+        gInstance = b->instance;
+        gPhys = b->physicalDevice;
+        gDevice = b->device;
+    }
     int ok = b->instance == gInstance && b->physicalDevice == gPhys && b->device == gDevice;
     if (gDevice && b->device == gDevice) {
         gGdpa = (PFN_vkGetDeviceProcAddr)gGipa(gInstance, "vkGetDeviceProcAddr");
         DEV(vkGetDeviceQueue)(gDevice, b->queueFamilyIndex, b->queueIndex, &gQueue);
         gQueueFamily = b->queueFamilyIndex;
     }
-    return snprintf(out, cap, "binding=VULKAN2 handles=%s queueFamily=%u queueIndex=%u", ok ? "made-by-runtime" : "FOREIGN", b->queueFamilyIndex,
-                    b->queueIndex);
+    return snprintf(out, cap, "binding=VULKAN%s handles=%s queueFamily=%u queueIndex=%u", gV1 ? "(v1)" : "2", ok ? (gV1 ? "app-created" : "made-by-runtime") : "FOREIGN",
+                    b->queueFamilyIndex, b->queueIndex);
 }
 
 static XrResult XRAPI_CALL vkRequirements(XrInstance i, XrSystemId s, XrGraphicsRequirementsVulkanKHR* r) {
@@ -96,11 +118,61 @@ static XrResult XRAPI_CALL vkCreateDeviceXr(XrInstance i, const XrVulkanDeviceCr
     return XR_SUCCESS;
 }
 
+// XR_KHR_vulkan_enable (v1). The app asks before it has a Vulkan instance, so the extension
+// lists are fixed strings (MOCK_XR_VK_INSTANCE_EXTS / MOCK_XR_VK_DEVICE_EXTS replace them; the
+// defaults are the usual SteamVR set, not read from a Frame).
+static XrResult stringOut(const char* s, uint32_t cap, uint32_t* count, char* buf) {
+    uint32_t n = (uint32_t)strlen(s) + 1;
+    *count = n;
+    if (cap == 0) return XR_SUCCESS;
+    if (cap < n) return XR_ERROR_SIZE_INSUFFICIENT;
+    memcpy(buf, s, n);
+    return XR_SUCCESS;
+}
+
+static XrResult XRAPI_CALL vk1Requirements(XrInstance i, XrSystemId s, XrGraphicsRequirementsVulkanKHR* r) {
+    return vkRequirements(i, s, r);
+}
+
+static XrResult XRAPI_CALL vk1InstanceExts(XrInstance i, XrSystemId s, uint32_t cap, uint32_t* count, char* buf) {
+    (void)i;
+    (void)s;
+    const char* e = getenv("MOCK_XR_VK_INSTANCE_EXTS");
+    return stringOut(e ? e : "VK_KHR_external_memory_capabilities VK_KHR_get_physical_device_properties2", cap, count, buf);
+}
+
+static XrResult XRAPI_CALL vk1DeviceExts(XrInstance i, XrSystemId s, uint32_t cap, uint32_t* count, char* buf) {
+    (void)i;
+    (void)s;
+    const char* e = getenv("MOCK_XR_VK_DEVICE_EXTS");
+    return stringOut(e ? e : "VK_KHR_external_memory VK_KHR_external_memory_fd VK_KHR_dedicated_allocation VK_KHR_get_memory_requirements2", cap, count, buf);
+}
+
+// The physical device of the app's instance (the first one; the mock's system has one GPU).
+static XrResult XRAPI_CALL vk1GraphicsDevice(XrInstance i, XrSystemId s, VkInstance vki, VkPhysicalDevice* out) {
+    (void)i;
+    (void)s;
+    ensureGipa();
+    if (!gGipa || !vki) return XR_ERROR_VALIDATION_FAILURE;
+    PFN_vkEnumeratePhysicalDevices en = (PFN_vkEnumeratePhysicalDevices)gGipa(vki, "vkEnumeratePhysicalDevices");
+    uint32_t n = 1;
+    VkPhysicalDevice d = VK_NULL_HANDLE;
+    VkResult r = en(vki, &n, &d);
+    if ((r != VK_SUCCESS && r != VK_INCOMPLETE) || !d) return XR_ERROR_RUNTIME_FAILURE;
+    gInstance = vki;
+    gPhys = *out = d;
+    return XR_SUCCESS;
+}
+
 static PFN_xrVoidFunction getProc(const char* name) {
     if (!strcmp(name, "xrGetVulkanGraphicsRequirements2KHR")) return (PFN_xrVoidFunction)vkRequirements;
     if (!strcmp(name, "xrCreateVulkanInstanceKHR")) return (PFN_xrVoidFunction)vkCreateInstanceXr;
     if (!strcmp(name, "xrGetVulkanGraphicsDevice2KHR")) return (PFN_xrVoidFunction)vkGetDevice;
     if (!strcmp(name, "xrCreateVulkanDeviceKHR")) return (PFN_xrVoidFunction)vkCreateDeviceXr;
+    if (!strcmp(name, "xrGetVulkanGraphicsRequirementsKHR")) return (PFN_xrVoidFunction)vk1Requirements;
+    if (!strcmp(name, "xrGetVulkanInstanceExtensionsKHR")) return (PFN_xrVoidFunction)vk1InstanceExts;
+    if (!strcmp(name, "xrGetVulkanDeviceExtensionsKHR")) return (PFN_xrVoidFunction)vk1DeviceExts;
+    if (!strcmp(name, "xrGetVulkanGraphicsDeviceKHR")) return (PFN_xrVoidFunction)vk1GraphicsDevice;
     return NULL;
 }
 
@@ -155,6 +227,8 @@ static void* createImages(int64_t format, uint64_t usage, int width, int height,
         ci.tiling = VK_IMAGE_TILING_OPTIMAL;
         ci.usage = u;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        // The app makes views of the linear sibling of an sRGB format.
+        if (usage & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT) ci.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
         if (DEV(vkCreateImage)(gDevice, &ci, NULL, &images[i]) != VK_SUCCESS) {
             fprintf(stderr, "xrmock: vkCreateImage failed\n");
             continue;
@@ -220,9 +294,11 @@ static void* createImages(int64_t format, uint64_t usage, int width, int height,
             VkImageMemoryBarrier b;
             memset(&b, 0, sizeof(b));
             b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.dstAccessMask = depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            // Images without attachment usage (the sampled quad layers) cannot be put in an attachment layout.
+            int attach = depth || (u & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+            b.dstAccessMask = depth ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT : attach ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : VK_ACCESS_SHADER_READ_BIT;
             b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            b.newLayout = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            b.newLayout = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : attach ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image = images[i];
             b.subresourceRange.aspectMask = depth ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT;

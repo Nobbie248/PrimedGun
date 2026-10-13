@@ -148,6 +148,12 @@ static XrResult XRAPI_CALL mCreateInstance(const XrInstanceCreateInfo* ci, XrIns
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++) {
         strcat(line, " ");
         strcat(line, ci->enabledExtensionNames[i]);
+        int offered = 0;
+        for (int k = 0; k < gExtCount; k++) offered |= !strcmp(gExtNames[k], ci->enabledExtensionNames[i]);
+        if (!offered) {
+            fprintf(stderr, "xrmock: refused xrCreateInstance: extension %s is not offered\n", ci->enabledExtensionNames[i]);
+            return XR_ERROR_EXTENSION_NOT_PRESENT;
+        }
     }
     trace("createInstance extensions:%s", line);
     *out = (XrInstance)(uintptr_t)1;
@@ -877,7 +883,7 @@ static void init(void) {
         for (char* tok = strtok(copy, ","); tok && gExtCount < 64; tok = strtok(NULL, ",")) strcpy(gExtNames[gExtCount++], tok);
         free(copy);
     } else {
-        const char* exts[] = {"XR_KHR_opengl_es_enable", "XR_MNDX_egl_enable", "XR_KHR_vulkan_enable2", "XR_FB_display_refresh_rate",
+        const char* exts[] = {"XR_KHR_opengl_es_enable", "XR_MNDX_egl_enable", "XR_KHR_vulkan_enable2", "XR_KHR_vulkan_enable", "XR_FB_display_refresh_rate",
                               "XR_EXT_performance_settings", "XR_VALVE_frame_controller_interaction", "XR_KHR_composition_layer_depth", "XR_EXT_eye_gaze_interaction",
                               "XR_KHR_convert_timespec_time"};
         for (unsigned i = 0; i < sizeof(exts) / sizeof(exts[0]); i++) strcpy(gExtNames[gExtCount++], exts[i]);
