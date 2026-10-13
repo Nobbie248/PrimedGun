@@ -2,7 +2,7 @@
 # Runs the game against the mock OpenXR runtime (xrmock), headless: no window, no sound.
 #
 #   frame/tools/mockrun.sh [--state N] [--seconds N] [--warmup N] [--drain] [--validate]
-#                          [--exe PATH] [--platform headless|x11] [--tag NAME]
+#                          [--exe PATH] [--platform x11|headless] [--tag NAME]
 #
 #   --state N     load StateSaves/GM8E01.sNN (01 or 02) at boot (default: none, the game's title)
 #   --seconds N   length of the measured window: the first N one-second XRSTATS lines, counted
@@ -12,8 +12,9 @@
 #   --drain       PRIMEDGUN_XR_WAIT_GPU=1 (the GPU drain before the eye images are released)
 #   --validate    VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation (needs the layer installed for the user)
 #   --exe PATH    the dolphin-nogui binary (default <repo>/build-linux/Binaries/dolphin-nogui)
-#   --platform P  dolphin-nogui window platform (default headless; x11 draws into the private Xvfb)
+#   --platform P  dolphin-nogui window platform (default x11, in the private Xvfb; headless never presents VR frames)
 #   --tag NAME    suffix of the run directory
+#   --stacks N    debugging: list the game threads (ps -L: cpu, state, wait channel; ptrace is not available) in threads.txt after N s
 #
 # Environment: MOCK_XR_* settings of xrmock (MOCK_XR_HZ default 120, MOCK_XR_EYE default 1728x1728,
 # MOCK_XR_BUSY_MS default 4: the exact released-unfinished check), PF_MOCKRUN_HOME (scratch,
@@ -36,7 +37,7 @@ if [ -z "${PF_MOCKRUN_LOCKED:-}" ]; then
   mkdir -p "$(dirname "$LOCK")"
   PF_MOCKRUN_LOCKED=1 exec flock "$LOCK" "$0" "$@"
 fi
-STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=headless; TAG=""
+STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=x11; TAG=""; STACKS=""
 EXE=${PF_BUILD:-$REPO/build-linux}/Binaries/dolphin-nogui
 while [ $# -gt 0 ]; do
   case $1 in
@@ -48,6 +49,7 @@ while [ $# -gt 0 ]; do
     --exe) EXE=$2; shift ;;
     --platform) PLATFORM=$2; shift ;;
     --tag) TAG=$2; shift ;;
+    --stacks) STACKS=$2; shift ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -101,7 +103,8 @@ if [ -n "$STATE" ]; then
   STATE_ARGS=(-s "$SF")
 fi
 
-# Headless: a private virtual X server (for libraries that want a display), nothing audible.
+# Headless: a private virtual X server, nothing audible. The game window (platform x11) lives in it:
+# Dolphin's own headless platform never reaches the VR present path (Presenter::Present returns early).
 unset WAYLAND_DISPLAY
 XVFB_DISPLAY_FILE=$RUN/xvfb.display; : > "$XVFB_DISPLAY_FILE"
 Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp 3>"$XVFB_DISPLAY_FILE" >"$RUN/xvfb.log" 2>&1 &
@@ -110,6 +113,12 @@ trap 'kill $XVFB_PID 2>/dev/null' EXIT
 for _ in $(seq 50); do [ -s "$XVFB_DISPLAY_FILE" ] && break; sleep 0.2; done
 [ -s "$XVFB_DISPLAY_FILE" ] || die "Xvfb did not start (see $RUN/xvfb.log)"
 export DISPLAY=:$(head -1 "$XVFB_DISPLAY_FILE")
+# Valve's gamescope WSI layer (implicit, enabled by the desktop session) needs Xwayland and breaks
+# swapchains on a plain Xvfb.
+unset ENABLE_GAMESCOPE_WSI GAMESCOPE_WAYLAND_DISPLAY
+export DISABLE_GAMESCOPE_WSI=1
+# Xvfb has no DRI3: Mesa presents through plain X requests (host copy) with this.
+export MESA_VK_WSI_DEBUG=${MESA_VK_WSI_DEBUG:-sw}
 export SDL_AUDIODRIVER=dummy SDL_AUDIO_DRIVER=dummy
 # The loader looks for the validation layer under XDG_DATA_HOME.
 if [ $VALIDATE = 1 ]; then
@@ -145,6 +154,23 @@ PID=$!
 # The mock ends the XR session after MOCK_XR_SECONDS; the game is stopped shortly after.
 ( sleep $((MOCK_XR_SECONDS + 40)); kill -TERM $PID 2>/dev/null; sleep 15; kill -KILL $PID 2>/dev/null ) &
 WATCH=$!
+# (thread list for hang hunting)
+T0=$SECONDS; ENDED=""; TERMED=""; TERM2=""
+while kill -0 $PID 2>/dev/null; do
+  if [ -n "$STACKS" ] && [ ! -e "$RUN/threads.txt" ] && [ $((SECONDS - T0)) -ge "$STACKS" ]; then
+    { ps -L -o tid,comm,pcpu,stat,wchan:32 -p $PID; sleep 2; ps -L -o tid,comm,pcpu,stat,wchan:32 -p $PID; } > "$RUN/threads.txt" 2>&1
+  fi
+  # The mock ended the XR session: stop the game soon after (it would only fail to acquire images).
+  if [ -z "$ENDED" ] && grep -aq 'endSession' "$RUN/mock.trace" 2>/dev/null; then ENDED=$SECONDS; fi
+  if [ -n "$ENDED" ] && [ -z "$TERMED" ] && [ $((SECONDS - ENDED)) -ge 2 ]; then
+    kill -TERM $PID 2>/dev/null; TERMED=$SECONDS
+  fi
+  # A second SIGTERM makes Dolphin stop at once (its first one asks nicely); the game has not always
+  # exited on the first (it hung after "OpenXR Vulkan: Shut down").
+  if [ -n "$TERMED" ] && [ $((SECONDS - TERMED)) -ge 5 ] && [ -z "$TERM2" ]; then kill -TERM $PID 2>/dev/null; TERM2=1; fi
+  if [ -n "$TERMED" ] && [ $((SECONDS - TERMED)) -ge 15 ]; then kill -KILL $PID 2>/dev/null; fi
+  sleep 0.5
+done
 wait $PID; RC=$?
 kill $WATCH 2>/dev/null
 echo "mockrun: game stopped (exit $RC)"
