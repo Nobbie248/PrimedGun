@@ -227,7 +227,7 @@ else
         APPID=$($CEF "(async () => { const id = await SteamClient.Apps.AddShortcut('$NAME', '$EXE', '$APP', ''); SteamClient.Apps.SetShortcutName(id, '$NAME'); return id; })()")
         echo "added the '$NAME' shortcut (appid $APPID)"
     fi
-    $CEF "(() => { SteamClient.Apps.SetShortcutLaunchOptions($APPID, '$LAUNCH'); return 1; })()" > /dev/null
+    $CEF "(() => { SteamClient.Apps.SetShortcutLaunchOptions($APPID, '$LAUNCH'); SteamClient.Apps.SetShortcutIsVR($APPID, true); return 1; })()" > /dev/null
     GRID=$(ls -d "$STEAM"/userdata/*/config 2> /dev/null | head -1)/grid
 fi
 
