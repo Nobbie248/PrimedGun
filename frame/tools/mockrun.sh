@@ -186,14 +186,28 @@ echo "== session states (mock events the game polled)"
 NAMES=(0 IDLE READY SYNCHRONIZED VISIBLE FOCUSED STOPPING LOSS_PENDING EXITING)
 for s in $(grep -a 'event sessionState=' "$RUN/mock.trace" | sed 's/.*sessionState=//' | tr '\n' ' '); do printf '%s ' "${NAMES[$s]:-$s}"; done; echo
 echo "== statistics (XRSTATS, first $SECS seconds)"
-grep -a 'XRSTATS' "$DL" | head -n "$SECS" | awk '
-  { for (i=1;i<=NF;i++) { split($i,kv,"="); v[kv[1]]=kv[2] }
-    n++; sub_s+=v["submitted"]; if (n==1||v["submitted"]<sub_min) sub_min=v["submitted"]
-    fps_s+=v["game_fps"]; if (n==1||v["game_fps"]<fps_min) fps_min=v["game_fps"]
-    vps_s+=v["game_vps"]; d_s+=v["drain_avg_ms"]; if (v["drain_max_ms"]>d_max) d_max=v["drain_max_ms"]; eye=v["eye"] }
-  END { if (!n) { print "no XRSTATS lines"; exit }
-        printf "seconds=%d submitted_per_s_avg=%.1f submitted_per_s_min=%d game_fps_avg=%.1f game_fps_min=%.1f game_vps_avg=%.1f drain_avg_ms=%.2f drain_max_ms=%.2f eye=%s\n",
-               n, sub_s/n, sub_min, fps_s/n, fps_min, vps_s/n, d_s/n, d_max, eye }'
+python3 -I - "$DL" "$SECS" <<'PY'
+import re, statistics, sys
+rows = []
+for line in open(sys.argv[1], errors="replace"):
+    if "XRSTATS" in line:
+        rows.append({k: v for k, v in re.findall(r"(\w+)=(\S+)", line)})
+rows = rows[:int(sys.argv[2])]
+if not rows:
+    print("no XRSTATS lines"); sys.exit()
+f = lambda k, r=rows: [float(x[k]) for x in r]
+sub, fps, vps = f("submitted"), f("game_fps"), f("game_vps")
+med = statistics.median(sub)
+slow = [x for x in sub if x < 0.9 * med]
+steady = rows[10:] or rows
+print("seconds=%d submitted_per_s avg=%.1f min=%d median=%.0f | game_fps avg=%.1f min=%.1f | game_vps avg=%.1f | drain_ms avg=%.2f max=%.2f | eye=%s"
+      % (len(rows), statistics.mean(sub), min(sub), med, statistics.mean(fps), min(fps), statistics.mean(vps),
+         statistics.mean(f("drain_avg_ms")), max(f("drain_max_ms")), rows[0]["eye"]))
+print("steady (after 10 s): submitted_per_s avg=%.1f min=%d | game_fps avg=%.1f min=%.1f | drain_ms avg=%.2f"
+      % (statistics.mean(f("submitted", steady)), min(f("submitted", steady)), statistics.mean(f("game_fps", steady)),
+         min(f("game_fps", steady)), statistics.mean(f("drain_avg_ms", steady))))
+print("slow seconds (submitted < 90%% of the median): %d, worst %d submitted" % (len(slow), min(sub)))
+PY
 echo "== stall file: $([ -s "$RUN/PrimedGunFrameStall.txt" ] && echo "WRITTEN (the frame-completion watchdog paused the game)" || echo none)"
 } | tee "$RUN/result.txt"
 
