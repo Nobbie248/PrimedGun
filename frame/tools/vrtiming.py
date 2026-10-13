@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# GalaxyFrame: SteamVR's compositor frame timing, a line a
+# SteamVR's compositor frame timing, a line a
 # second, for whatever app has the scene (IVRCompositor::GetFrameTimings and
 # GetCumulativeStats through ctypes).  Read-only: it connects as a background
 # app and changes nothing.  The game's own log counts the frames it was late
 # for (shown twice, missed refreshes); this shows what the compositor did with
 # the frames it got (reused, mispresented, dropped, reprojected), and the
-# compositor's GPU time.  tools/session-report.py reads both logs.
+# compositor's GPU time.  The session report reads both logs.
 # Usage: env -u LD_LIBRARY_PATH python3 -I vrtiming.py SECONDS [out.txt]
 # the wrapper runs it for the length of a session into
-# ~/.local/share/GalaxyFrame/vrtiming.log (GQ_VRTIMING=0 turns that off).
+# the session directory (PF_VRTIMING=0 turns that off).
 # Origin: tools/vrtiming.py of Moonlight XR Native (GPLv3).
 import ctypes, os, sys, time
 

@@ -19,14 +19,14 @@
 # LAN addresses, host names, other user names) must not be written into the
 # repository, not even as search patterns. Put them, one case-insensitive
 # extended regular expression per line, in a file outside it:
-#   GQ_PRIVACY_PATTERNS=FILE
+#   PF_PRIVACY_PATTERNS=FILE
 # The default is ~/.config/moonlight-xr-privacy-patterns.txt, the list the
 # Moonlight XR Native checker reads, so one list serves both projects
 # (MLXR_PRIVACY_PATTERNS names another).  Without a list only the generic
 # checks run, and the script says so.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-PAT="${GQ_PRIVACY_PATTERNS:-${MLXR_PRIVACY_PATTERNS:-$HOME/.config/moonlight-xr-privacy-patterns.txt}}"
+PAT="${PF_PRIVACY_PATTERNS:-${MLXR_PRIVACY_PATTERNS:-$HOME/.config/moonlight-xr-privacy-patterns.txt}}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 MODE=files
 if [ $# -eq 0 ]; then
