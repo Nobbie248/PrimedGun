@@ -58,8 +58,10 @@ ShaderHostConfig ShaderHostConfig::GetCurrent()
 std::string GetDiskShaderCacheFileName(APIType api_type, const char* type, bool include_gameid,
                                        bool include_host_config, bool include_api)
 {
+  // CreateFullPath, not CreateDir: the NoGUI build never runs UICommon::CreateDirectories, so the
+  // Cache/ folder above Shaders/ may not exist yet, and then no shader cache was ever written.
   if (!File::Exists(File::GetUserPath(D_SHADERCACHE_IDX)))
-    File::CreateDir(File::GetUserPath(D_SHADERCACHE_IDX));
+    File::CreateFullPath(File::GetUserPath(D_SHADERCACHE_IDX));
 
   std::string filename = File::GetUserPath(D_SHADERCACHE_IDX);
   if (include_api)
