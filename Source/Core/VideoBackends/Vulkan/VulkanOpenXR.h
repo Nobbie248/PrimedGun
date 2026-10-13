@@ -7,10 +7,13 @@
 
 #include <atomic>
 #include <array>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 // VulkanLoader.h must come first — it defines VK_NO_PROTOTYPES before vulkan.h.
@@ -159,6 +162,11 @@ public:
   bool SubmitFrame() override;
   bool SupportsDetachedFrameLoop() const override { return false; }
 
+  // PrimeFrame pacing (PRIMEFRAME_PACING=pipelined|inline|drain, see frame/PACING.md).
+  bool UsesPipelinedPacing() const override { return m_pacing == Pacing::Pipelined; }
+  bool SkipsWindowPresent() const override { return m_skip_window_present; }
+  bool LocateNextFramePose() override;
+
   uint32_t GetEyeWidth() const override
   {
     return m_use_layered_swapchain ? m_layered_swapchain.width : m_eye_swapchains[0].width;
@@ -171,6 +179,48 @@ public:
   const XRVkEyeSwapchain& GetEyeSwapchain(uint32_t eye) const { return m_eye_swapchains[eye]; }
 
 private:
+  enum class Pacing
+  {
+    Pipelined,  // two eye sets; a pacing thread releases each set after its fence and ends it
+    Inline,     // one set; fence wait right before the release, same frame
+    Drain,      // one set; the submit waits for the GPU (PRIMEDGUN_XR_WAIT_GPU=1)
+  };
+
+  // One eye set handed from the video thread to the pacing thread.
+  struct XRFrameItem
+  {
+    uint64_t id = 0;
+    uint32_t set = 0;
+    XrTime target = 0;  // the display time its pose was located for
+    std::array<bool, 2> eye_acquired{};
+    bool released = false;  // PRIMEFRAME_NO_GPU_WAIT: released by the video thread at once
+    bool views_valid = false;
+    bool cinematic = false;
+    XrCompositionLayerFlags layer_flags = 0;
+    std::array<XrCompositionLayerProjectionView, 2> views{};
+    XrCompositionLayerQuad cinematic_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    std::vector<XrCompositionLayerQuad> quads;
+    VkFence fence = VK_NULL_HANDLE;
+    bool complete = false;
+    int64_t submit_ns = 0;
+  };
+
+  std::array<XRVkEyeSwapchain, 2>& EyeSet(uint32_t set)
+  {
+    return set == 0 ? m_eye_swapchains : m_eye_swapchains_b;
+  }
+  VkFence TakeFence();
+  void ReturnFence(VkFence fence);
+  bool SubmitFramePipelined();
+  bool ReleaseItem(XRFrameItem& item, bool wait_gpu);
+  void PacerLoop();
+  void StartPacer();
+  void StopPacer();
+  void ReleaseCompletedItems(bool block);
+  void NoteLayerEnd(bool fresh, bool late);
+  void NoteGpuWait(uint64_t wait_us, bool waited);
+  void EmitStats();
+
   struct PendingXRFrame
   {
     XrTime display_time = 0;
@@ -207,6 +257,48 @@ private:
   void FinalizePendingXRFrame(PendingXRFrame frame);
 
   std::array<XRVkEyeSwapchain, 2> m_eye_swapchains{};
+  // Second eye set (pipelined pacing: one waited, unreleased image per swapchain).
+  std::array<XRVkEyeSwapchain, 2> m_eye_swapchains_b{};
+  uint32_t m_set_count = 1;
+
+  Pacing m_pacing = Pacing::Pipelined;
+  bool m_no_gpu_wait = false;
+  bool m_skip_window_present = true;
+
+  // Video thread side of the pipelined pacing.
+  uint32_t m_next_set = 0;
+  uint32_t m_frame_set = 0;
+  bool m_frame_set_chosen = false;
+  uint64_t m_frame_id = 0;
+  XrTime m_target_time = 0;
+  XrTime m_last_target = 0;
+  int64_t m_locate_ns = 0;
+  int64_t m_last_submit_ns = 0;
+  double m_span_ema_ms = 0.0;
+  double m_interval_ema_ms = 0.0;
+  int m_slack_frames = 0;
+
+  // Shared with the pacing thread.
+  std::mutex m_pacer_mutex;
+  std::condition_variable m_pacer_cv;
+  std::deque<XRFrameItem> m_pending;
+  std::array<bool, 2> m_set_in_flight{};
+  bool m_video_waiting_for_set = false;
+  std::vector<VkFence> m_free_fences;
+  std::vector<VkFence> m_all_fences;
+  std::thread m_pacer;
+  std::atomic<bool> m_pacer_exit{false};
+  std::atomic<double> m_gpu_tail_ema_ms{2.0};
+
+  // Per-second statistics (XRSTATS), written by either thread.
+  std::mutex m_stats_mutex;
+  struct Stats
+  {
+    uint64_t window_start_us = 0;
+    uint32_t fresh = 0, layers = 0, late = 0, gpu_waits = 0, set_waits = 0;
+    uint64_t gpu_wait_max_us = 0, drain_sum_us = 0, drain_max_us = 0;
+    uint64_t gpu_busy_ns = 0;
+  } m_stats;
   XRVkLayeredSwapchain m_layered_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_overlay_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_position_marker_swapchain{};

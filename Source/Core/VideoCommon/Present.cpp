@@ -1129,7 +1129,22 @@ void Presenter::PrepareNextOpenXRFrame()
     return;
   }
 
-  if (VR::g_openxr->IsFrameThreadActive())
+  VR::IOpenXRSwapchain* const swapchain = VR::g_openxr->GetSwapchain();
+  if (swapchain && swapchain->UsesPipelinedPacing())
+  {
+    // The backend's pacing thread owns the frame protocol; the pose for the next game frame is
+    // located for the refresh it is expected to be shown on.
+    if (VR::g_openxr->IsSessionRunning() && VR::g_openxr->ShouldRender() &&
+        swapchain->LocateNextFramePose())
+    {
+      auto& geometry_shader_manager = Core::System::GetInstance().GetGeometryShaderManager();
+      geometry_shader_manager.SetProjectionChanged();
+      if (!g_ActiveConfig.VRLockHeadPoseEffective())
+        geometry_shader_manager.InvalidateVRHeadPose();
+    }
+    m_openxr_frame_prepared = false;
+  }
+  else if (VR::g_openxr->IsFrameThreadActive())
   {
     // The pacing thread owns the OpenXR frame protocol. Refresh the pose here so
     // the next game frame, rather than the frame just presented, uses it.
@@ -1252,14 +1267,26 @@ void Presenter::Present(PresentInfo* present_info)
   const bool vr_pacing_active =
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
       VR::g_openxr->IsFrameThreadActive();
+  // PrimeFrame pipelined pacing (Vulkan): the backend's pacing thread owns the OpenXR frame
+  // protocol; this thread renders the eyes, hands them over and locates the next pose.
+  VR::IOpenXRSwapchain* const vr_swapchain =
+      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr ?
+          VR::g_openxr->GetSwapchain() :
+          nullptr;
+  const bool vr_pipelined = vr_swapchain && vr_swapchain->UsesPipelinedPacing();
   bool vr_frame_started =
-      vr_pacing_active ? VR::g_openxr->IsSessionRunning() : m_openxr_frame_prepared;
-  if (!vr_pacing_active && !vr_frame_started &&
+      vr_pacing_active || vr_pipelined ? VR::g_openxr->IsSessionRunning() :
+                                         m_openxr_frame_prepared;
+  if (!vr_pacing_active && !vr_pipelined && !vr_frame_started &&
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
   {
     vr_frame_started = StartOpenXRFrameNow();
     m_openxr_frame_prepared = vr_frame_started;
   }
+  // Nobody sees the desktop window in the headset: while the session runs the eyes are the only
+  // output (no mirror blits, no window present; PRIMEFRAME_WINDOW_PRESENT=1 keeps it).
+  const bool vr_skip_window =
+      vr_frame_started && !vr_pacing_active && vr_swapchain && vr_swapchain->SkipsWindowPresent();
   const bool vr_skip_duplicate_publish =
       vr_frame_started && present_info != nullptr &&
       present_info->reason == PresentInfo::PresentReason::VideoInterfaceDuplicate &&
@@ -1267,7 +1294,14 @@ void Presenter::Present(PresentInfo* present_info)
 #endif
 
   g_gfx->BeginUtilityDrawing();
+#ifdef ENABLE_VR
+  const bool backbuffer_bound =
+      !vr_skip_window && g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
+  if (vr_skip_window && m_xfb_entry)
+    BlitCurrentSourceToOpenXREyes(m_xfb_entry->texture.get(), m_xfb_rect);
+#else
   const bool backbuffer_bound = g_gfx->BindBackbuffer({{0.0f, 0.0f, 0.0f, 1.0f}});
+#endif
 
   // Render the XFB to the screen.
   if (backbuffer_bound && m_xfb_entry)
@@ -1309,7 +1343,13 @@ void Presenter::Present(PresentInfo* present_info)
       present_info->present_time_accuracy = PresentInfo::PresentTimeAccuracy::PresentInProgress;
     }
 
+#ifdef ENABLE_VR
+    // Skipped: SubmitFrame submits the frame's work and advances the frame resources instead.
+    if (!vr_skip_window)
+      g_gfx->PresentBackbuffer();
+#else
     g_gfx->PresentBackbuffer();
+#endif
   }
 
 #ifdef ENABLE_VR

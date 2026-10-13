@@ -10,6 +10,10 @@
 #   --warmup N    extra seconds of session before the window can start (boot, state load);
 #                 the mock ends the session after N + warmup seconds (default 30)
 #   --drain       PRIMEDGUN_XR_WAIT_GPU=1 (the GPU drain before the eye images are released)
+#   --pacing M    PRIMEFRAME_PACING=pipelined|inline|drain (default: the game's default, pipelined)
+#   --nowait      PRIMEFRAME_NO_GPU_WAIT=1: release with no GPU wait at all (the negative test:
+#                 the mock's release check must fail)
+#   --window      PRIMEFRAME_WINDOW_PRESENT=1: keep the desktop window present while in VR
 #   --validate    VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation (needs the layer installed for the user)
 #   --exe PATH    the dolphin-nogui binary (default <repo>/build-linux/Binaries/dolphin-nogui)
 #   --platform P  dolphin-nogui window platform (default x11, in the private Xvfb; headless never presents VR frames)
@@ -17,7 +21,8 @@
 #   --stacks N    debugging: list the game threads (ps -L: cpu, state, wait channel; ptrace is not available) in threads.txt after N s
 #
 # Environment: MOCK_XR_* settings of xrmock (MOCK_XR_HZ default 120, MOCK_XR_EYE default 1728x1728,
-# MOCK_XR_BUSY_MS default 4: the exact released-unfinished check), PF_MOCKRUN_HOME (scratch,
+# MOCK_XR_BUSY_MS default 4: the exact released-unfinished check, MOCK_XR_SKIP default late: a late
+# xrWaitFrame returns at once with the running refresh, as SteamVR on the Frame), PF_MOCKRUN_HOME (scratch,
 # default ~/.cache/pf-mockrun), PF_BUILD (build dir), PF_XRMOCK_DIR (where the mock is built;
 # default one per checkout under ~/.cache/pf-xrmock), PF_ROM (the Metroid Prime image).
 # The scratch user dir (PF_MOCKRUN_HOME/user) is seeded by copying Config/, GameSettings/, GC/
@@ -37,7 +42,7 @@ if [ -z "${PF_MOCKRUN_LOCKED:-}" ]; then
   mkdir -p "$(dirname "$LOCK")"
   PF_MOCKRUN_LOCKED=1 exec flock "$LOCK" "$0" "$@"
 fi
-STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=x11; TAG=""; STACKS=""
+STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=x11; TAG=""; STACKS=""; PACING=""; NOWAIT=0; WINDOW=0
 EXE=${PF_BUILD:-$REPO/build-linux}/Binaries/dolphin-nogui
 while [ $# -gt 0 ]; do
   case $1 in
@@ -45,6 +50,9 @@ while [ $# -gt 0 ]; do
     --seconds) SECS=$2; shift ;;
     --warmup) WARMUP=$2; shift ;;
     --drain) DRAIN=1 ;;
+    --pacing) PACING=$2; shift ;;
+    --nowait) NOWAIT=1 ;;
+    --window) WINDOW=1 ;;
     --validate) VALIDATE=1 ;;
     --exe) EXE=$2; shift ;;
     --platform) PLATFORM=$2; shift ;;
@@ -55,6 +63,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 die() { echo "mockrun: $*" >&2; exit 1; }
+# The owner plays other games on this Frame: every game wrapper writes ~/.cache/headset-in-use
+# ("<name> <pid>") while it runs. Never measure next to that.
+INUSE=$HOME/.cache/headset-in-use
+headset_in_use() { [ -f "$INUSE" ] && kill -0 "$(awk '{print $2}' "$INUSE" 2>/dev/null)" 2>/dev/null; }
+while headset_in_use; do echo "mockrun: headset in use ($(cat "$INUSE")), waiting" >&2; sleep 60; done
 [ -x "$EXE" ] || die "no game binary at $EXE"
 ROM=${PF_ROM:-$HOME/Documents/Roms/gc/Metroid Prime (USA).rvz}
 [ -f "$ROM" ] || die "no game image at $ROM"
@@ -138,12 +151,16 @@ export MOCK_XR_SECONDS=${MOCK_XR_SECONDS:-$TOTAL}
 export MOCK_XR_HZ=${MOCK_XR_HZ:-120}
 export MOCK_XR_BUSY_MS=${MOCK_XR_BUSY_MS:-4}
 export MOCK_XR_TRACE=${MOCK_XR_TRACE:-$RUN/mock.trace}
+export MOCK_XR_SKIP=${MOCK_XR_SKIP:-late}
 [ $DRAIN = 1 ] && export PRIMEDGUN_XR_WAIT_GPU=1 || unset PRIMEDGUN_XR_WAIT_GPU
+[ -n "$PACING" ] && export PRIMEFRAME_PACING=$PACING || unset PRIMEFRAME_PACING
+[ $NOWAIT = 1 ] && export PRIMEFRAME_NO_GPU_WAIT=1 || unset PRIMEFRAME_NO_GPU_WAIT
+[ $WINDOW = 1 ] && export PRIMEFRAME_WINDOW_PRESENT=1 || unset PRIMEFRAME_WINDOW_PRESENT
 
 CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Audio Output' -e "$ROM" "${STATE_ARGS[@]}")
 {
-  echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  validate: $VALIDATE  platform: $PLATFORM"
-  echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  session seconds: $MOCK_XR_SECONDS"
+  echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
+  echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
 } | tee "$RUN/info.txt"
 echo "mockrun: run dir $RUN"
 set +e
@@ -154,8 +171,11 @@ PID=$!
 ( sleep $((MOCK_XR_SECONDS + 40)); kill -TERM $PID 2>/dev/null; sleep 15; kill -KILL $PID 2>/dev/null ) &
 WATCH=$!
 # (thread list for hang hunting)
-T0=$SECONDS; ENDED=""; TERMED=""; TERM2=""
+T0=$SECONDS; ENDED=""; TERMED=""; TERM2=""; INVALID=""
 while kill -0 $PID 2>/dev/null; do
+  if headset_in_use; then
+    INVALID=1; kill -KILL $PID 2>/dev/null; break
+  fi
   if [ -n "$STACKS" ] && [ ! -e "$RUN/threads.txt" ] && [ $((SECONDS - T0)) -ge "$STACKS" ]; then
     { ps -L -o tid,comm,pcpu,stat,wchan:32 -p $PID; sleep 2; ps -L -o tid,comm,pcpu,stat,wchan:32 -p $PID; } > "$RUN/threads.txt" 2>&1
   fi
@@ -172,6 +192,10 @@ while kill -0 $PID 2>/dev/null; do
 done
 wait $PID; RC=$?
 kill $WATCH 2>/dev/null
+if [ -n "$INVALID" ]; then
+  echo "mockrun: INVALID run, headset in use ($(cat "$INUSE" 2>/dev/null)); the game was stopped" | tee "$RUN/result.txt" >&2
+  exit 3
+fi
 echo "mockrun: game stopped (exit $RC)"
 # Keep the game's own logs with the run.
 cp "$USERDIR/Logs/dolphin.log" "$RUN/dolphin.log" 2>/dev/null
@@ -194,17 +218,20 @@ for line in open(sys.argv[1], errors="replace"):
 rows = rows[:int(sys.argv[2])]
 if not rows:
     print("no XRSTATS lines"); sys.exit()
-f = lambda k, r=rows: [float(x[k]) for x in r]
+f = lambda k, r=rows: [float(x.get(k, 0)) for x in r]
 sub, fps, vps = f("submitted"), f("game_fps"), f("game_vps")
 med = statistics.median(sub)
 slow = [x for x in sub if x < 0.9 * med]
 steady = rows[10:] or rows
-print("seconds=%d submitted_per_s avg=%.1f min=%d median=%.0f | game_fps avg=%.1f min=%.1f | game_vps avg=%.1f | drain_ms avg=%.2f max=%.2f | eye=%s"
-      % (len(rows), statistics.mean(sub), min(sub), med, statistics.mean(fps), min(fps), statistics.mean(vps),
-         statistics.mean(f("drain_avg_ms")), max(f("drain_max_ms")), rows[0]["eye"]))
-print("steady (after 10 s): submitted_per_s avg=%.1f min=%d | game_fps avg=%.1f min=%.1f | drain_ms avg=%.2f"
+avg = lambda k, r=rows: statistics.mean(f(k, r))
+print("mode=%s seconds=%d submitted_per_s avg=%.1f min=%d median=%.0f | game_fps avg=%.1f min=%.1f | game_vps avg=%.1f | eye=%s"
+      % (rows[0].get("mode", "?"), len(rows), statistics.mean(sub), min(sub), med, statistics.mean(fps), min(fps), statistics.mean(vps), rows[0]["eye"]))
+print("layers_per_s avg=%.1f | shown_per_s avg=%.1f | late total=%d (%.2f/s) | gpu_waits total=%d max_ms=%.2f | drain_ms avg=%.2f max=%.2f | gpu_ms avg=%.2f max=%.2f | xrwait_ms avg=%.2f max=%.2f | set_waits total=%d"
+      % (avg("layers"), avg("shown"), sum(f("late")), avg("late"), sum(f("gpu_waits")), max(f("gpu_wait_max_ms")), avg("drain_avg_ms"), max(f("drain_max_ms")),
+         avg("gpu_ms"), max(f("gpu_ms")), avg("xrwait_avg_ms"), max(f("xrwait_max_ms")), sum(f("set_waits"))))
+print("steady (after 10 s): submitted_per_s avg=%.1f min=%d | game_fps avg=%.1f min=%.1f | gpu_ms avg=%.2f | late/s %.2f"
       % (statistics.mean(f("submitted", steady)), min(f("submitted", steady)), statistics.mean(f("game_fps", steady)),
-         min(f("game_fps", steady)), statistics.mean(f("drain_avg_ms", steady))))
+         min(f("game_fps", steady)), avg("gpu_ms", steady), avg("late", steady)))
 print("slow seconds (submitted < 90%% of the median): %d, worst %d submitted" % (len(slow), min(sub)))
 PY
 echo "== stall file: $([ -s "$RUN/PrimedGunFrameStall.txt" ] && echo "WRITTEN (the frame-completion watchdog paused the game)" || echo none)"
