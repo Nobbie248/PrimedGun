@@ -59,6 +59,7 @@ else
     NAME=${NAME:-PrimeFrame}
     APP=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app}
     if [ -f "$SRC" ]; then
+        mkdir -p "${TMPDIR:-$HOME/.cache}"
         SCRATCH=$(mktemp -d "${TMPDIR:-$HOME/.cache}/pf-install.XXXXXX")
         tar -xzf "$SRC" -C "$SCRATCH"
         ROOT=$SCRATCH
