@@ -117,12 +117,17 @@ log "starting $EXE -u $USERDIR -p $PLATFORM -v Vulkan -e <disc image> $*"
 touch "$SESSION/.start"
 "$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -e "$ROM" "$@" > "$SESSION/stdout.log" 2>&1 &
 GAME_PID=$!
+# The headset is in use: development builds and headless GPU runs on this machine (this project's and
+# the sibling projects') wait while this file exists and names a live process.
+HEADSET_MARK=${XDG_CACHE_HOME:-$HOME/.cache}/headset-in-use
+echo "primeframe $GAME_PID" > "$HEADSET_MARK" 2> /dev/null
 trap 'kill -TERM "$GAME_PID" 2> /dev/null' TERM INT HUP
 rc=0
 while kill -0 "$GAME_PID" 2> /dev/null; do
     wait "$GAME_PID"; rc=$?
 done
 trap - TERM INT HUP
+[ "$(awk '{print $2}' "$HEADSET_MARK" 2> /dev/null)" = "$GAME_PID" ] && rm -f "$HEADSET_MARK"
 log "game exited with status $rc"
 [ -n "$VRT_PID" ] && { kill "$VRT_PID" 2> /dev/null; wait "$VRT_PID" 2> /dev/null; }
 

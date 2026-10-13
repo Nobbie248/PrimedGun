@@ -24,7 +24,22 @@ configure() {
     $PF_CMAKE_ARGS
 }
 if [ -n "$PF_CONFIGURE_ONLY" ]; then configure; exit; fi
+# Never build while the owner is in the headset: a game's launch wrapper writes this file ("<name> <pid>")
+# while it runs (PrimeFrame's and the sibling projects'); a stale file whose process is gone is ignored.
+# A build that is already running is paused (SIGSTOP) while the file names a live process.
+M=${XDG_CACHE_HOME:-$HOME/.cache}/headset-in-use
+in_use() { [ -f "$M" ] && kill -0 "$(awk '{print $2}' "$M" 2>/dev/null)" 2>/dev/null; }
+while in_use; do echo "pfbuild: headset in use, waiting"; sleep 60; done
 exec 9>"$PF/.build.lock"
 echo "pfbuild: waiting for lock ($WT)"; flock 9; echo "pfbuild: building $WT"
 [ -f "$BUILD/build.ninja" ] || configure
-nice -n 5 ninja -j${JOBS:-4} -C "$BUILD" "$@"
+setsid nice -n 5 ninja -j${JOBS:-4} -C "$BUILD" "$@" &
+NINJA=$!
+trap 'kill -CONT -$NINJA 2>/dev/null; kill -TERM -$NINJA 2>/dev/null' TERM INT HUP
+PAUSED=0
+while kill -0 $NINJA 2>/dev/null; do
+  if in_use; then [ $PAUSED = 0 ] && { echo "pfbuild: headset in use, build paused"; kill -STOP -$NINJA; PAUSED=1; }
+  elif [ $PAUSED = 1 ]; then echo "pfbuild: build resumed"; kill -CONT -$NINJA; PAUSED=0; fi
+  sleep 5
+done
+wait $NINJA
