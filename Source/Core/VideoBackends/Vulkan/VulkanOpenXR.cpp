@@ -1852,6 +1852,8 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
           return nullptr;
         }
         lock.unlock();
+        // The sets are held too long for this frame rate: no slack in the next target.
+        m_slack_frames = 1000;
         std::lock_guard<std::mutex> stats_lock(m_stats_mutex);
         m_stats.set_waits++;
       }
@@ -2845,7 +2847,7 @@ bool VulkanOpenXR::LocateNextFramePose()
       // The next frame cannot make the cadence refresh: it is shown on the first it can make.
       m_slack_frames = 0;
     }
-    else if (t_lock <= t_ready + period / 2 || ++m_slack_frames <= 30)
+    else if (t_lock <= t_ready + period / 2 || (m_slack_frames < 1000 && ++m_slack_frames <= 30))
     {
       // The cadence refresh (2:2 at 60 fps / 120 Hz). With a refresh or more of slack it is kept
       // for 30 frames before the target moves earlier (one shorter hold, less latency after).
