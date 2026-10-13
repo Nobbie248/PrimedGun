@@ -10,7 +10,7 @@
 # Built-in checks (generic, safe to keep in the repository): access tokens and
 # API keys, private keys and certificates, e-mail addresses, MAC addresses,
 # IPv4 addresses (LAN ranges included), Steam user ids in paths, home
-# directories other than the generic /home/steamos, and commit identities
+# directories other than a generic one, and commit identities
 # other than a GitHub no-reply address.  Placeholders used by docs and tests
 # are allowed: 127.x, 0.0.0.0, the RFC 5737 ranges, multicast, locally
 # administered and all-zero MACs.
