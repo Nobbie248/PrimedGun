@@ -4,7 +4,9 @@
 Reads dolphin.log (XRSTATS lines; the first N seconds after S skipped, default all after 10),
 clock.log (mockrun --clocklog) and the VR CPU cull report lines. Prints a Markdown row:
 run, eye, game fps avg (min), layers/s, new sets/s, GPU ms per set avg / p99 / max (per-second
-averages), GPU busy %, late (app), GPU MHz avg (min), GPU max temp, draws culled per frame avg.
+averages), the same at the full GPU clock (each second's GPU ms scaled by its mean clock / 903 MHz:
+the governor lowers the clock when the GPU is not saturated, which makes busy time look longer),
+GPU busy %, late (app), GPU MHz avg (min), GPU max temp, draws culled per frame avg.
 """
 import os, re, statistics, sys
 
@@ -36,8 +38,8 @@ def main():
         if a == "--seconds": seconds = int(next(it))
         elif a == "--skip": skip = int(next(it))
         else: args.append(a)
-    print("| Run | Eye | Game fps avg (min) | Layers/s | New sets/s | GPU ms/set avg / p99 / max | GPU busy | Late (app) | GPU MHz avg (min) | GPU C max | Culled draws/frame |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    print("| Run | Eye | Game fps avg (min) | Layers/s | New sets/s | GPU ms/set avg / p99 / max | at 903 MHz avg / p99 | GPU busy | Late (app) | GPU MHz avg (min) | GPU C max | Culled draws/frame |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for run in args:
         xs, st, cull = rows_of(run, seconds, skip)
         if not xs:
@@ -46,18 +48,23 @@ def main():
         gpu, sub = f("gpu_ms"), f("submitted")
         busy = statistics.mean(g * s / 1000 for g, s in zip(gpu, sub))
         inw = window(st)
-        clk = ""
+        clk, norm = "", "-"
         cp = os.path.join(run, "clock.log")
         if os.path.exists(cp):
-            cl = [dict(re.findall(r"(\w+)=(\S+)", l)) for l in open(cp) if l[:2].isdigit() and inw(l.split()[0])]
+            cl = [dict(re.findall(r"(\w+)=(\S+)", l), t=sec(l.split()[0])) for l in open(cp) if l[:2].isdigit() and inw(l.split()[0])]
             if cl:
-                mhz = [float(c["gpu_mhz"]) for c in cl]
+                key = "gpu_avg_mhz" if "gpu_avg_mhz" in cl[0] else "gpu_mhz"
+                mhz = [float(c[key]) for c in cl]
+                by = {c["t"]: float(c[key]) for c in cl}
+                # the clock sample of the second after the XRSTATS line covers that line's second
+                nm = [g * by.get(sec(t) + 1, by.get(sec(t), 903)) / 903 for g, t in zip(gpu, st)]
+                norm = "%.2f / %.2f" % (statistics.mean(nm), pct(nm, 99))
                 clk = "%.0f (%.0f) | %.1f" % (statistics.mean(mhz), min(mhz), max(float(c["gpu_c"]) for c in cl))
         clk = clk or "- | -"
         cu = [n for t, n in cull if inw(t)]
-        print("| %s | %s | %.1f (%.1f) | %.1f | %.1f | %.2f / %.2f / %.2f | %.0f %% | %d | %s | %s |" % (
+        print("| %s | %s | %.1f (%.1f) | %.1f | %.1f | %.2f / %.2f / %.2f | %s | %.0f %% | %d | %s | %s |" % (
             os.path.basename(run), xs[0].get("eye", "?"), statistics.mean(f("game_fps")), min(f("game_fps")),
-            statistics.mean(f("layers")), statistics.mean(f("shown")), statistics.mean(gpu), pct(gpu, 99), max(gpu),
+            statistics.mean(f("layers")), statistics.mean(f("shown")), statistics.mean(gpu), pct(gpu, 99), max(gpu), norm,
             100 * busy, sum(f("late")), clk, "%.0f" % statistics.mean(cu) if cu else "-"))
 
 main()

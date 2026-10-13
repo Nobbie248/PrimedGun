@@ -193,8 +193,8 @@ TOTAL=$((SECS + WARMUP))
 [ -n "$EYE" ] && export MOCK_XR_EYE=${EYE}x${EYE}
 [ -n "$TUDEBUG" ] && export TU_DEBUG=$TUDEBUG
 # --cool: the GPU clock comes down when it is hot; start every run from the same temperature.
-GPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q '^gpuss' "$z/type" 2>/dev/null && echo "$z/temp"; done)
-CPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q '^cpu[0-9]' "$z/type" 2>/dev/null && echo "$z/temp"; done)
+GPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q "^gpuss" "$z/type" 2>/dev/null && echo "$z/temp"; done; true)
+CPU_ZONES=$(for z in /sys/class/thermal/thermal_zone*; do grep -q "^cpu[0-9]" "$z/type" 2>/dev/null && echo "$z/temp"; done; true)
 maxtemp() { cat $1 2>/dev/null | sort -n | tail -1; }
 if [ -n "$COOL" ] && [ -n "$GPU_ZONES" ]; then
   for _ in $(seq 60); do
@@ -217,7 +217,7 @@ CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Au
   echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
   echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
   echo "TU_DEBUG: ${TU_DEBUG:-unset}${GPU_ZONES:+  gpu temp at start: $(( $(maxtemp "$GPU_ZONES") / 1000 )) C}"
-  [ -s "$RUN/sets.txt" ] && cat "$RUN/sets.txt"
+  [ ! -s "$RUN/sets.txt" ] || cat "$RUN/sets.txt"
 } | tee "$RUN/info.txt"
 echo "mockrun: run dir $RUN"
 set +e
@@ -229,9 +229,17 @@ CLOCKPID=""
 if [ $CLOCKLOG = 1 ]; then
   GDF=$(ls -d /sys/class/devfreq/*.gpu 2>/dev/null | head -1)
   GCD=$(grep -l "devfreq-$(basename "${GDF:-none}")" /sys/class/thermal/cooling_device*/type 2>/dev/null | head -1)
-  ( while kill -0 $PID 2>/dev/null; do
-      printf '%s gpu_mhz=%d gpu_cap_mhz=%d gpu_cdev=%s gpu_c=%.1f cpu_c=%.1f cpu_mhz=%s\n' "$(date +%M:%S:%3N)" \
-        $(( $(cat "$GDF/cur_freq" 2>/dev/null || echo 0) / 1000000 )) $(( $(cat "$GDF/max_freq" 2>/dev/null || echo 0) / 1000000 )) \
+  # gpu_avg_mhz: mean GPU clock over the last second from devfreq's time in each state (the governor
+  # lowers the clock when the GPU is not saturated, and busy time per frame grows with it).
+  ( PREV=""
+    while kill -0 $PID 2>/dev/null; do
+      CUR=$(awk '/^[ *]*[0-9]+:/{gsub(/[*:]/,""); printf "%d:%s ", $1/1000000, $NF}' "$GDF/trans_stat" 2>/dev/null)
+      AVG=$(awk -v a="$PREV" -v b="$CUR" 'BEGIN{n=split(a,x," "); split(b,y," "); s=0; w=0
+            for(i=1;i<=n;i++){split(x[i],p,":"); split(y[i],q,":"); d=q[2]-p[2]; s+=d*q[1]; w+=d}
+            if(w>0) printf "%.0f", s/w; else printf "0"}')
+      PREV=$CUR
+      printf '%s gpu_mhz=%d gpu_avg_mhz=%s gpu_cap_mhz=%d gpu_cdev=%s gpu_c=%.1f cpu_c=%.1f cpu_mhz=%s\n' "$(date +%M:%S:%3N)" \
+        $(( $(cat "$GDF/cur_freq" 2>/dev/null || echo 0) / 1000000 )) "$AVG" $(( $(cat "$GDF/max_freq" 2>/dev/null || echo 0) / 1000000 )) \
         "$(cat "$(dirname "${GCD:-/x}")/cur_state" 2>/dev/null || echo -)" \
         "$(maxtemp "$GPU_ZONES")e-3" "$(maxtemp "$CPU_ZONES")e-3" \
         "$(for p in /sys/devices/system/cpu/cpufreq/policy*; do printf '%d,' $(( $(cat $p/scaling_cur_freq) / 1000 )); done)"
@@ -315,8 +323,8 @@ if os.path.exists(sys.argv[3]) and stamps:
     cl = [dict(re.findall(r"(\w+)=(\S+)", l)) for l in open(sys.argv[3]) if l[:2].isdigit() and inwin(sec(l.split()[0]))]
     g = lambda k: [float(x[k]) for x in cl if k in x]
     if cl:
-        print("clock (window, %d samples): gpu_mhz avg=%.0f min=%.0f | gpu_cap_mhz min=%.0f | gpu_c max=%.1f | cpu_c max=%.1f"
-              % (len(cl), statistics.mean(g("gpu_mhz")), min(g("gpu_mhz")), min(g("gpu_cap_mhz")), max(g("gpu_c")), max(g("cpu_c"))))
+        print("clock (window, %d samples): gpu_avg_mhz avg=%.0f min=%.0f | gpu_cap_mhz min=%.0f | gpu_c max=%.1f | cpu_c max=%.1f"
+              % (len(cl), statistics.mean(g("gpu_avg_mhz") or g("gpu_mhz")), min(g("gpu_avg_mhz") or g("gpu_mhz")), min(g("gpu_cap_mhz")), max(g("gpu_c")), max(g("cpu_c"))))
 PY
 echo "== stall file: $([ -s "$RUN/PrimedGunFrameStall.txt" ] && echo "WRITTEN (the frame-completion watchdog paused the game)" || echo none)"
 } | tee "$RUN/result.txt"

@@ -1,20 +1,23 @@
 #!/bin/bash
 # Runs mock runs for the GPU/resolution table, one after another, each from the same GPU temperature.
 #
-#   frame/perf/matrix.sh [--seconds N] [--cool C] [--exe PATH] SPEC... [-- extra mockrun options]
+#   frame/perf/matrix.sh [--seconds N] [--cool C] [--exe PATH] [--dump-at T] SPEC... [-- extra mockrun options]
 #
 # SPEC is state:eye:ir:tu, e.g. 02:1728:2:sysmem (tu: sysmem, gmem or - for Turnip's default).
 # Each run: mockrun.sh --state S --seconds N --warmup 20 --eye E --set GM8E01:Video_Settings.InternalResolution=IR
 # [--tudebug TU] --clocklog --cool C --tag tbl-S-E-irIR-TU. Prints the run dirs; frame/perf/summary.py
-# makes the rows. A run marked INVALID (headset session) is repeated.
+# makes the rows. A run marked INVALID (headset session) is repeated. --dump-at T: the mock writes the
+# eye images it is handed T s into the session to PF_PERF_DUMPS/<tag>/ (default ~/.cache/pf-perf-dumps;
+# put T after the measured window, the read-back costs a frame).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-SECS=120; COOL=55; EXE=(); SPECS=(); EXTRA=()
+SECS=120; COOL=55; EXE=(); SPECS=(); EXTRA=(); DUMPAT=""
 while [ $# -gt 0 ]; do
   case $1 in
     --seconds) SECS=$2; shift ;;
     --cool) COOL=$2; shift ;;
     --exe) EXE=(--exe "$2"); shift ;;
+    --dump-at) DUMPAT=$2; shift ;;
     --) shift; EXTRA=("$@"); break ;;
     *) SPECS+=("$1") ;;
   esac
@@ -23,6 +26,11 @@ done
 for SPEC in "${SPECS[@]}"; do
   IFS=: read -r S E IR TU <<<"$SPEC"
   TUA=(); [ "$TU" != - ] && TUA=(--tudebug "$TU")
+  TAG=tbl-s$S-$E-ir$IR-$TU
+  if [ -n "$DUMPAT" ]; then
+    export MOCK_XR_DUMP=${PF_PERF_DUMPS:-$HOME/.cache/pf-perf-dumps}/$TAG MOCK_XR_DUMP_AT=$DUMPAT
+    mkdir -p "$MOCK_XR_DUMP"
+  fi
   for TRY in 1 2 3; do
     "$HERE/../tools/mockrun.sh" --state "$S" --seconds "$SECS" --warmup 20 --eye "$E" \
       --set "GM8E01:Video_Settings.InternalResolution=$IR" "${TUA[@]}" --clocklog --cool "$COOL" \

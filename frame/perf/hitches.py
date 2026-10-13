@@ -11,7 +11,7 @@ import sys
 path = sys.argv[1]; skip = float(sys.argv[2]) if len(sys.argv) > 2 else 10; span = float(sys.argv[3]) if len(sys.argv) > 3 else 1e9
 fr = []
 for line in open(path):
-    if line.startswith("#"): continue
+    if line.startswith("#") or len(line.split()) != 7: continue
     t, dt, sh, tex, efb, efb_us, dvd = map(int, line.split())
     fr.append((t, dt, sh, tex, efb, efb_us, dvd))
 t0 = fr[0][0]
@@ -26,7 +26,7 @@ for a, b in bins:
     c = sum(1 for d in dts if a <= d < b)
     print("| %s | %d | %.2f %% |" % ("%g to %g" % (a, b) if b < 1e9 else ">= %g" % a, c, 100 * c / n))
 s = sorted(dts)
-print("p50 %.2f  p90 %.2f  p99 %.2f  p99.9 %.2f  max %.2f ms" % tuple(s[int(p * (n - 1))] for p in (0.5, 0.9, 0.99, 0.999)) + (s[-1],))
+print("p50 %.2f  p90 %.2f  p99 %.2f  p99.9 %.2f  max %.2f ms" % (tuple(s[int(p * (n - 1))] for p in (0.5, 0.9, 0.99, 0.999)) + (s[-1],)))
 tot = lambda i: sum(f[i] for f in fr)
 print("totals: shaders created %d, textures uploaded %d, EFB read-backs %d (%.1f ms waited, %.2f per frame), disc reads %d"
       % (tot(2), tot(3), tot(4), tot(5) / 1000, tot(4) / n, tot(6)))
