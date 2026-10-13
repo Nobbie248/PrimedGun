@@ -123,7 +123,6 @@ export SDL_AUDIODRIVER=dummy SDL_AUDIO_DRIVER=dummy
 # The loader looks for the validation layer under XDG_DATA_HOME.
 if [ $VALIDATE = 1 ]; then
   export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
-  export VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
 fi
 
 MOCK_DIR=${PF_XRMOCK_DIR:-$HOME/.cache/pf-xrmock/$(printf %s "$REPO" | md5sum | cut -c1-8)}

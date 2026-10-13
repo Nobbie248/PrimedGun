@@ -215,7 +215,11 @@ static XrResult XRAPI_CALL mCreateSession(XrInstance i, const XrSessionCreateInf
     pushState(XR_SESSION_STATE_READY);
     return XR_SUCCESS;
 }
-static XrResult XRAPI_CALL mDestroySession(XrSession s) { (void)s; return XR_SUCCESS; }
+static XrResult XRAPI_CALL mDestroySession(XrSession s) {
+    (void)s;
+    if (gGfx && gGfx->shutdown) gGfx->shutdown();
+    return XR_SUCCESS;
+}
 static int gSpaces = 0;
 static XrResult XRAPI_CALL mCreateRefSpace(XrSession s, const XrReferenceSpaceCreateInfo* ci, XrSpace* out) {
     (void)s;
@@ -310,7 +314,17 @@ static XrResult XRAPI_CALL mCreateSwapchain(XrSession s, const XrSwapchainCreate
 }
 static Chain* chainOf(XrSwapchain sc) { return &gChains[(uintptr_t)sc - 1000]; }
 static XrResult XRAPI_CALL mDestroySwapchain(XrSwapchain sc) {
-    (void)sc;
+    Chain* c = chainOf(sc);
+    // The app destroys its device after this; images left behind are validation errors.
+    if (gGfx && gGfx->destroy_images && c->images) {
+        if (gGfx->poll_snapshots) {
+            int changed = gGfx->poll_snapshots(1);
+            gErrors += changed;
+            gBusyReleases += changed;
+        }
+        gGfx->destroy_images(c->images, c->count);
+        c->images = NULL;
+    }
     return XR_SUCCESS;
 }
 static int chainId(XrSwapchain sc) { return (int)((uintptr_t)sc - 1000); }

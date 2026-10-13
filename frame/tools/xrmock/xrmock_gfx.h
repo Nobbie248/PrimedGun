@@ -46,6 +46,11 @@ typedef struct MockGfx {
     // MOCK_XR_DUMP: writes image `index` (waits for the app's queue first) as a PPM, every
     // `step`-th pixel. Null: not available.
     int (*dump_image)(void* images, int index, int width, int height, int64_t format, int step, const char* path);
+    // xrDestroySwapchain: frees the images of a swapchain (the app destroys its device after
+    // this; leftovers are validation errors). Null: nothing to free.
+    void (*destroy_images)(void* images, int count);
+    // End of the session: frees what the checks created (fences). Null: nothing.
+    void (*shutdown)(void);
 } MockGfx;
 
 extern const MockGfx kMockGfxGles;

@@ -523,5 +523,34 @@ static int dumpImage(void* images, int index, int width, int height, int64_t for
     return ok;
 }
 
+static void destroyImages(void* images, int count) {
+    if (!gDevice || !images) return;
+    VkImage* im = (VkImage*)images;
+    for (int i = 0; i < count; i++) {
+        if (!im[i]) continue;
+        for (int k = 0; k < gImageCount; k++) {
+            if (gImages[k].image != im[i]) continue;
+            if (gImages[k].map) DEV(vkUnmapMemory)(gDevice, gImages[k].memory);
+            DEV(vkDestroyImage)(gDevice, im[i], NULL);
+            DEV(vkFreeMemory)(gDevice, gImages[k].memory, NULL);
+            gImages[k].image = VK_NULL_HANDLE;
+            gImages[k].map = NULL;
+            break;
+        }
+    }
+    // A pending snapshot of a freed image would sample freed memory: the session is ending.
+    gPendingCount = 0;
+    free(images);
+}
+
+static void shutdownVk(void) {
+    if (!gDevice) return;
+    DEV(vkDeviceWaitIdle)(gDevice);
+    for (int i = 0; i < gPendingCount; i++) DEV(vkDestroyFence)(gDevice, gPending[i].fence, NULL);
+    gPendingCount = 0;
+    for (int i = 0; i < gFreeFenceCount; i++) DEV(vkDestroyFence)(gDevice, gFreeFences[i], NULL);
+    gFreeFenceCount = 0;
+}
+
 const MockGfx kMockGfxVk = {"vk", ownsBinding, describeBinding, getProc, formats, formatOf, createImages, fillImages, releaseWaitMs,
-                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage};
+                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage, destroyImages, shutdownVk};
