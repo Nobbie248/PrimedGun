@@ -4,6 +4,7 @@
 # if there is one, read only), vrcmd and the game are fakes. Nothing is run that talks to SteamVR.
 #   frame/test-installer.sh [SCRATCH_DIR]      (default ~/.cache/pf-laneD/test-installer, emptied first)
 HERE=$(cd "$(dirname "$0")" && pwd)
+export PYTHONDONTWRITEBYTECODE=1
 T=${1:-$HOME/.cache/pf-laneD/test-installer}
 REALHOME=$HOME
 rm -rf "$T"; mkdir -p "$T"

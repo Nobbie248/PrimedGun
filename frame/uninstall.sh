@@ -8,6 +8,7 @@
 # --purge also removes $PRIMEFRAME_HOME (saves, states, settings, logs); there is no undo.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
+export PYTHONDONTWRITEBYTECODE=1
 DEV=0; NAME=; PURGE=0
 while [ $# -gt 0 ]; do
     case $1 in

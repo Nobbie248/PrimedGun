@@ -26,6 +26,7 @@
 # Your user folder is seeded from seed/ only where files are missing; nothing there is overwritten.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
+export PYTHONDONTWRITEBYTECODE=1
 DEV=0; NAME=; ROM_ARG=; IMPORT=0; PODMAN_USER=; FORCE=0; SRC=
 while [ $# -gt 0 ]; do
     case $1 in
