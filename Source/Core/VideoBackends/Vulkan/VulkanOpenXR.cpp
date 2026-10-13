@@ -10,6 +10,7 @@
 
 #include "VideoBackends/Vulkan/VulkanOpenXR.h"
 
+#include <cstdlib>
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -2038,9 +2039,16 @@ bool VulkanOpenXR::SubmitFrame()
     StateTracker::GetInstance()->EndRenderPass();
 
     // Submit all eye rendering once per frame before releasing OpenXR swapchain images.
+    // PRIMEDGUN_XR_WAIT_GPU=1 forces the drain. Standalone SteamVR on the Steam Frame can sample
+    // the eye images before the GPU finishes them, which shows up as ghosting in the last eye.
+    static const bool s_force_wait_for_completion = [] {
+      const char* env = std::getenv("PRIMEDGUN_XR_WAIT_GPU");
+      return env && env[0] == '1';
+    }();
     const bool wait_for_completion =
-        !g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
-        VR::g_openxr->IsQuestOrVirtualDesktopRuntime();
+        s_force_wait_for_completion ||
+        (!g_vulkan_context->SupportsTimelineSemaphores() && VR::g_openxr &&
+         VR::g_openxr->IsQuestOrVirtualDesktopRuntime());
     g_command_buffer_mgr->SubmitCommandBuffer(false, wait_for_completion);
     StateTracker::GetInstance()->InvalidateCachedState();
 
