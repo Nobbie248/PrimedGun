@@ -41,6 +41,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+[ -z "$ROM_ARG" ] || [ -f "$ROM_ARG" ] || { echo "no such disc image: $ROM_ARG" >&2; exit 1; }
 PFHOME=${PRIMEFRAME_HOME:-$HOME/.local/share/PrimeFrame}
 STEAM=${PRIMEFRAME_STEAM_DIR:-$HOME/.local/share/Steam}
 SCRATCH=
