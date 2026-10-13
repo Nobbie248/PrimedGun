@@ -17,6 +17,8 @@
 #   PRIMEFRAME_PACING       passed through to the game, which has its own default when unset
 #   PRIMEFRAME_PLATFORM     Dolphin NoGUI platform, default x11 (headless never presents VR)
 #   PRIMEFRAME_VRTIMING=0   no compositor timing log
+#   PRIMEFRAME_STATE        start from a save state: a slot number 1 to 10 (user/StateSaves/GM8E01.s01..s10)
+#                           or a file path (useful in session.env for a test in a given room)
 #   PRIMEFRAME_KEEP_SESSIONS number of session folders kept (default 30)
 # session.env: if $PRIMEFRAME_HOME/session.env exists it is sourced for ONE launch (VAR=value
 # lines, any of the above or the game's own PRIMEDGUN_* switches), then renamed session.env.used.
@@ -113,6 +115,14 @@ fi
 # Not exec: the wrapper stays to stop the logger and write the report. A signal for the wrapper
 # (Steam stopping the app) goes on to the game.
 PLATFORM=${PRIMEFRAME_PLATFORM:-x11}
+if [ -n "$PRIMEFRAME_STATE" ]; then
+    case "$PRIMEFRAME_STATE" in
+        [1-9] | 10) STATE=$USERDIR/StateSaves/GM8E01.s$(printf %02d "$PRIMEFRAME_STATE") ;;
+        *) STATE=$PRIMEFRAME_STATE ;;
+    esac
+    if [ -f "$STATE" ]; then set -- -s "$STATE" "$@"; log "starting from the save state $STATE"
+    else log "PRIMEFRAME_STATE=$PRIMEFRAME_STATE: no file $STATE, starting normally"; fi
+fi
 log "starting $EXE -u $USERDIR -p $PLATFORM -v Vulkan -e <disc image> $*"
 touch "$SESSION/.start"
 "$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -e "$ROM" "$@" > "$SESSION/stdout.log" 2>&1 &

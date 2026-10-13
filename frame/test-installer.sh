@@ -22,6 +22,10 @@ STEAM=$T/steam; mkdir -p "$STEAM/userdata/1/config/grid"
 REAL=$(ls "$REALHOME"/.local/share/Steam/userdata/*/config/shortcuts.vdf 2> /dev/null | head -1)   # read only, copied
 [ -n "$REAL" ] && cp "$REAL" "$STEAM/userdata/1/config/shortcuts.vdf"
 VDF=$STEAM/userdata/1/config/shortcuts.vdf
+# The real list may already hold PrimeFrame entries (a real install): the copy starts without them.
+[ -f "$VDF" ] && python3 -I -B -c 'import importlib.util as u, sys
+s = u.spec_from_file_location("cef", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m)
+for n in ("PrimeFrame", "PrimeFrame (dev)"): m.vdf_remove(sys.argv[2], n)' "$HERE/steam-cef.py" "$VDF"
 py() { python3 -I -B -c '
 import importlib.util, sys
 s = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
