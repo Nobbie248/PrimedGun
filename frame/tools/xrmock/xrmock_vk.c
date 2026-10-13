@@ -11,6 +11,7 @@
 #include <vulkan/vulkan.h>
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -353,12 +354,23 @@ static int gPendingCount = 0, gChecked = 0;
 static VkFence gFreeFences[PENDING];
 static int gFreeFenceCount = 0;
 
+// The app may release on one thread (overlays, video thread) while another polls in
+// xrWaitFrame (pacing thread): the snapshot list is shared.
+static pthread_mutex_t gSnapMutex = PTHREAD_MUTEX_INITIALIZER;
+
 static void sample(int image, unsigned char* out) {
     VkDeviceSize step = gImages[image].size / SAMPLES;
     for (int k = 0; k < SAMPLES; k++) memcpy(out + k * CHUNK, gImages[image].map + (VkDeviceSize)k * step, CHUNK);
 }
 
+static int pollSnapshotsLocked(int wait);
 static int pollSnapshots(int wait) {
+    pthread_mutex_lock(&gSnapMutex);
+    int changed = pollSnapshotsLocked(wait);
+    pthread_mutex_unlock(&gSnapMutex);
+    return changed;
+}
+static int pollSnapshotsLocked(int wait) {
     int changed = 0;
     unsigned char now[SAMPLES * CHUNK];
     for (int i = 0; i < gPendingCount;) {
@@ -380,7 +392,13 @@ static int pollSnapshots(int wait) {
 
 // At a release, inside xrReleaseSwapchainImage: the app holds its queue lock (SteamVR's client
 // submits there too).
+static void releaseSnapshotLocked(void* images, int index);
 static void releaseSnapshot(void* images, int index) {
+    pthread_mutex_lock(&gSnapMutex);
+    releaseSnapshotLocked(images, index);
+    pthread_mutex_unlock(&gSnapMutex);
+}
+static void releaseSnapshotLocked(void* images, int index) {
     if (!gQueue) return;
     VkImage image = ((VkImage*)images)[index];
     int found = -1;

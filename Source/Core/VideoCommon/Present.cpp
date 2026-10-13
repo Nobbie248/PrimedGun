@@ -941,6 +941,11 @@ std::tuple<int, int> Presenter::CalculateOutputDimensions(int width, int height,
   return std::make_tuple(width, height);
 }
 
+#ifdef ENABLE_VR
+// Set by Present(): this Present started a VR frame (the eye blits are only valid then).
+static bool s_vr_eyes_this_present = false;
+#endif
+
 void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
                                   const AbstractTexture* source_texture,
                                   const MathUtil::Rectangle<int>& source_rc)
@@ -1083,7 +1088,9 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
 
     // Backends that use Dolphin's original inline OpenXR lifecycle must populate
     // their swapchain during the XFB render. Detached pacing does this at Present().
-    if (!VR::g_openxr || !VR::g_openxr->IsFrameThreadActive())
+    // Only when this Present started a VR frame: eye images acquired without a SubmitFrame
+    // would stay waited (the next acquire then breaks the one-waited-image rule).
+    if ((!VR::g_openxr || !VR::g_openxr->IsFrameThreadActive()) && s_vr_eyes_this_present)
       BlitCurrentSourceToOpenXREyes(source_texture, source_rc);
   }
 #endif
@@ -1287,6 +1294,7 @@ void Presenter::Present(PresentInfo* present_info)
   // output (no mirror blits, no window present; PRIMEFRAME_WINDOW_PRESENT=1 keeps it).
   const bool vr_skip_window =
       vr_frame_started && !vr_pacing_active && vr_swapchain && vr_swapchain->SkipsWindowPresent();
+  s_vr_eyes_this_present = vr_frame_started;
   const bool vr_skip_duplicate_publish =
       vr_frame_started && present_info != nullptr &&
       present_info->reason == PresentInfo::PresentReason::VideoInterfaceDuplicate &&

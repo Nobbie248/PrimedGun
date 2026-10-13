@@ -1841,10 +1841,16 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
       {
         m_video_waiting_for_set = true;
         m_pacer_cv.notify_all();
-        m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
+        const bool free = m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
           return !m_set_in_flight[m_frame_set] || m_pacer_exit.load();
         });
         m_video_waiting_for_set = false;
+        if (!free || m_set_in_flight[m_frame_set])
+        {
+          // The pacing thread did not give the set back (session ending): skip the eyes.
+          m_frame_set_chosen = false;
+          return nullptr;
+        }
         lock.unlock();
         std::lock_guard<std::mutex> stats_lock(m_stats_mutex);
         m_stats.set_waits++;
@@ -2834,31 +2840,23 @@ bool VulkanOpenXR::LocateNextFramePose()
   {
     const int64_t step = std::max<int64_t>(1, std::llround(interval_ms * 1e6 / period));
     const XrTime t_lock = m_last_target + step * period;
-    if (t_lock >= t_ready - period / 2)
+    if (t_lock < t_ready - period / 2)
     {
+      // The next frame cannot make the cadence refresh: it is shown on the first it can make.
+      m_slack_frames = 0;
+    }
+    else if (t_lock <= t_ready + period / 2 || ++m_slack_frames <= 30)
+    {
+      // The cadence refresh (2:2 at 60 fps / 120 Hz). With a refresh or more of slack it is kept
+      // for 30 frames before the target moves earlier (one shorter hold, less latency after).
+      target = t_lock;
       if (t_lock <= t_ready + period / 2)
-      {
-        target = t_lock;
         m_slack_frames = 0;
-      }
-      else if (t_lock <= t_ready + period + period / 2 && ++m_slack_frames <= 30)
-      {
-        // A refresh of slack: keep the cadence for a while before moving earlier.
-        target = t_lock;
-      }
-      else
-      {
-        m_slack_frames = 0;
-      }
     }
     else
     {
       m_slack_frames = 0;
     }
-    // Never a single refresh after the previous set while the game runs at most ~80 fps
-    // (a 1-refresh hold is a 3:1 or 1:3 judder): two refreshes at least.
-    const int64_t min_step = interval_ms * 1e6 >= 1.5 * period ? 2 : 1;
-    target = std::max(target, m_last_target + min_step * period);
   }
   m_last_target = target;
   m_target_time = target;
