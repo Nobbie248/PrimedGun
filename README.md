@@ -123,6 +123,7 @@ If you would like more Steam Frame ports, you can also [buy me a coffee](https:/
 - Built by [simplysanatori](https://github.com/simplysanatori).
 - [PrimedGun](https://github.com/Nobbie248/PrimedGun) by Nobbie, and everyone PrimedGun thanks: iChris4, who made Dolphin ReduX for PC and Quest and ported PrimedGun to the Quest, the Metroid Prime modding community, the Metroid Prime decompilation project, Metaforce and PrimeHack, and the early testers. Its own README, kept as [README.upstream.md](README.upstream.md), has the full list.
 - iChris4's Dolphin ReduX and the old Dolphin Hydra build, whose Metroid Prime behaviour PrimedGun carries forward.
+- Carl Kenner and the contributors of Dolphin VR, the first VR build of Dolphin, which started the line of VR work that later builds grew from.
 - josethevrtech and [PrimedSteam](https://github.com/josethevrtech/PrimedSteam), who contributed PrimedGun's SteamOS build workflow.
 - The Dolphin team, whose emulator all of this is built on.
 - Valve, for the Steam Frame, SteamVR and the OpenXR runtime in it.
