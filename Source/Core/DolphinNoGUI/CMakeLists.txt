@@ -26,7 +26,15 @@ if (WIN32)
     OUTPUT_NAME      DolphinNoGUI
   )
 else()
-  set_target_properties(dolphin-nogui PROPERTIES OUTPUT_NAME dolphin-emu-nogui)
+  set_target_properties(dolphin-nogui PROPERTIES OUTPUT_NAME dolphin-nogui)
+endif()
+
+if(UNIX AND LINUX_LOCAL_DEV)
+  # Relocatable layout: Sys/ and assets/ next to the binary (links; a release copies them).
+  add_custom_command(TARGET dolphin-nogui POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/Data/Sys $<TARGET_FILE_DIR:dolphin-nogui>/Sys
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:dolphin-nogui>/assets
+  )
 endif()
 
 target_link_libraries(dolphin-nogui
