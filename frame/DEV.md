@@ -168,3 +168,49 @@ XRSTATS submitted=60 drain_avg_ms=0.13 drain_max_ms=3.19 eye=1728x1728 game_fps=
 vblank counters (`PerformanceMetrics::UpdateCounters()` folds them in from the GPU thread; the OSD
 did that only when drawn). `xrWaitFrame` lives in `OpenXRManager.cpp` and is not in the line.
 Android builds are untouched.
+
+## Install, wrapper and release
+
+- `frame/primeframe.sh` is the launch wrapper; its header lists every `PRIMEFRAME_*` switch. The
+  Steam shortcut runs it as `"<app>/primeframe.sh" %command%`. Per launch it sets the five SteamVR
+  per-app keys with `vrcmd` for `$SteamAppId` and reads them back, makes
+  `~/.local/share/PrimeFrame/sessions/<date-time>/` (`launch.log`, `stdout.log`, `dolphin.log`,
+  stall file, `vrtiming.log`, `report.txt`), and runs
+  `primeframe -u <home>/user -p x11 -v Vulkan -e <rom> "$@"`. `session.env` (VAR=value lines) is
+  sourced for one launch and renamed `session.env.used`: this is how a test setting such as
+  `PRIMEDGUN_XR_WAIT_GPU=1` or `PRIMEFRAME_PACING=...` reaches the game from the Steam library.
+  `PRIMEFRAME_SYSMEM=1` sets `TU_DEBUG=sysmem` (off by default until the GPU lane decides).
+- `frame/install.sh --dev build-linux` copies `Binaries/dolphin-nogui` as `primeframe`, plus
+  `Sys/` and `assets/` (links followed) into `~/Games/PrimeFrame/app-dev` and adds the shortcut
+  "PrimeFrame (dev)". Without `--dev` it takes a release tarball or an unpacked release.
+  `PRIMEFRAME_STEAM_DIR=<copy of a Steam folder>` edits the copy's `shortcuts.vdf` instead of the live
+  Steam; `PRIMEFRAME_SKIP_STEAM=1` skips Steam. The user folder is seeded from `frame/seed/user`
+  only where files are missing.
+- `frame/test-installer.sh` runs all of it in a scratch HOME (`~/.cache/pf-laneD/test-installer`)
+  with a fake `vrcmd`, fake game and fake build tree; it must print "all passed".
+- `frame/release.sh` makes `primeframe-1.0.0-linux-arm64.tar.gz` (flat layout; `install.sh`,
+  `primeframe.sh`, `tools/`, `seed/` sit beside the binary, `Sys/` and `assets/`) and runs the
+  privacy check on it. The tarball check skips upstream's `Sys/` by path.
+- `frame/tools/privacy-check.sh`: default scope is our own additions (changed against `main`,
+  which is upstream v1.1.7, plus `frame/` and our three docs); `--history` covers the commits after
+  `main`; a DIR or tarball argument covers everything but `Sys/`. Personal values go in a local
+  pattern list outside the repository (`PF_PRIVACY_PATTERNS`).
+
+### Importing from the old Podman setup (owner only, not in the README)
+
+```
+frame/install.sh --dev build-linux --import-podman      # source: ~/PrimedGun-podman/src/build-podman/Binaries/user
+```
+
+Copies (never moves, never writes into the source) `GC/MemoryCardA.USA.raw`, `GC/SRAM.raw`,
+`StateSaves/`, and only the `[VR]` section of `Config/GFX.ini`, `[Video_Settings]` of
+`GameSettings/GM8E01.ini` and `[VR]` of `Config/Dolphin.ini` into
+`~/.local/share/PrimeFrame/user`. An existing destination file is kept (with a message) unless
+`--force`, which first copies it to `~/.local/share/PrimeFrame/backup-<date-time>/`. An ini file you have
+edited since the seed is also kept unless `--force`. The Analytics ID and the keyboard controller
+mapping (`GCPadNew.ini`) are not carried over: PrimedGun applies its OpenXR bindings itself.
+
+## Pacing
+
+(Lane A adds the pacing note here: the fence based release, the two eye swapchain sets, the
+statistics line fields and the A/B switches.)
