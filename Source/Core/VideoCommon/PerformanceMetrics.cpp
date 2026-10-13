@@ -4,14 +4,57 @@
 #include "VideoCommon/PerformanceMetrics.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 
 #include <imgui.h>
 #include <implot.h>
 
 #include "Core/Config/GraphicsSettings.h"
+#include "VideoCommon/Statistics.h"
 #include "VideoCommon/VideoConfig.h"
 
 PerformanceMetrics g_perf_metrics;
+
+// PrimeFrame: PRIMEFRAME_FRAMELOG=<file> writes one line per presented frame (hitch analysis,
+// frame/perf/hitches.py). Counters bumped where the work happens (declared extern there, no header):
+// EFB copies read back to guest RAM (each waits for the GPU) and the time spent waiting, disc reads.
+namespace PrimeFramePerf
+{
+std::atomic<u32> efb_ram_reads{0};
+std::atomic<u64> efb_ram_read_us{0};
+std::atomic<u32> dvd_reads{0};
+}  // namespace PrimeFramePerf
+
+static void LogPrimeFrameFrame()
+{
+  static FILE* file = [] {
+    const char* path = std::getenv("PRIMEFRAME_FRAMELOG");
+    FILE* f = path && *path ? std::fopen(path, "w") : nullptr;
+    if (f)
+      std::fputs("# t_us dt_us shaders_created textures_uploaded efb_ram_reads efb_ram_read_us dvd_reads\n", f);
+    return f;
+  }();
+  if (!file)
+    return;
+  static Clock::time_point last{};
+  static int last_shaders = 0, last_textures = 0;
+  const auto now = Clock::now();
+  const auto us = [](auto d) {
+    return static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+  };
+  const int shaders = g_stats.num_pixel_shaders_created + g_stats.num_vertex_shaders_created;
+  const int textures = g_stats.num_textures_uploaded;
+  std::fprintf(file, "%lld %lld %d %d %u %llu %u\n",
+               us(std::chrono::system_clock::now().time_since_epoch()),
+               last == Clock::time_point{} ? 0LL : us(now - last), shaders - last_shaders,
+               textures - last_textures, PrimeFramePerf::efb_ram_reads.exchange(0),
+               static_cast<unsigned long long>(PrimeFramePerf::efb_ram_read_us.exchange(0)),
+               PrimeFramePerf::dvd_reads.exchange(0));
+  last = now;
+  last_shaders = shaders;
+  last_textures = textures;
+}
 
 void PerformanceMetrics::Reset()
 {
@@ -30,6 +73,7 @@ void PerformanceMetrics::Reset()
 void PerformanceMetrics::CountFrame()
 {
   m_fps_counter.Count();
+  LogPrimeFrameFrame();
 }
 
 void PerformanceMetrics::CountVBlank()
