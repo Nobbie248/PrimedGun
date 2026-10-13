@@ -312,6 +312,7 @@ static XrResult XRAPI_CALL mCreateSwapchain(XrSession s, const XrSwapchainCreate
     gChainCount++;
     return XR_SUCCESS;
 }
+static int gReleases = 0, gBusyReleases = 0;
 static Chain* chainOf(XrSwapchain sc) { return &gChains[(uintptr_t)sc - 1000]; }
 static XrResult XRAPI_CALL mDestroySwapchain(XrSwapchain sc) {
     Chain* c = chainOf(sc);
@@ -347,7 +348,6 @@ static XrResult XRAPI_CALL mAcquire(XrSwapchain sc, const XrSwapchainImageAcquir
     trace("acquire sc%d idx=%u", chainId(sc), *idx);
     return XR_SUCCESS;
 }
-static int gReleases = 0, gBusyReleases = 0;
 static double gBusyMaxMs = 0.0;
 static int gWaitHist[5];
 static int gPoseAge[6];  // display time minus locate time in refreshes: <0, 0, 1, 2, 3, more
