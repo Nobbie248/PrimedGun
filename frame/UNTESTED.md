@@ -9,12 +9,14 @@ Nothing below has a verdict yet.
 - The overall verdict: PrimeFrame starts from the Steam library and plays Metroid Prime through SteamVR.
 - Smooth head motion, no ghosting in either eye on turns.
 - Performance in the heavy rooms, and any number: frame rate, GPU time per eye set, late and repeated sets, hitches.
-- 1728 pixels per eye with 2x internal resolution looking sharp enough, and 120 Hz being reached.
+- 2160 pixel eye images with 3x internal resolution looking sharper than before, and 120 Hz being reached.
 - Eye images released to SteamVR only after the GPU has finished them (the pacing work in frame/DEV.md).
 - Shader compilation in the background causing no visible hitch in play.
 - The x11 platform under Steam's session on the Frame (the headless runs used a private X server).
 - Valve's foveation layer on or off (`PRIMEFRAME_FDM_LAYER`) making no visible difference.
-- `PRIMEFRAME_SYSMEM=1` (Turnip rendering straight to memory) as a speed gain without a visible problem.
+- Turnip rendering straight to memory (TU_DEBUG=sysmem, the default) with no visible problem under SteamVR.
+- No late pop-in at the edges of the view from the head culling.
+- GPU temperature in long sessions at 3x.
 
 ## Controls
 

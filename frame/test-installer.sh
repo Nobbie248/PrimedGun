@@ -178,7 +178,7 @@ sleep 1
 echo x > "$W/disc.rvz"; echo "$W/disc.rvz" > "$PRIMEFRAME_HOME/rom"
 DOLPHIN_EMU_USERPATH=/elsewhere run
 check "wrapper exits with the game's status" test "$(cat "$W/rc")" = 0
-for k in preferredRefreshRate=120 framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=1728; do
+for k in preferredRefreshRate=120 framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
     check "vrcmd --set-settings-int steam.app.4242.${k%=*} ${k#*=}" has "$W/vrcmd.log" "^--set-settings-int steam.app.4242.${k%=*} ${k#*=}\$"
 done
 check "read-back logged as matching" has "$S/launch.log" "read-back: 5 of 5"
@@ -190,7 +190,7 @@ check "report.txt has the XRSTATS table" has "$S/report.txt" "^submitted"
 check "stdout.log written" has "$S/stdout.log" "game stdout"
 check "no stall file when the game wrote none" test ! -e "$S/PrimedGunFrameStall.txt"
 check "vrtiming logger stopped at exit" test -z "$(pgrep -f "$W/app/tools/vrtiming.py")"
-check "defaults: no sysmem, no switches" has "$S/dolphin.log" "env FDM= TU= PACING="
+check "defaults: sysmem on, no other switches" has "$S/dolphin.log" "env FDM= TU=sysmem PACING="
 sleep 1
 FAKE_STALL=1 FAKE_RC=3 run
 check "the game's exit status is passed on" test "$(cat "$W/rc")" = 3
@@ -200,15 +200,15 @@ echo '{"steam.app.4242": {"preferredRefreshRate": 72, "framesToThrottle": 0}}' >
 check "mismatch logged when SteamVR dropped the settings" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "MISMATCH steam.app.4242.preferredRefreshRate"
 check "missing settings counted as mismatches" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "read-back: 1 of 5"
 sleep 1
-printf 'PRIMEFRAME_SYSMEM=1\n' > "$PRIMEFRAME_HOME/session.env"
+printf 'PRIMEFRAME_SYSMEM=0\n' > "$PRIMEFRAME_HOME/session.env"
 run PRIMEFRAME_FDM_LAYER=0 PRIMEFRAME_PACING=pipelined PRIMEFRAME_REFRESH_HZ=90
 S=$PRIMEFRAME_HOME/sessions/latest
-check "switches and session.env reach the game" has "$S/dolphin.log" "env FDM=1 TU=sysmem PACING=pipelined"
+check "switches and session.env reach the game" has "$S/dolphin.log" "env FDM=1 TU= PACING=pipelined"
 check "90 Hz choice applied" has "$W/vrcmd.log" "preferredRefreshRate 90"
 check "session.env renamed after one launch, copy in the session" test ! -f "$PRIMEFRAME_HOME/session.env" -a -f "$PRIMEFRAME_HOME/session.env.used" -a -f "$S/session.env"
 sleep 1
 run
-check "next launch: session.env gone, sysmem off again" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "TU= PACING="
+check "next launch: session.env gone, sysmem on again" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "TU=sysmem PACING="
 sleep 1
 run SteamAppId=; check "no SteamAppId: settings skipped, game still runs" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "no SteamAppId"
 sleep 1

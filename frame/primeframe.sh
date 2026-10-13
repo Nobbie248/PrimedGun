@@ -12,6 +12,8 @@
 # Environment (all optional; session.env below is the way to set them from the Steam library):
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
+#   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;
+#                           1728 is SteamVR's 100 % here)
 #   PRIMEFRAME_FDM_LAYER=0  sets DISABLE_VULKAN_FDM_INJECTION_LAYER=1 (A/B: Valve's FDM layer off)
 #   PRIMEFRAME_SYSMEM=0     leaves TU_DEBUG unset (Turnip's tiled rendering); by default the wrapper sets
 #                           TU_DEBUG=sysmem (renders straight to memory: a third of the GPU time here)
@@ -71,11 +73,13 @@ log "disc image: $ROM"
 
 # SteamVR's per-app settings, every launch. SteamAppId is set by Steam for a library launch.
 HZ=${PRIMEFRAME_REFRESH_HZ:-120}
+EYE=${PRIMEFRAME_EYE:-2160}
+case "$EYE" in 1[0-9][0-9][0-9] | 2[0-9][0-9][0-9] | 3[0-9][0-9][0-9]) ;; *) log "PRIMEFRAME_EYE=$EYE is not a pixel size, using 2160"; EYE=2160 ;; esac
 case "$HZ" in 90 | 120) ;; *) log "PRIMEFRAME_REFRESH_HZ=$HZ is not 90 or 120, using 120"; HZ=120 ;; esac
 VRCMD=${PRIMEFRAME_VRCMD:-$(command -v vrcmd || echo /opt/steamvr/bin/linuxarm64/vrcmd)}
 VRSETTINGS=${PRIMEFRAME_VRSETTINGS:-$HOME/.config/openvr/config/steamvr.vrsettings}
 STEAMVR_DIR=${PRIMEFRAME_STEAMVR_DIR:-/opt/steamvr/bin/linuxarm64}
-SETTINGS="preferredRefreshRate=$HZ framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=1728"
+SETTINGS="preferredRefreshRate=$HZ framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=$EYE"
 if [ -z "$SteamAppId" ]; then
     log "no SteamAppId: SteamVR per-app settings NOT applied (not a Steam library launch)"
 elif [ ! -x "$VRCMD" ]; then

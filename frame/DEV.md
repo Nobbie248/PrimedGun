@@ -175,7 +175,7 @@ fdinfo. `frame/tools/session-report.py` reads the fields generically.
   `primeframe -u <home>/user -p x11 -v Vulkan -e <rom> "$@"`. `session.env` (VAR=value lines) is
   sourced for one launch and renamed `session.env.used`: this is how a test setting such as
   `PRIMEDGUN_XR_WAIT_GPU=1` or `PRIMEFRAME_PACING=...` reaches the game from the Steam library.
-  `PRIMEFRAME_SYSMEM=1` sets `TU_DEBUG=sysmem` (off by default until the GPU lane decides).
+  `TU_DEBUG=sysmem` is set by default (a third of the GPU time in the heavy room, frame/perf/RESULTS.md); `PRIMEFRAME_SYSMEM=0` leaves Turnip tiled. `PRIMEFRAME_EYE` (default 2160) is the eye image size asked of SteamVR.
 - `frame/install.sh --dev build-linux` copies `Binaries/dolphin-nogui` as `primeframe`, plus
   `Sys/` and `assets/` (links followed) into `~/Games/PrimeFrame/app-dev` and adds the shortcut
   "PrimeFrame (dev)". Without `--dev` it takes a release tarball or an unpacked release.
