@@ -166,8 +166,20 @@ SH
 sed -i 's|^echo "args: \$FAKE_ARGS_MARK"; ||' "$W/app/primeframe"
 sed -i '2i echo "$*" > "$(dirname "$0")/../args.txt"' "$W/app/primeframe"
 chmod +x "$W/bin/vrcmd" "$W/app/primeframe" "$W/app/primeframe.sh"
+# Steam's %command% on the Frame: steam-launch-wrapper [its options] -- reaper SteamLaunch AppId=N -- <game>.
+# The fakes behave like the real ones: the launch wrapper refuses options it does not know before "--".
+cat > "$W/bin/steam-launch-wrapper" << 'SH'
+#!/bin/bash
+while [ "$1" != -- ]; do case $1 in --oom-score-adjust) shift 2 ;; *) echo "steam-launch-wrapper: Unrecognised option $1"; exit 1 ;; esac; done
+shift; exec "$@"
+SH
+cat > "$W/bin/reaper" << 'SH'
+#!/bin/bash
+while [ "$1" != -- ]; do shift; done; shift; exec "$@"
+SH
+chmod +x "$W/bin/steam-launch-wrapper" "$W/bin/reaper"
 export FAKE_VRCMD_LOG=$W/vrcmd.log FAKE_VRSETTINGS=$PRIMEFRAME_VRSETTINGS
-run() { env PATH="$W/bin:$PATH" SteamAppId=4242 "$@" "$W/app/primeframe.sh" "$W/app/primeframe" --steamarg > "$W/out.txt" 2>&1; echo $? > "$W/rc"; }
+run() { env PATH="$W/bin:$PATH" SteamAppId=4242 "$@" "$W/app/primeframe.sh" "$W/bin/steam-launch-wrapper" --oom-score-adjust 900 -- "$W/bin/reaper" SteamLaunch AppId=4242 -- "$W/app/primeframe" > "$W/out.txt" 2>&1; echo $? > "$W/rc"; }
 run
 S=$PRIMEFRAME_HOME/sessions/latest
 check "no rom file: refuses to start (exit 66) with a clear line" test "$(cat "$W/rc")" = 66 && has "$S/launch.log" "REFUSING TO START"
@@ -178,11 +190,15 @@ sleep 1
 echo x > "$W/disc.rvz"; echo "$W/disc.rvz" > "$PRIMEFRAME_HOME/rom"
 DOLPHIN_EMU_USERPATH=/elsewhere run
 check "wrapper exits with the game's status" test "$(cat "$W/rc")" = 0
+check "Steam's launch chain runs; the game gets its options at the end" grep -q -- "^-u $PRIMEFRAME_HOME/user -p x11 -v Vulkan -e $W/disc.rvz\$" "$W/args.txt"
+mkdir -p "$PRIMEFRAME_HOME/user/StateSaves"; echo s > "$PRIMEFRAME_HOME/user/StateSaves/GM8E01.s02"; sleep 1
+printf 'PRIMEFRAME_STATE=2\n' > "$PRIMEFRAME_HOME/session.env"; run
+check "PRIMEFRAME_STATE=2 starts from slot 2" grep -q -- "-e $W/disc.rvz -s $PRIMEFRAME_HOME/user/StateSaves/GM8E01.s02\$" "$W/args.txt"
+rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
 for k in preferredRefreshRate=120 framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
     check "vrcmd --set-settings-int steam.app.4242.${k%=*} ${k#*=}" has "$W/vrcmd.log" "^--set-settings-int steam.app.4242.${k%=*} ${k#*=}\$"
 done
 check "read-back logged as matching" has "$S/launch.log" "read-back: 5 of 5"
-check "game started with -u -p x11 -v Vulkan -e <disc> and Steam's own arguments" has "$W/args.txt" "^-u $PRIMEFRAME_HOME/user -p x11 -v Vulkan -e $W/disc.rvz --steamarg\$"
 check "the user path from the environment is dropped" has "$S/dolphin.log" "USERPATH=unset"
 check "dolphin.log copied into the session" has "$S/dolphin.log" "XRSTATS submitted=60"
 check "vrtiming.log written" has "$S/vrtiming.log" "fake vrtiming"

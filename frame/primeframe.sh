@@ -51,9 +51,14 @@ unset DOLPHIN_EMU_USERPATH
 [ "${PRIMEFRAME_SYSMEM:-1}" = 1 ] && { export TU_DEBUG=${TU_DEBUG:+$TU_DEBUG,}sysmem; log "TU_DEBUG=$TU_DEBUG"; }
 [ -n "$PRIMEFRAME_PACING" ] && { export PRIMEFRAME_PACING; log "PRIMEFRAME_PACING=$PRIMEFRAME_PACING"; }
 
-# The game: Steam's %command% (the binary the shortcut names), else the installed one.
-EXE=${PRIMEFRAME_EXE:-$HERE/primeframe}
-if [ -z "$PRIMEFRAME_EXE" ] && [ $# -gt 0 ] && [ -x "$1" ] && [ -f "$1" ]; then EXE=$1; shift; fi
+# The game. Steam's %command% is a chain of Steam's own helpers (steam-launch-wrapper, reaper
+# SteamLaunch AppId=...) ending with the binary the shortcut names: it runs as given, with the game's
+# options appended (they reach the binary at the end of the chain). Without arguments, the installed
+# binary runs.
+if [ -n "$PRIMEFRAME_EXE" ]; then CMD=("$PRIMEFRAME_EXE")
+elif [ $# -gt 0 ]; then CMD=("$@")
+else CMD=("$HERE/primeframe"); fi
+EXE=${CMD[${#CMD[@]}-1]}
 [ -x "$EXE" ] || { log "REFUSING TO START: no game binary at $EXE (run install.sh)"; exit 1; }
 
 # The disc image: the path in $PFHOME/rom, chosen at install.
@@ -121,17 +126,18 @@ fi
 # Not exec: the wrapper stays to stop the logger and write the report. A signal for the wrapper
 # (Steam stopping the app) goes on to the game.
 PLATFORM=${PRIMEFRAME_PLATFORM:-x11}
+STATEARGS=()
 if [ -n "$PRIMEFRAME_STATE" ]; then
     case "$PRIMEFRAME_STATE" in
         [1-9] | 10) STATE=$USERDIR/StateSaves/GM8E01.s$(printf %02d "$PRIMEFRAME_STATE") ;;
         *) STATE=$PRIMEFRAME_STATE ;;
     esac
-    if [ -f "$STATE" ]; then set -- -s "$STATE" "$@"; log "starting from the save state $STATE"
+    if [ -f "$STATE" ]; then STATEARGS=(-s "$STATE"); log "starting from the save state $STATE"
     else log "PRIMEFRAME_STATE=$PRIMEFRAME_STATE: no file $STATE, starting normally"; fi
 fi
-log "starting $EXE -u $USERDIR -p $PLATFORM -v Vulkan -e <disc image> $*"
+log "starting ${CMD[*]} -u $USERDIR -p $PLATFORM -v Vulkan -e <disc image> ${STATEARGS[*]}"
 touch "$SESSION/.start"
-"$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -e "$ROM" "$@" > "$SESSION/stdout.log" 2>&1 &
+"${CMD[@]}" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -e "$ROM" "${STATEARGS[@]}" > "$SESSION/stdout.log" 2>&1 &
 GAME_PID=$!
 # The headset is in use: development builds and headless GPU runs on this machine (this project's and
 # the sibling projects') wait while this file exists and names a live process.
