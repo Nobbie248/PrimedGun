@@ -13,7 +13,8 @@
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
 #   PRIMEFRAME_FDM_LAYER=0  sets DISABLE_VULKAN_FDM_INJECTION_LAYER=1 (A/B: Valve's FDM layer off)
-#   PRIMEFRAME_SYSMEM=1     sets TU_DEBUG=sysmem (Turnip renders straight to memory; off by default)
+#   PRIMEFRAME_SYSMEM=0     leaves TU_DEBUG unset (Turnip's tiled rendering); by default the wrapper sets
+#                           TU_DEBUG=sysmem (renders straight to memory: a third of the GPU time here)
 #   PRIMEFRAME_PACING       passed through to the game, which has its own default when unset
 #   PRIMEFRAME_PLATFORM     Dolphin NoGUI platform, default x11 (headless never presents VR)
 #   PRIMEFRAME_VRTIMING=0   no compositor timing log
@@ -42,7 +43,8 @@ fi
 # The game must use the -u folder, never a user path from the environment.
 unset DOLPHIN_EMU_USERPATH
 [ "$PRIMEFRAME_FDM_LAYER" = 0 ] && { export DISABLE_VULKAN_FDM_INJECTION_LAYER=1; log "A/B: Valve FDM layer disabled"; }
-[ "$PRIMEFRAME_SYSMEM" = 1 ] && { export TU_DEBUG=sysmem; log "TU_DEBUG=sysmem"; }
+# Direct rendering by default: the stereo geometry shader made each draw run once per GMEM tile.
+[ "${PRIMEFRAME_SYSMEM:-1}" = 1 ] && { export TU_DEBUG=${TU_DEBUG:+$TU_DEBUG,}sysmem; log "TU_DEBUG=$TU_DEBUG"; }
 [ -n "$PRIMEFRAME_PACING" ] && { export PRIMEFRAME_PACING; log "PRIMEFRAME_PACING=$PRIMEFRAME_PACING"; }
 
 # The game: Steam's %command% (the binary the shortcut names), else the installed one.
