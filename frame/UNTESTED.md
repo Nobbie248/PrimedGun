@@ -34,3 +34,13 @@ Nothing below has a verdict yet.
 - Importing from the old Podman setup (`--import-podman`, in frame/DEV.md): the save and the states loading in the new build.
 - `collect-logs.sh` and `uninstall.sh` on the real install.
 - Installing from the release tarball on a clean Frame.
+
+## Pacing (built, measured only under the mock)
+
+- Pipelined pacing on the real SteamVR compositor: the per-refresh xrEndFrame, the repeated layer on the
+  refreshes between game frames, and whether it looks smooth.
+- No ghosting in either eye with the fence-based release instead of the drain.
+- Not presenting the desktop window while the game runs under Steam.
+- Controller input polled on the pacing thread.
+- The overlay, laser and cinematic screen quad layers with two eye sets.
+

@@ -156,18 +156,14 @@ profiles (no Frame profile yet), haptics.
 
 ## Statistics line
 
-`VulkanOpenXR.cpp` logs one line a second at INFO level (category OpenXR) from `SubmitFrame`:
+`VulkanOpenXR.cpp` logs one line a second at INFO level (category OpenXR):
 
 ```
-XRSTATS submitted=60 drain_avg_ms=0.13 drain_max_ms=3.19 eye=1728x1728 game_fps=59.9 game_vps=59.9
+XRSTATS mode= submitted= layers= shown= late= gpu_waits= gpu_wait_max_ms= drain_avg_ms= drain_max_ms= gpu_ms= xrwait_avg_ms= xrwait_max_ms= set_waits= eye= game_fps= game_vps=
 ```
 
-`submitted` is the number of eye sets released and ended in that second; `drain_*` is the time
-`SubmitFrame` spent in the command buffer submit that waits for completion
-(`PRIMEDGUN_XR_WAIT_GPU=1`; 0 when off); `game_fps` and `game_vps` are Dolphin's own frame and
-vblank counters (`PerformanceMetrics::UpdateCounters()` folds them in from the GPU thread; the OSD
-did that only when drawn). `xrWaitFrame` lives in `OpenXRManager.cpp` and is not in the line.
-Android builds are untouched.
+frame/PACING.md explains every field. `gpu_ms` is GPU busy time per eye set from the kernel's DRM
+fdinfo. `frame/tools/session-report.py` reads the fields generically.
 
 ## Install, wrapper and release
 
@@ -212,5 +208,21 @@ mapping (`GCPadNew.ini`) are not carried over: PrimedGun applies its OpenXR bind
 
 ## Pacing
 
-(Lane A adds the pacing note here: the fence based release, the two eye swapchain sets, the
-statistics line fields and the A/B switches.)
+frame/PACING.md has the whole account (the loop before and now, the mock's cadence model, the table).
+In short:
+
+- `PRIMEFRAME_PACING=pipelined` (default) | `inline` | `drain`; `PRIMEDGUN_XR_WAIT_GPU=1` alone still
+  means `drain`. Pipelined: two eye swapchain sets; the video thread renders a set, puts a fenced empty
+  submission behind it and hands it to a pacing thread, which runs xrWaitFrame, xrBeginFrame and
+  xrEndFrame every refresh, releases a set only after its fence and ends it with exactly the poses it
+  was rendered with; refreshes without a new set repeat the last layer. Controller actions are polled on
+  the pacing thread.
+- While the OpenXR session runs the desktop window is neither drawn nor presented
+  (`PRIMEFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
+  present, which hid every early release and cost the heavy room about 40 % of its frame rate.
+- `PRIMEFRAME_NO_GPU_WAIT=1` releases with no wait at all: the negative test, which the mock's release
+  check must fail (`mockrun.sh --nowait`).
+- mockrun: `--pacing M`, `--nowait`, `--window`; it sets `MOCK_XR_SKIP=late` (a late xrWaitFrame returns
+  at once, as SteamVR does), waits while `~/.cache/headset-in-use` names a live process and marks a run
+  INVALID (exit 3) when a headset session starts during it. The mock adds an `xrmock: cadence` summary
+  line (late layers, how many refreshes each new set stayed on screen).
