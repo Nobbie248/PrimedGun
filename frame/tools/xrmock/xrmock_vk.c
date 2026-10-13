@@ -541,6 +541,201 @@ static int dumpImage(void* images, int index, int width, int height, int64_t for
     return ok;
 }
 
+// MOCK_XR_STAMP: the app's stamp block (PRIMEFRAME_FRAME_STAMP in VulkanOpenXR.cpp), 256x20 pixels
+// in the top left corner, copied at the release into one of STAMP_SLOTS host-visible slots. Releases
+// come from two app threads (eyes on the pacing thread, overlay quads on the video thread).
+#define STAMP_W 256
+#define STAMP_H 20
+#define STAMP_SLOTS 64
+static struct {
+    VkFence fence;
+    VkCommandBuffer cb;
+    unsigned gen;
+    int submitted, decoded, result, eye;
+    uint64_t oldest, newest;
+} gStamp[STAMP_SLOTS];
+static VkBuffer gStampBuf;
+static VkDeviceMemory gStampMem;
+static unsigned char* gStampMap;
+static VkCommandPool gStampPool;
+static int gStampNext = 0, gStampReady = -1;
+static pthread_mutex_t gStampMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int stampSetup(void) {
+    if (gStampReady >= 0) return gStampReady;
+    gStampReady = 0;
+    VkBufferCreateInfo bci;
+    memset(&bci, 0, sizeof(bci));
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = (VkDeviceSize)STAMP_W * STAMP_H * 4 * STAMP_SLOTS;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (DEV(vkCreateBuffer)(gDevice, &bci, NULL, &gStampBuf) != VK_SUCCESS) return 0;
+    VkMemoryRequirements req;
+    DEV(vkGetBufferMemoryRequirements)(gDevice, gStampBuf, &req);
+    VkPhysicalDeviceMemoryProperties mp;
+    INST(vkGetPhysicalDeviceMemoryProperties)(gPhys, &mp);
+    uint32_t type = UINT32_MAX;
+    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (uint32_t t = 0; t < mp.memoryTypeCount; t++)
+        if ((req.memoryTypeBits & (1u << t)) && (mp.memoryTypes[t].propertyFlags & want) == want) {
+            type = t;
+            break;
+        }
+    VkMemoryAllocateInfo mai;
+    memset(&mai, 0, sizeof(mai));
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    if (type == UINT32_MAX || DEV(vkAllocateMemory)(gDevice, &mai, NULL, &gStampMem) != VK_SUCCESS) return 0;
+    DEV(vkBindBufferMemory)(gDevice, gStampBuf, gStampMem, 0);
+    void* map = NULL;
+    if (DEV(vkMapMemory)(gDevice, gStampMem, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS) return 0;
+    gStampMap = (unsigned char*)map;
+    VkCommandPoolCreateInfo pci;
+    memset(&pci, 0, sizeof(pci));
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pci.queueFamilyIndex = gQueueFamily;
+    if (DEV(vkCreateCommandPool)(gDevice, &pci, NULL, &gStampPool) != VK_SUCCESS) return 0;
+    for (int i = 0; i < STAMP_SLOTS; i++) {
+        VkCommandBufferAllocateInfo ai;
+        memset(&ai, 0, sizeof(ai));
+        ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        ai.commandPool = gStampPool;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        VkFenceCreateInfo fi;
+        memset(&fi, 0, sizeof(fi));
+        fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (DEV(vkAllocateCommandBuffers)(gDevice, &ai, &gStamp[i].cb) != VK_SUCCESS ||
+            DEV(vkCreateFence)(gDevice, &fi, NULL, &gStamp[i].fence) != VK_SUCCESS)
+            return 0;
+    }
+    gStampReady = 1;
+    return 1;
+}
+
+// A cell is 1 when its centre pixel is white (any colour channel above half).
+static int stampBit(int i, int column, int row) {
+    const unsigned char* q = gStampMap + (size_t)i * STAMP_W * STAMP_H * 4 + ((size_t)(row * 4 + 2) * STAMP_W + (size_t)(column * 4 + 2)) * 4;
+    return q[0] > 127 || q[1] > 127 || q[2] > 127;
+}
+static int stampValue(int i, int row, uint64_t* out) {
+    uint64_t value = 0;
+    for (int bit = 0; bit < 64; bit++) {
+        int one = stampBit(i, bit, row);
+        if (one == stampBit(i, bit, row + 1)) return 0;
+        if (one) value |= 1ull << bit;
+    }
+    *out = value;
+    return 1;
+}
+static int stampDecode(int i) {
+    static const int marker[4] = {1, 0, 1, 0};
+    for (int k = 0; k < 4; k++)
+        if (stampBit(i, 2 + k, 2) != marker[k]) return -1;
+    if (stampBit(i, 0, 2) == stampBit(i, 1, 2)) return -1;
+    if (!stampValue(i, 0, &gStamp[i].oldest) || !stampValue(i, 3, &gStamp[i].newest)) return -1;
+    gStamp[i].eye = stampBit(i, 0, 2);
+    return 1;
+}
+
+static int stampCapture(void* images, int index, int width, int height, unsigned* gen) {
+    if (!gQueue || !gDevice || width < STAMP_W || height < STAMP_H) return -1;
+    pthread_mutex_lock(&gStampMutex);
+    if (!stampSetup()) {
+        pthread_mutex_unlock(&gStampMutex);
+        return -1;
+    }
+    int i = gStampNext;
+    gStampNext = (gStampNext + 1) % STAMP_SLOTS;
+    if (gStamp[i].submitted) {
+        // Reused: its copy was queued a whole ring ago and long finished.
+        DEV(vkWaitForFences)(gDevice, 1, &gStamp[i].fence, VK_TRUE, 2000000000ull);
+        DEV(vkResetFences)(gDevice, 1, &gStamp[i].fence);
+        gStamp[i].submitted = 0;
+    }
+    gStamp[i].gen++;
+    gStamp[i].decoded = 0;
+    VkCommandBuffer cb = gStamp[i].cb;
+    DEV(vkResetCommandBuffer)(cb, 0);
+    VkCommandBufferBeginInfo bi;
+    memset(&bi, 0, sizeof(bi));
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    DEV(vkBeginCommandBuffer)(cb, &bi);
+    VkImageMemoryBarrier b;
+    memset(&b, 0, sizeof(b));
+    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = ((VkImage*)images)[index];
+    b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b.subresourceRange.levelCount = 1;
+    b.subresourceRange.layerCount = 1;
+    DEV(vkCmdPipelineBarrier)(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &b);
+    VkBufferImageCopy region;
+    memset(&region, 0, sizeof(region));
+    region.bufferOffset = (VkDeviceSize)i * STAMP_W * STAMP_H * 4;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width = STAMP_W;
+    region.imageExtent.height = STAMP_H;
+    region.imageExtent.depth = 1;
+    DEV(vkCmdCopyImageToBuffer)(cb, b.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, gStampBuf, 1, &region);
+    b.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    DEV(vkCmdPipelineBarrier)(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &b);
+    DEV(vkEndCommandBuffer)(cb);
+    VkSubmitInfo si;
+    memset(&si, 0, sizeof(si));
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    int r = -1;
+    if (DEV(vkQueueSubmit)(gQueue, 1, &si, gStamp[i].fence) == VK_SUCCESS) {
+        gStamp[i].submitted = 1;
+        *gen = gStamp[i].gen;
+        r = i;
+    }
+    pthread_mutex_unlock(&gStampMutex);
+    return r;
+}
+
+static int stampRead(int i, unsigned gen, int wait, uint64_t* oldest, uint64_t* newest, int* eye) {
+    pthread_mutex_lock(&gStampMutex);
+    int r;
+    if (i < 0 || i >= STAMP_SLOTS || gStamp[i].gen != gen) r = -2;
+    else if (!gStamp[i].decoded && !gStamp[i].submitted) r = -2;
+    else {
+        r = 1;
+        if (!gStamp[i].decoded) {
+            VkResult v = wait ? DEV(vkWaitForFences)(gDevice, 1, &gStamp[i].fence, VK_TRUE, 2000000000ull)
+                              : DEV(vkGetFenceStatus)(gDevice, gStamp[i].fence);
+            if (v != VK_SUCCESS) r = 0;
+            else {
+                DEV(vkResetFences)(gDevice, 1, &gStamp[i].fence);
+                gStamp[i].submitted = 0;
+                gStamp[i].result = stampDecode(i);
+                gStamp[i].decoded = 1;
+            }
+        }
+        if (r) {
+            *oldest = gStamp[i].oldest;
+            *newest = gStamp[i].newest;
+            *eye = gStamp[i].eye;
+            r = gStamp[i].result;
+        }
+    }
+    pthread_mutex_unlock(&gStampMutex);
+    return r;
+}
+
 static void destroyImages(void* images, int count) {
     if (!gDevice || !images) return;
     VkImage* im = (VkImage*)images;
@@ -568,7 +763,15 @@ static void shutdownVk(void) {
     gPendingCount = 0;
     for (int i = 0; i < gFreeFenceCount; i++) DEV(vkDestroyFence)(gDevice, gFreeFences[i], NULL);
     gFreeFenceCount = 0;
+    if (gStampReady == 1) {
+        for (int i = 0; i < STAMP_SLOTS; i++) DEV(vkDestroyFence)(gDevice, gStamp[i].fence, NULL);
+        DEV(vkDestroyCommandPool)(gDevice, gStampPool, NULL);
+        DEV(vkUnmapMemory)(gDevice, gStampMem);
+        DEV(vkDestroyBuffer)(gDevice, gStampBuf, NULL);
+        DEV(vkFreeMemory)(gDevice, gStampMem, NULL);
+        gStampReady = 0;
+    }
 }
 
 const MockGfx kMockGfxVk = {"vk", ownsBinding, describeBinding, getProc, formats, formatOf, createImages, fillImages, releaseWaitMs,
-                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage, destroyImages, shutdownVk};
+                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage, destroyImages, shutdownVk, stampCapture, stampRead};

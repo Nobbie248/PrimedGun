@@ -278,8 +278,7 @@ bool Presenter::FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_heigh
     m_xfb_entry->AcquireContentLock();
 
 #ifdef ENABLE_VR
-    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
-        VR::g_openxr->IsFrameThreadActive())
+    if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
       VR::g_openxr->SelectPresentPoseForXFB(xfb_addr);
 #endif
   }

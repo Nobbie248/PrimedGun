@@ -292,6 +292,7 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
         if (VR::g_openxr && VR::g_openxr->IsSessionRunning())
         {
           RefreshVRProjectionCache(upm, perspective);
+          VR::g_openxr->NoteCachedDrawPose();
 
           constants.eye_projection[0] = m_cached_eye_projection[0];
           constants.eye_projection[1] = m_cached_eye_projection[1];
@@ -602,6 +603,7 @@ void GeometryShaderManager::SetConstants(PrimitiveType prim)
             std::array<std::array<float, 4>, 4> layer_head_proj{};
             VR::g_openxr->GetEyeProjectionRows(layer_upm, layer_eye_proj, layer_eye_z);
             VR::g_openxr->GetRawEyeProjectionRows(layer_upm, layer_head_proj);
+            VR::g_openxr->NoteDrawPose(VR::g_openxr->GetEyeViewsLocateTime());
             // Apply fWidthHack / fHeightHack to projection rows (mirrors Hydra
             // VertexShaderManager.cpp:1530-1549).  Row 0 is X (multiply by width_hack),
             // row 1 is Y (multiply by height_hack).

@@ -27,6 +27,9 @@
 #                 A game ini value wins over GFX.ini (InternalResolution, ShaderCompilationMode live there)
 #   --clocklog    log the GPU clock (devfreq), its thermal cap, GPU and CPU temperatures and CPU clocks
 #                 once a second to clock.log in the run dir, and summarise them over the window
+#   --stamp       MOCK_XR_STAMP=1 and the game's PRIMEFRAME_FRAME_STAMP=1: every eye image names the locates
+#                 its draws used, the mock compares them with the poses submitted with it (a mismatch fails)
+#   --head DPS    MOCK_XR_HEAD_DPS=DPS: the mock's head turns (yaw) at up to DPS degrees a second
 #   --cool C      before the game starts, wait (up to 10 min) until every GPU thermal zone is below C
 #                 degrees Celsius, so runs start from the same temperature
 #
@@ -34,7 +37,9 @@
 # MOCK_XR_BUSY_MS default 4: the exact released-unfinished check, MOCK_XR_SKIP default late: a late
 # xrWaitFrame returns at once with the running refresh, as SteamVR on the Frame), PF_MOCKRUN_HOME (scratch,
 # default ~/.cache/pf-mockrun), PF_BUILD (build dir), PF_XRMOCK_DIR (where the mock is built;
-# default one per checkout under ~/.cache/pf-xrmock), PF_ROM (the Metroid Prime image).
+# default one per checkout under ~/.cache/pf-xrmock), PF_ROM (the Metroid Prime image), PF_SRC_USER (the user
+# dir Config/ and GameSettings/ are copied from; default the old PrimedGun one; the installed
+# ~/.local/share/PrimeFrame/user gives the owner's current settings).
 # The scratch user dir (PF_MOCKRUN_HOME/user) is seeded by copying Config/, GameSettings/, GC/
 # and StateSaves/ from the owner's PrimedGun user dir (read only); Config and GameSettings are
 # reseeded every run, the large GC and StateSaves once. Each run's logs go to
@@ -53,7 +58,7 @@ if [ -z "${PF_MOCKRUN_LOCKED:-}" ]; then
   PF_MOCKRUN_LOCKED=1 exec flock "$LOCK" "$0" "$@"
 fi
 STATE=""; SECS=60; WARMUP=30; DRAIN=0; VALIDATE=0; PLATFORM=x11; TAG=""; STACKS=""; PACING=""; NOWAIT=0; WINDOW=0
-EYE=""; TUDEBUG=""; SETS=(); CLOCKLOG=0; COOL=""
+EYE=""; TUDEBUG=""; SETS=(); CLOCKLOG=0; COOL=""; STAMP=0; HEAD=""
 EXE=${PF_BUILD:-$REPO/build-linux}/Binaries/dolphin-nogui
 while [ $# -gt 0 ]; do
   case $1 in
@@ -75,6 +80,8 @@ while [ $# -gt 0 ]; do
     --set) SETS+=("$2"); shift ;;
     --clocklog) CLOCKLOG=1 ;;
     --cool) COOL=$2; shift ;;
+    --stamp) STAMP=1 ;;
+    --head) HEAD=$2; shift ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -88,7 +95,7 @@ while headset_in_use; do echo "mockrun: headset in use ($(cat "$INUSE")), waitin
 [ -x "$EXE" ] || die "no game binary at $EXE"
 ROM=${PF_ROM:-$HOME/Documents/Roms/gc/Metroid Prime (USA).rvz}
 [ -f "$ROM" ] || die "no game image at $ROM"
-SRC_USER=$HOME/PrimedGun-podman/src/build-podman/Binaries/user
+SRC_USER=${PF_SRC_USER:-$HOME/PrimedGun-podman/src/build-podman/Binaries/user}
 [ -d "$SRC_USER/Config" ] || die "no source user dir at $SRC_USER"
 
 # Never next to a running game or the owner's session. Only real game-like processes count:
@@ -211,11 +218,15 @@ export MOCK_XR_SKIP=${MOCK_XR_SKIP:-late}
 [ -n "$PACING" ] && export PRIMEFRAME_PACING=$PACING || unset PRIMEFRAME_PACING
 [ $NOWAIT = 1 ] && export PRIMEFRAME_NO_GPU_WAIT=1 || unset PRIMEFRAME_NO_GPU_WAIT
 [ $WINDOW = 1 ] && export PRIMEFRAME_WINDOW_PRESENT=1 || unset PRIMEFRAME_WINDOW_PRESENT
+if [ $STAMP = 1 ]; then export MOCK_XR_STAMP=1 PRIMEFRAME_FRAME_STAMP=1; else unset MOCK_XR_STAMP PRIMEFRAME_FRAME_STAMP; fi
+[ -n "$HEAD" ] && export MOCK_XR_HEAD_DPS=$HEAD
 
 CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Audio Output' -e "$ROM" "${STATE_ARGS[@]}")
 {
   echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
   echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
+  echo "user settings from: $SRC_USER  stamp: $STAMP  head: ${MOCK_XR_HEAD_DPS:-default} deg/s  lead: ${MOCK_XR_LEAD:-3}"
+  env | grep -E '^PRIMEFRAME_|^PRIMEDGUN_' | sort | tr '\n' ' '; echo
   echo "TU_DEBUG: ${TU_DEBUG:-unset}${GPU_ZONES:+  gpu temp at start: $(( $(maxtemp "$GPU_ZONES") / 1000 )) C}"
   [ ! -s "$RUN/sets.txt" ] || cat "$RUN/sets.txt"
 } | tee "$RUN/info.txt"

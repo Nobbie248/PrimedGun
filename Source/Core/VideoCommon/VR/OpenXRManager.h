@@ -225,6 +225,31 @@ public:
   const std::array<XREyeView, 2>& GetSubmittedEyeViews() const { return m_submitted_eye_views; }
   void StampXFBPose(uint32_t xfb_addr);
   void SelectPresentPoseForXFB(uint32_t xfb_addr);
+
+  // PrimeFrame pose bookkeeping (video thread). Every xrLocateViews is named by the display time
+  // it was made for. The draws note the locate their constants came from; an XFB copy keeps the
+  // oldest and newest of its draws with the XFB (StampXFBPose), and the present picks them up
+  // with the XFB it shows (SelectPresentPoseForXFB).
+  XrTime GetEyeViewsLocateTime() const { return m_eye_views_locate_time; }
+  void NoteDrawPose(XrTime t)
+  {
+    if (t == 0)
+      return;
+    if (m_draw_pose_min == 0 || t < m_draw_pose_min)
+      m_draw_pose_min = t;
+    if (t > m_draw_pose_max)
+      m_draw_pose_max = t;
+  }
+  // The pose of the geometry shader's cache (RecordRenderedEyeViews).
+  void NoteCachedDrawPose() { NoteDrawPose(m_submitted_locate_time); }
+  struct PresentPose
+  {
+    bool valid = false;        // the XFB shown was stamped at its copy
+    XrTime locate_time = 0;    // the locate of its pose (the newest its draws used)
+    XrTime draw_oldest = 0;    // the oldest and newest locate its draws used
+    XrTime draw_newest = 0;
+  };
+  const PresentPose& GetPresentPose() const { return m_present_pose; }
   const std::array<XREyeView, 2>& GetPresentEyeViews() const
   {
     return m_present_eye_views_valid ? m_present_eye_views : m_submitted_eye_views;
@@ -383,12 +408,20 @@ private:
     uint32_t xfb_addr = 0;
     uint64_t serial = 0;
     std::array<XREyeView, 2> views{};
+    XrTime locate_time = 0;
+    XrTime draw_oldest = 0;
+    XrTime draw_newest = 0;
   };
   std::array<XFBPoseStamp, 8> m_xfb_pose_stamps{};
   size_t m_xfb_pose_stamp_next = 0;
   uint64_t m_xfb_pose_stamp_serial = 0;
   std::array<XREyeView, 2> m_present_eye_views{};
   bool m_present_eye_views_valid = false;
+  PresentPose m_present_pose{};
+  XrTime m_eye_views_locate_time = 0;
+  XrTime m_submitted_locate_time = 0;
+  XrTime m_draw_pose_min = 0;
+  XrTime m_draw_pose_max = 0;
 
   bool m_eye_views_valid = false;
   bool m_submitted_eye_views_valid = false;

@@ -313,6 +313,7 @@ void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
     m_xfb_pose_stamp_next = 0;
     m_xfb_pose_stamp_serial = 0;
     m_present_eye_views_valid = false;
+    m_present_pose = {};
     return;
   }
 
@@ -1510,6 +1511,7 @@ bool OpenXRManager::LocateViewsAt(XrTime display_time)
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
   }
+  m_eye_views_locate_time = display_time;
 
   if (m_recenter_requested.exchange(false, std::memory_order_acq_rel) && view_count >= 2)
   {
@@ -1557,10 +1559,15 @@ void OpenXRManager::RecordRenderedEyeViews()
 {
   m_submitted_eye_views = m_eye_views;
   m_submitted_eye_views_valid = m_eye_views_valid;
+  m_submitted_locate_time = m_eye_views_locate_time;
 }
 
 void OpenXRManager::StampXFBPose(uint32_t xfb_addr)
 {
+  const XrTime draw_oldest = m_draw_pose_min;
+  const XrTime draw_newest = m_draw_pose_max;
+  m_draw_pose_min = 0;
+  m_draw_pose_max = 0;
   if (!m_submitted_eye_views_valid)
     return;
 
@@ -1583,6 +1590,9 @@ void OpenXRManager::StampXFBPose(uint32_t xfb_addr)
   slot->xfb_addr = xfb_addr;
   slot->serial = ++m_xfb_pose_stamp_serial;
   slot->views = m_submitted_eye_views;
+  slot->locate_time = m_submitted_locate_time;
+  slot->draw_oldest = draw_oldest;
+  slot->draw_newest = draw_newest;
 }
 
 void OpenXRManager::SelectPresentPoseForXFB(uint32_t xfb_addr)
@@ -1599,6 +1609,14 @@ void OpenXRManager::SelectPresentPoseForXFB(uint32_t xfb_addr)
       newest = &stamp;
   }
 
+  m_present_pose = {};
+  if (match)
+  {
+    m_present_pose.valid = true;
+    m_present_pose.locate_time = match->locate_time;
+    m_present_pose.draw_oldest = match->draw_oldest;
+    m_present_pose.draw_newest = match->draw_newest;
+  }
   if (!match)
     match = newest;
   if (match)

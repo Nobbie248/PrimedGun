@@ -1989,11 +1989,64 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
   return sc.framebuffers[idx].get();
 }
 
+#if !defined(ANDROID)
+// PRIMEFRAME_FRAME_STAMP=1 (tests only): each eye image gets a 256x20 pixel block in its top left
+// corner naming the locates (display times, XrTime) whose poses the draws of the XFB shown used:
+// the oldest and the newest. The mock runtime (MOCK_XR_STAMP) reads it back from the image a
+// projection layer submits and compares both with the locate of the layer's poses. Layout, 4x4
+// pixel cells, white = 1: row 0 the 64 bits of the oldest (bit 0 first), row 1 their complement,
+// row 2: cell 0 the eye (1 = right), cell 1 its complement, cells 2-5 the marker 1 0 1 0, row 3 the
+// newest, row 4 its complement. 0 means the XFB shown was not stamped at its copy.
+static void WriteFrameStamp(uint32_t eye_index)
+{
+  const auto& pose = VR::g_openxr->GetPresentPose();
+  const uint64_t oldest = pose.valid ? static_cast<uint64_t>(pose.draw_oldest) : 0;
+  const uint64_t newest = pose.valid ? static_cast<uint64_t>(pose.draw_newest) : 0;
+  constexpr uint32_t cell_size = 4;
+  std::vector<VkClearRect> ones, zeros;
+  const auto cell = [&](uint32_t column, uint32_t row, bool one) {
+    const VkClearRect rect{{{static_cast<int32_t>(column * cell_size),
+                             static_cast<int32_t>(row * cell_size)},
+                            {cell_size, cell_size}},
+                           0,
+                           1};
+    (one ? ones : zeros).push_back(rect);
+  };
+  for (uint32_t bit = 0; bit < 64; ++bit)
+  {
+    const bool old_one = ((oldest >> bit) & 1u) != 0;
+    const bool new_one = ((newest >> bit) & 1u) != 0;
+    cell(bit, 0, old_one);
+    cell(bit, 1, !old_one);
+    cell(bit, 3, new_one);
+    cell(bit, 4, !new_one);
+  }
+  cell(0, 2, eye_index == 1);
+  cell(1, 2, eye_index != 1);
+  for (uint32_t k = 0; k < 4; ++k)
+    cell(2 + k, 2, (k & 1u) == 0);
+  StateTracker::GetInstance()->EndClearRenderPass();
+  StateTracker::GetInstance()->BeginRenderPass();
+  VkClearAttachment white{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+  white.clearValue.color = {{1.0f, 1.0f, 1.0f, 1.0f}};
+  VkClearAttachment black{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+  black.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+  const VkCommandBuffer cmd = g_command_buffer_mgr->GetCurrentCommandBuffer();
+  vkCmdClearAttachments(cmd, 1, &white, static_cast<uint32_t>(ones.size()), ones.data());
+  vkCmdClearAttachments(cmd, 1, &black, static_cast<uint32_t>(zeros.size()), zeros.data());
+}
+#endif
+
 void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
 {
   ASSERT(eye_index < 2);
   if (!m_image_acquired[eye_index])
     return;
+#if !defined(ANDROID)
+  static const bool s_frame_stamp = EnvIs("PRIMEFRAME_FRAME_STAMP", "1");
+  if (s_frame_stamp)
+    WriteFrameStamp(eye_index);
+#endif
 
 #if defined(ANDROID)
   // End any active render pass so the eye image is no longer bound for rendering.

@@ -51,6 +51,13 @@ typedef struct MockGfx {
     void (*destroy_images)(void* images, int count);
     // End of the session: frees what the checks created (fences). Null: nothing.
     void (*shutdown)(void);
+    // MOCK_XR_STAMP: at a release (the app holds its queue), copy the corner block the app wrote
+    // with PRIMEFRAME_FRAME_STAMP=1 into a host slot; returns the slot (its generation in *gen),
+    // -1 when not available.
+    int (*stamp_capture)(void* images, int index, int width, int height, unsigned* gen);
+    // The slot's stamp: 1 decoded (oldest and newest locate, eye), 0 not read back yet (wait != 0:
+    // waits), -1 no valid stamp in the image, -2 the slot was reused since (gen differs).
+    int (*stamp_read)(int slot, unsigned gen, int wait, uint64_t* oldest, uint64_t* newest, int* eye);
 } MockGfx;
 
 extern const MockGfx kMockGfxGles;
