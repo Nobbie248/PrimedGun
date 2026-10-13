@@ -232,7 +232,7 @@ fi
 
 # ---- library art: copy the art of the owner's old shortcut (if it exists) to the new appid
 if [ "$APPID" != none ] && [ -n "$GRID" ]; then
-    OLDID=$(python3 -I - "$HERE/steam-cef.py" "$STEAM" << 'PY'
+    OLDID=$(python3 -I -B - "$HERE/steam-cef.py" "$STEAM" << 'PY'
 import glob, importlib.util, sys
 spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 for p in sorted(glob.glob(sys.argv[2] + "/userdata/*/config/shortcuts.vdf")):

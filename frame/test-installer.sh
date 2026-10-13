@@ -22,7 +22,7 @@ STEAM=$T/steam; mkdir -p "$STEAM/userdata/1/config/grid"
 REAL=$(ls "$REALHOME"/.local/share/Steam/userdata/*/config/shortcuts.vdf 2> /dev/null | head -1)   # read only, copied
 [ -n "$REAL" ] && cp "$REAL" "$STEAM/userdata/1/config/shortcuts.vdf"
 VDF=$STEAM/userdata/1/config/shortcuts.vdf
-py() { python3 -I -c '
+py() { python3 -I -B -c '
 import importlib.util, sys
 s = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
 d = m.vdf_load(sys.argv[2])["shortcuts"]
@@ -31,7 +31,7 @@ count() { py 'print(sum(1 for v in d.values() if v.get("AppName") == sys.argv[3]
 field() { py 'print(next(v[sys.argv[4]] for v in d.values() if v.get("AppName") == sys.argv[3]))' "$@"; }
 OLD="PrimedGun - Metroid Prime VR"
 if [ "$(count "$OLD")" = 0 ]; then
-    python3 -I -c '
+    python3 -I -B -c '
 import importlib.util, sys
 s = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
 m.vdf_shortcut(sys.argv[2], sys.argv[3], "\"/old/primedgun.sh\"", "\"/old/\"", "-e x")' "$HERE/steam-cef.py" "$VDF" "$OLD"
