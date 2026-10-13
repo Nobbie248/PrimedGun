@@ -1350,7 +1350,23 @@ bool OpenXRManager::WaitFrame()
 {
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
   m_frame_state = {XR_TYPE_FRAME_STATE};
+  const auto wait_start = std::chrono::steady_clock::now();
   XR_CHECK(xrWaitFrame(m_session, &wait_info, &m_frame_state));
+  const auto wait_end = std::chrono::steady_clock::now();
+  const uint64_t waited_us = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(wait_end - wait_start).count());
+  m_wait_count.fetch_add(1, std::memory_order_relaxed);
+  m_wait_total_us.fetch_add(waited_us, std::memory_order_relaxed);
+  if (waited_us > m_wait_max_us.load(std::memory_order_relaxed))
+    m_wait_max_us.store(waited_us, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    m_clock.display_time = m_frame_state.predictedDisplayTime;
+    m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          wait_end.time_since_epoch())
+                          .count();
+    m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
+  }
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
                                           std::memory_order_release);
   m_predicted_display_period_snapshot.store(m_frame_state.predictedDisplayPeriod,
@@ -1402,8 +1418,18 @@ bool OpenXRManager::EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& l
     end_info.layers = layers.data();
   }
 
+  // The runtime's client may submit on our queue inside xrEndFrame (SteamVR does).
+  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                  std::unique_lock<std::mutex>{};
   XR_CHECK(xrEndFrame(m_session, &end_info));
   return true;
+}
+
+void OpenXRManager::TakeWaitFrameStats(uint32_t* count, uint64_t* total_us, uint64_t* max_us)
+{
+  *count = m_wait_count.exchange(0, std::memory_order_relaxed);
+  *total_us = m_wait_total_us.exchange(0, std::memory_order_relaxed);
+  *max_us = m_wait_max_us.exchange(0, std::memory_order_relaxed);
 }
 
 XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
@@ -1449,6 +1475,13 @@ bool OpenXRManager::LocateViews()
           snapshot_time +
               m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
           snapshot_time;
+  return LocateViewsAt(display_time);
+}
+
+bool OpenXRManager::LocateViewsAt(XrTime display_time)
+{
+  if (display_time == 0)
+    return false;
   XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
   locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
   locate_info.displayTime = display_time;

@@ -70,6 +70,14 @@ public:
   virtual bool SupportsDetachedFrameLoop() const { return true; }
   virtual std::unique_lock<std::mutex> AcquireGraphicsQueueLock() { return {}; }
   virtual bool WaitForPendingFrameFinalization(std::string_view reason = {}) { return true; }
+
+  // PrimeFrame pacing (Vulkan). Pipelined: a pacing thread owns xrWaitFrame/xrBeginFrame/
+  // xrEndFrame and the releases; the video thread only renders, hands each eye set over and
+  // locates the pose for the next game frame (LocateNextFramePose). The desktop window present
+  // is skipped while the session runs when SkipsWindowPresent() (nobody sees it in the headset).
+  virtual bool UsesPipelinedPacing() const { return false; }
+  virtual bool SkipsWindowPresent() const { return false; }
+  virtual bool LocateNextFramePose() { return false; }
 };
 
 class OpenXRManager
@@ -165,7 +173,25 @@ public:
   // xrLocateViews — fills m_eye_views with the predicted head pose for each eye.
   // Call between BeginFrame and rendering.
   bool LocateViews();
+  // xrLocateViews for an explicit display time (the pipelined pacing picks the refresh).
+  bool LocateViewsAt(XrTime display_time);
   void RecordRenderedEyeViews();
+
+  // The last xrWaitFrame: its predicted display time, the steady clock (ns) when it returned,
+  // the display period. Lets another thread place a future refresh on the runtime's grid.
+  struct FrameClock
+  {
+    XrTime display_time = 0;
+    int64_t wake_ns = 0;
+    int64_t period_ns = 0;
+  };
+  FrameClock GetFrameClock() const
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    return m_clock;
+  }
+  // xrWaitFrame calls since the last call: count, total and longest blocking time (us).
+  void TakeWaitFrameStats(uint32_t* count, uint64_t* total_us, uint64_t* max_us);
 
   // ---- Accessors ----
 
@@ -297,6 +323,11 @@ private:
   bool m_exit_render_loop = false;
 
   XrFrameState m_frame_state{XR_TYPE_FRAME_STATE};
+  mutable std::mutex m_clock_mutex;
+  FrameClock m_clock;
+  std::atomic<uint32_t> m_wait_count{0};
+  std::atomic<uint64_t> m_wait_total_us{0};
+  std::atomic<uint64_t> m_wait_max_us{0};
   std::atomic<XrTime> m_predicted_display_time_snapshot{0};
   std::atomic<int64_t> m_predicted_display_period_snapshot{0};
   std::atomic<bool> m_should_render_snapshot{false};

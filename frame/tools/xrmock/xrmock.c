@@ -21,6 +21,13 @@
 //   MOCK_XR_EXTENSIONS=a,b    replace the list of extensions offered
 //   MOCK_XR_SKIP=1            a frame begun late loses refreshes (the display
 //                             times jump), as on a headset
+//   MOCK_XR_SKIP=late         a late xrWaitFrame returns at once with the refresh
+//                             that is running (SteamVR on the Frame); display
+//                             times stay in the future
+//   MOCK_XR_LATCH_MS=<ms>     a layer stack lands on the first refresh at least
+//                             this long after its xrEndFrame (one period), never
+//                             before its display time; the summary gives the
+//                             cadence (refreshes each new eye set stays on screen)
 //   MOCK_XR_BUSY_MS=<ms>      Vulkan: check that each released image was finished.
 //                             Exact where the images can be host visible (the
 //                             Frame): the image's bytes at the release against
@@ -355,6 +362,8 @@ static int gPoseSets = 0, gPoseSameTime = 0, gPoseEarlier = 0, gPoseLater = 0, g
 static void checkPoses(const XrCompositionLayerProjection* p, XrTime displayTime, int fresh);
 // Frames by what they showed: a projection layer whose eye images were both released since
 // the last xrEndFrame (fresh), one shown again (repeat), none.
+static int gLateLayers = 0, gLayerEnds = 0, gUnseen = 0, gHeld[6], gRun2 = 0, gRun2Max = 0, gFlips = 0;
+static int64_t gLastFreshSlot = -1, gLastHeld = -1;
 static int gEnds = 0, gFreshSets = 0, gFreshSame = 0, gFreshEarlier = 0, gFreshLater = 0, gRepeatSets = 0, gQuadEnds = 0, gEmptyEnds = 0;
 static XrResult XRAPI_CALL mWaitImage(XrSwapchain sc, const XrSwapchainImageWaitInfo* wi) {
     (void)wi;
@@ -490,6 +499,10 @@ static XrResult XRAPI_CALL mEndSession(XrSession s) {
             "xrmock: frames: %d ended; %d showed newly released eyes (from one locate for the display time submitted %d, for an earlier one %d, "
             "a later one %d), %d repeated a projection layer, %d a quad, %d no layer; focus blips %d\n",
             gEnds, gFreshSets, gFreshSame, gFreshEarlier, gFreshLater, gRepeatSets, gQuadEnds, gEmptyEnds, gBlips);
+    fprintf(stderr,
+            "xrmock: cadence: %d layer stacks ended, %d late (landed after their display time); new eye sets held on screen for 1 refresh %d, "
+            "2: %d, 3: %d, 4: %d, 5+: %d; never shown %d; 1-3 or 3-1 flips %d; longest run of 2s %d\n",
+            gLayerEnds, gLateLayers, gHeld[1], gHeld[2], gHeld[3], gHeld[4], gHeld[5], gUnseen, gFlips, gRun2Max);
     if (gReleases) {
         fprintf(stderr, "xrmock: queue drain time at the releases: <0.5 ms %d, 0.5-1 %d, 1-2 %d, 2-4 %d, >4 %d\n", gWaitHist[0], gWaitHist[1], gWaitHist[2],
                 gWaitHist[3], gWaitHist[4]);
@@ -554,10 +567,17 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
     int64_t now = nowNs();
     // MOCK_XR_SKIP=1: a frame loop that falls behind loses refreshes, as on a
     // headset (the next frame waits for the next refresh to come).
+    // MOCK_XR_SKIP=late: a late call returns at once with the refresh that is running (SteamVR on
+    // the Frame does not block a late xrWaitFrame); the display times stay in the future.
     static int skip = -1;
-    if (skip < 0) skip = getenv("MOCK_XR_SKIP") != NULL;
-    if (skip && gT0 && now > gT0 + (int64_t)gWaits * gPeriod + gPeriod / 2) {
+    if (skip < 0) {
+        const char* e = getenv("MOCK_XR_SKIP");
+        skip = !e ? 0 : !strcmp(e, "late") ? 2 : 1;
+    }
+    if (skip == 1 && gT0 && now > gT0 + (int64_t)gWaits * gPeriod + gPeriod / 2) {
         gWaits = (int)((now - gT0) / gPeriod) + 1;
+    } else if (skip == 2 && gT0 && now >= gT0 + (int64_t)(gWaits + 1) * gPeriod) {
+        gWaits = (int)((now - gT0) / gPeriod);
     }
     int64_t wake = gT0 + (int64_t)gWaits * gPeriod;
     if (wake > now) {
@@ -626,7 +646,43 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
             strcat(buf, t);
         }
     }
-    trace("endFrame layers=%u%s", ei->layerCount, buf);
+    // Which refresh the layer stack lands on: the compositor takes what was ended by one period
+    // (MOCK_XR_LATCH_MS) before a refresh, and nothing before its display time. Fresh eye sets
+    // give the cadence: how many refreshes each one stays on screen.
+    int64_t landSlot = -1, wantSlot = -1;
+    if (gT0 && ei->layerCount > 0) {
+        static int64_t latch = -1;
+        if (latch < 0) latch = getenv("MOCK_XR_LATCH_MS") ? (int64_t)(atof(getenv("MOCK_XR_LATCH_MS")) * 1e6) : gPeriod;
+        int64_t want = (int64_t)ei->displayTime - gTimeOffset - gT0;
+        wantSlot = (want + gPeriod / 2) / gPeriod;
+        int64_t earliest = nowNs() + latch - gT0;
+        landSlot = (earliest + gPeriod - 1) / gPeriod;
+        if (landSlot < wantSlot) landSlot = wantSlot;
+        if (landSlot > wantSlot) {
+            gLateLayers++;
+            trace("late: ended for refresh %lld, lands on %lld", (long long)wantSlot, (long long)landSlot);
+        }
+        gLayerEnds++;
+        int fresh = ei->layers[0]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION && ((const XrCompositionLayerProjection*)ei->layers[0])->viewCount == 2 &&
+                    chainOf(((const XrCompositionLayerProjection*)ei->layers[0])->views[0].subImage.swapchain)->released;
+        if (fresh) {
+            if (gLastFreshSlot >= 0) {
+                int64_t held = landSlot - gLastFreshSlot;
+                if (held <= 0) gUnseen++;
+                else {
+                    gHeld[held > 5 ? 5 : held]++;
+                    // A run: consecutive fresh sets each held 2 refreshes.
+                    if (held == 2) {
+                        if (++gRun2 > gRun2Max) gRun2Max = gRun2;
+                    } else gRun2 = 0;
+                    if (gLastHeld >= 0 && ((gLastHeld == 1 && held == 3) || (gLastHeld == 3 && held == 1))) gFlips++;
+                    gLastHeld = held;
+                }
+            }
+            gLastFreshSlot = landSlot;
+        }
+    }
+    trace("endFrame layers=%u%s d=%lld at=%lld", ei->layerCount, buf, (long long)wantSlot, (long long)landSlot);
     gEnds++;
     if (ei->layerCount == 0) gEmptyEnds++;
     else if (ei->layers[0]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) gQuadEnds++;
