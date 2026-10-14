@@ -13,13 +13,14 @@
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
 #   PRIMEFRAME_MOTION_SMOOTHING  SteamVR motionSmoothingOverride for the app: 0 global, 1 on, 2 off (default), 3 always on
-#   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (0 default; 1 = SteamVR paces the app at half the refresh)
+#   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (0 default; 1 = SteamVR paces the app at half the
+#                           refresh, for PRIMEFRAME_PACING cycle and drain)
 #   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;
 #                           1728 is SteamVR's 100 % here)
 #   PRIMEFRAME_FDM_LAYER=0  sets DISABLE_VULKAN_FDM_INJECTION_LAYER=1 (A/B: Valve's FDM layer off)
 #   PRIMEFRAME_SYSMEM=0     leaves TU_DEBUG unset (Turnip's tiled rendering); by default the wrapper sets
 #                           TU_DEBUG=sysmem (renders straight to memory: a third of the GPU time here)
-#   PRIMEFRAME_PACING       passed through to the game, which has its own default when unset
+#   PRIMEFRAME_PACING       passed through to the game: cycle (its default), pipelined, drain, inline
 #   PRIMEFRAME_REPEATS=1    the game ends a frame every refresh, repeating the last eye set (the old
 #                           pipelined behaviour, for comparison; passed through like any game switch)
 #   PRIMEFRAME_PLATFORM     Dolphin NoGUI platform, default x11 (headless never presents VR)
@@ -91,6 +92,8 @@ EYE=${PRIMEFRAME_EYE:-2160}
 # SteamVR per-app motion smoothing: 0 global setting (on unless changed), 1 on, 2 off, 3 always on.
 MS=${PRIMEFRAME_MOTION_SMOOTHING:-2}
 # SteamVR frames to throttle: refreshes the app skips (SteamVR's frame limit = refresh / (1 + this)).
+# frame/PACING.md: 1 suits the cycle and drain loops (the headset showed the drain clean with it),
+# pipelined needs 0 (it picks its refreshes on the full-rate grid).
 THROTTLE=${PRIMEFRAME_THROTTLE:-0}
 case "$THROTTLE" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_THROTTLE=$THROTTLE is not 0 to 3, using 0"; THROTTLE=0 ;; esac
 case "$MS" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_MOTION_SMOOTHING=$MS is not 0 to 3, using 2"; MS=2 ;; esac
