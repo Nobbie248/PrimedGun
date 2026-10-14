@@ -1865,15 +1865,15 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
     if (m_pacing == Pacing::Pipelined)
     {
       std::unique_lock<std::mutex> lock(m_pacer_mutex);
-      if (m_set_in_flight[m_frame_set])
+      if (SetBusyLocked(m_frame_set))
       {
         m_video_waiting_for_set = true;
         m_pacer_cv.notify_all();
         const bool free = m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
-          return !m_set_in_flight[m_frame_set] || m_pacer_exit.load();
+          return !SetBusyLocked(m_frame_set) || m_pacer_exit.load();
         });
         m_video_waiting_for_set = false;
-        if (!free || m_set_in_flight[m_frame_set])
+        if (!free || SetBusyLocked(m_frame_set))
         {
           // The pacing thread did not give the set back (session ending): skip the eyes.
           m_frame_set_chosen = false;
@@ -2420,6 +2420,20 @@ bool VulkanOpenXR::SubmitFrame()
 
 
 #if !defined(ANDROID)
+// Pipelined: a set is busy while an item of it is pending with its images unreleased (one waited,
+// unreleased image per swapchain). Once released (at its fence, before its refresh) the game may
+// render into the set's next images: the pacing thread releases and ends items in order, so the
+// older layer is ended before the newer images are released. Under m_pacer_mutex.
+bool VulkanOpenXR::SetBusyLocked(uint32_t set) const
+{
+  for (const XRFrameItem& item : m_pending)
+  {
+    if (item.set == set && !item.released)
+      return true;
+  }
+  return false;
+}
+
 VkFence VulkanOpenXR::TakeFence()
 {
   {
@@ -2625,7 +2639,6 @@ bool VulkanOpenXR::SubmitFramePipelined()
   const uint32_t used_set = item.set;
   {
     std::lock_guard<std::mutex> lock(m_pacer_mutex);
-    m_set_in_flight[used_set] = true;
     m_pending.push_back(std::move(item));
   }
   m_pacer_cv.notify_all();
@@ -2863,11 +2876,6 @@ void VulkanOpenXR::ReleaseCompletedItems(bool block)
   }
   for (XRFrameItem& item : done)
     ReleaseItem(item, true);
-  {
-    std::lock_guard<std::mutex> lock(m_pacer_mutex);
-    for (XRFrameItem& item : done)
-      m_set_in_flight[item.set] = false;
-  }
   if (!done.empty())
     m_pacer_cv.notify_all();
 }
@@ -3021,21 +3029,35 @@ void VulkanOpenXR::PacerLoop()
           front->fence = VK_NULL_HANDLE;
         }
         ReturnFence(done_fence);
+        // The video thread may render into the set's next images now.
+        m_pacer_cv.notify_all();
       }
     }
+    // When the set is due on the very next slot the runtime hands out (SteamVR throttling the app
+    // to every second refresh: consecutive slots), xrWaitFrame is called at once and blocks until
+    // the runtime's own wake-up for it. Otherwise slots are skipped, and an xrWaitFrame called
+    // after skipped slots returns at once with the slot that is running (SteamVR on the Frame;
+    // the mock's MOCK_XR_SKIP=late): it is called just after the due slot's wake-up.
     if (due_wake != 0)
     {
-      // An xrWaitFrame called after refreshes were skipped returns at once with the refresh that
-      // is running (SteamVR on the Frame; the mock's MOCK_XR_SKIP=late): call it just after the
-      // due refresh started.
-      // As with repeats, a set is shown early when the game waits for a free one.
-      const auto deadline = std::chrono::steady_clock::time_point(
-          std::chrono::nanoseconds(due_wake + 250'000));
-      std::unique_lock<std::mutex> lock(m_pacer_mutex);
-      m_pacer_cv.wait_until(lock, deadline,
-                            [&] { return m_pacer_exit.load() || m_video_waiting_for_set; });
+      const int64_t slot = std::max(m_slot_ns.load(), VR::g_openxr->GetFrameClock().period_ns);
+      XrTime due = 0;
+      {
+        std::lock_guard<std::mutex> lock(m_pacer_mutex);
+        if (!m_pending.empty())
+          due = m_pending.front().target;
+      }
+      const bool next_slot = m_last_handed != 0 && due != 0 && due <= m_last_handed + slot + slot / 2;
+      if (!next_slot)
+      {
+        const auto deadline = std::chrono::steady_clock::time_point(
+            std::chrono::nanoseconds(due_wake + 250'000));
+        std::unique_lock<std::mutex> lock(m_pacer_mutex);
+        m_pacer_cv.wait_until(lock, deadline, [&] { return m_pacer_exit.load(); });
+      }
     }
 
+    const int64_t wait_call_ns = SteadyNs();
     if (!VR::g_openxr->WaitFrame())
     {
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -3043,7 +3065,16 @@ void VulkanOpenXR::PacerLoop()
     }
     const auto clock = VR::g_openxr->GetFrameClock();
     const XrTime display_time = clock.display_time;
-    const int64_t period = std::max<int64_t>(clock.period_ns, 1);
+    // The runtime's slot: the spacing of consecutive display times it hands out (a blocking
+    // xrWaitFrame follows the slot handed out before it).
+    if (m_last_handed != 0 && clock.wake_ns - wait_call_ns > 500'000)
+    {
+      const int64_t spacing = display_time - m_last_handed;
+      if (spacing > 5'000'000 && spacing < 40'000'000)
+        m_slot_ns.store(spacing);
+    }
+    m_last_handed = display_time;
+    const int64_t period = std::max<int64_t>(std::max(clock.period_ns, m_slot_ns.load()), 1);
     const bool should_render = VR::g_openxr->ShouldRender();
 
     // The newest set due on this refresh (or the oldest when the game waits for a free set).
@@ -3057,8 +3088,6 @@ void VulkanOpenXR::PacerLoop()
         if (m_pending[i].target <= display_time + period / 2)
           chosen = static_cast<int>(i);
       }
-      if (chosen < 0 && m_video_waiting_for_set && !m_pending.empty())
-        chosen = 0;
       if (chosen >= 0)
       {
         chosen_fence = m_pending[chosen].fence;
@@ -3125,11 +3154,6 @@ void VulkanOpenXR::PacerLoop()
       }
       for (XRFrameItem& item : items)
         ReleaseItem(item, !m_no_gpu_wait);
-      {
-        std::lock_guard<std::mutex> lock(m_pacer_mutex);
-        for (XRFrameItem& item : items)
-          m_set_in_flight[item.set] = false;
-      }
       m_pacer_cv.notify_all();
       current = std::move(items.back());
       have_current = true;
@@ -3181,7 +3205,8 @@ bool VulkanOpenXR::LocateNextFramePose()
   const auto clock = VR::g_openxr->GetFrameClock();
   if (clock.display_time == 0 || clock.period_ns <= 0)
     return false;
-  const int64_t period = clock.period_ns;
+  // The runtime's slot (two refreshes when SteamVR throttles the app to half the refresh rate).
+  const int64_t period = std::max(clock.period_ns, m_slot_ns.load());
   const int64_t now = SteadyNs();
   const double span_ms = m_span_ema_ms > 0.0 ? m_span_ema_ms : 15.0;
   const double interval_ms = m_interval_ema_ms > 0.0 ? m_interval_ema_ms : 16.7;

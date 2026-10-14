@@ -215,6 +215,7 @@ private:
     return set == 0 ? m_eye_swapchains : m_eye_swapchains_b;
   }
   VkFence TakeFence();
+  bool SetBusyLocked(uint32_t set) const;
   void ReturnFence(VkFence fence);
   bool SubmitFramePipelined();
   bool SubmitFrameCycle();
@@ -299,13 +300,16 @@ private:
   std::mutex m_pacer_mutex;
   std::condition_variable m_pacer_cv;
   std::deque<XRFrameItem> m_pending;
-  std::array<bool, 2> m_set_in_flight{};
   bool m_video_waiting_for_set = false;
   std::vector<VkFence> m_free_fences;
   std::vector<VkFence> m_all_fences;
   std::thread m_pacer;
   std::atomic<bool> m_pacer_exit{false};
   std::atomic<double> m_gpu_tail_ema_ms{2.0};
+  // Pipelined: the spacing of the display times the runtime hands out (0 until a blocking
+  // xrWaitFrame measured it; the display period is the floor) and the last one handed out.
+  std::atomic<int64_t> m_slot_ns{0};
+  XrTime m_last_handed = 0;
 
   // Per-second statistics (XRSTATS), written by either thread.
   std::mutex m_stats_mutex;

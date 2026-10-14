@@ -10,7 +10,7 @@
 #   --warmup N    extra seconds of session before the window can start (boot, state load);
 #                 the mock ends the session after N + warmup seconds (default 30)
 #   --drain       PRIMEDGUN_XR_WAIT_GPU=1 (the GPU drain before the eye images are released)
-#   --pacing M    PRIMEFRAME_PACING=pipelined|inline|drain (default: the game's default, pipelined)
+#   --pacing M    PRIMEFRAME_PACING=cycle|pipelined|drain|inline (default: the game's default, cycle)
 #   --nowait      PRIMEFRAME_NO_GPU_WAIT=1: release with no GPU wait at all (the negative test:
 #                 the mock's release check must fail)
 #   --window      PRIMEFRAME_WINDOW_PRESENT=1: keep the desktop window present while in VR
@@ -33,7 +33,7 @@
 #   --cool C      before the game starts, wait (up to 10 min) until every GPU thermal zone is below C
 #                 degrees Celsius, so runs start from the same temperature
 #
-# Environment: MOCK_XR_* settings of xrmock (MOCK_XR_HZ default 120, MOCK_XR_EYE default 1728x1728,
+# Environment: MOCK_XR_* settings of xrmock (MOCK_XR_THROTTLE: SteamVR's framesToThrottle, MOCK_XR_HZ default 120, MOCK_XR_EYE default 1728x1728,
 # MOCK_XR_BUSY_MS default 4: the exact released-unfinished check, MOCK_XR_SKIP default late: a late
 # xrWaitFrame returns at once with the running refresh, as SteamVR on the Frame), PF_MOCKRUN_HOME (scratch,
 # default ~/.cache/pf-mockrun), PF_BUILD (build dir), PF_XRMOCK_DIR (where the mock is built;
@@ -225,7 +225,7 @@ CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Au
 {
   echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
   echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
-  echo "user settings from: $SRC_USER  stamp: $STAMP  head: ${MOCK_XR_HEAD_DPS:-default} deg/s  lead: ${MOCK_XR_LEAD:-3}"
+  echo "user settings from: $SRC_USER  stamp: $STAMP  head: ${MOCK_XR_HEAD_DPS:-default} deg/s  lead: ${MOCK_XR_LEAD:-3}  throttle: ${MOCK_XR_THROTTLE:-0}"
   env | grep -E '^PRIMEFRAME_|^PRIMEDGUN_' | sort | tr '\n' ' '; echo
   echo "TU_DEBUG: ${TU_DEBUG:-unset}${GPU_ZONES:+  gpu temp at start: $(( $(maxtemp "$GPU_ZONES") / 1000 )) C}"
   [ ! -s "$RUN/sets.txt" ] || cat "$RUN/sets.txt"
