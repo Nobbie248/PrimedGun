@@ -165,6 +165,9 @@ public:
   // PrimeFrame pacing (PRIMEFRAME_PACING=pipelined|inline|drain, see frame/PACING.md).
   bool UsesPipelinedPacing() const override { return m_pacing == Pacing::Pipelined; }
   bool UsesLazyFrameStart() const override { return m_pacing == Pacing::Cycle && m_lazy_start; }
+  bool UsesCycleOverlap() const override { return m_pacing == Pacing::Cycle && m_cycle_overlap; }
+  bool CycleBeforeWait() override;
+  bool CycleBeginNowAfterWait() override;
   bool SkipsWindowPresent() const override { return m_skip_window_present; }
   bool LocateNextFramePose() override;
 
@@ -208,6 +211,12 @@ private:
     int64_t submit_ns = 0;
     XrTime pose_time = 0;       // the display time its poses were located for
     bool should_render = true;  // cycle: the frame's xrWaitFrame said so
+    // Cycle timing (XRC line): the frame's xrWaitFrame return, how long the video thread waited
+    // for the last frame's end at this frame's start, its CPU and wall time since the last submit.
+    int64_t wake_ns = 0;
+    int64_t video_wait_ns = 0;
+    int64_t video_cpu_ns = 0;
+    int64_t video_wall_ns = 0;
   };
 
   std::array<XRVkEyeSwapchain, 2>& EyeSet(uint32_t set)
@@ -278,6 +287,15 @@ private:
   // Cycle: PRIMEFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
   bool m_lazy_start = true;
   bool m_cycle_busy = false;  // the releaser thread is ending a frame (under m_pacer_mutex)
+  // Cycle overlap (PRIMEFRAME_CYCLE_OVERLAP=1): the next frame's xrWaitFrame does not wait for
+  // the last frame's end; the releaser thread begins the waited frame right after that end
+  // (m_cycle_begin_pending, under m_pacer_mutex).
+  bool m_cycle_overlap = false;
+  bool m_cycle_begin_pending = false;
+  // Cycle timing, video thread: its wait for the last frame's end in this frame, its CPU clock
+  // at the last submit.
+  int64_t m_cycle_video_wait_ns = 0;
+  int64_t m_cycle_last_cpu_ns = 0;
   // Pipelined: release a set's images as soon as its fence signalled, before its refresh
   // (PRIMEFRAME_EARLY_RELEASE=0: at its refresh); the margin the pose target leaves before the
   // runtime's wake-up for it (PRIMEFRAME_PACE_MARGIN_MS, default 3).

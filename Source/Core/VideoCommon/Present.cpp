@@ -3,7 +3,9 @@
 
 #include "VideoCommon/Present.h"
 
+#include <cstdlib>
 #include <optional>
+#include <string_view>
 
 #include "Common/ChunkFile.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -1114,13 +1116,18 @@ bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
   // begins. The other modes return at once.
   VR::g_openxr->DisarmLazyFrameStart();
   if (VR::IOpenXRSwapchain* swapchain = VR::g_openxr->GetSwapchain();
-      swapchain && !swapchain->WaitForPendingFrameFinalization("frame start"))
+      swapchain && swapchain->UsesCycleOverlap())
   {
-    return false;
+    if (!VR::g_openxr->StartCycleFrame(false))
+      return false;
   }
-
-  if (!VR::g_openxr->WaitFrame() || !VR::g_openxr->BeginFrame())
-    return false;
+  else
+  {
+    if (swapchain && !swapchain->WaitForPendingFrameFinalization("frame start"))
+      return false;
+    if (!VR::g_openxr->WaitFrame() || !VR::g_openxr->BeginFrame())
+      return false;
+  }
 
   if (do_locate_views && VR::g_openxr->ShouldRender())
   {
@@ -1193,6 +1200,20 @@ void Presenter::PrepareNextOpenXRFrame()
 }
 #endif
 
+#ifdef ENABLE_VR
+// The eye blit covers the whole eye image (cinema screen too: one full-size blit into eye 0), so
+// clearing it first only costs GPU time (0.55 to 0.63 ms a frame at 1728, more at 2160).
+// PRIMEFRAME_EYE_CLEAR=1 brings the clear back.
+static bool EyeClearWanted()
+{
+  static const bool s_clear = [] {
+    const char* env = std::getenv("PRIMEFRAME_EYE_CLEAR");
+    return env && std::string_view(env) == "1";
+  }();
+  return s_clear;
+}
+#endif
+
 void Presenter::BlitCurrentSourceToOpenXREyes(
     const AbstractTexture* source_texture, const MathUtil::Rectangle<int>& source_rect)
 {
@@ -1223,7 +1244,10 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
         swapchain->AcquireLayeredFramebuffer();
     if (layered_framebuffer)
     {
-      g_gfx->SetAndClearFramebuffer(layered_framebuffer, {0.f, 0.f, 0.f, 1.f});
+      if (EyeClearWanted())
+        g_gfx->SetAndClearFramebuffer(layered_framebuffer, {0.f, 0.f, 0.f, 1.f});
+      else
+        g_gfx->SetFramebuffer(layered_framebuffer);
       rendered_layered = m_post_processor->BlitFromTextureLayered(
           eye_rect, source_rect, source_texture);
       swapchain->ReleaseLayeredTexture();
@@ -1238,7 +1262,10 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
     if (eye_framebuffer == nullptr)
       continue;
 
-    g_gfx->SetAndClearFramebuffer(eye_framebuffer, {0.f, 0.f, 0.f, 1.f});
+    if (EyeClearWanted())
+      g_gfx->SetAndClearFramebuffer(eye_framebuffer, {0.f, 0.f, 0.f, 1.f});
+    else
+      g_gfx->SetFramebuffer(eye_framebuffer);
     const int source_layer =
         cinematic_screen_active ? 0 : static_cast<int>(eye);
     m_post_processor->BlitFromTexture(eye_rect, source_rect, source_texture, source_layer);
