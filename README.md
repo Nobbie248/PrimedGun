@@ -64,39 +64,45 @@ Known:
 ## Requirements
 
 - A Steam Frame with SteamOS and SteamVR, and a few hundred MB free.
-- Your own Metroid Prime (USA) disc image, game ID GM8E01, revision 0, as an RVZ, ISO or GCM file. Put it in `~/Documents/Roms/gc` or give its path to `install.sh`.
-- A terminal on the Frame: SSH, or Konsole from the desktop.
+- Your own Metroid Prime disc image, the US release (game ID GM8E01, revision 0, the version PrimedGun supports), as `.rvz`, `.iso` or `.gcm`. No disc image is provided; [Your disc image](#your-disc-image) shows how to make one.
+- A terminal on the Frame: SSH, or Konsole from the desktop (SteamVR dashboard, Launch a program, Desktop).
 - Steam running on the Frame while you install, so the installer can add the library entry.
+
+### Your disc image
+
+1. **Dump your own disc.** Follow Dolphin's guide, [Ripping Games](https://dolphin-emu.org/docs/guides/ripping-games/). A Wii with CleanRip reads GameCube discs. A GameCube-compatible disc drive on a PC does not read them.
+2. **Shrink it (optional).** Open the image in Dolphin on a PC, right click the game and choose Convert File to make an `.rvz`. It is about 1 GB instead of 1.4.
+3. **Check it is the right one.** In Dolphin, the game's properties show the ID and the revision. They must read GM8E01 and revision 0. A different region or revision does not work with PrimedGun.
+4. **Put it on the Frame.** Copy it with a USB drive opened from the desktop, or with `scp` over SSH from a PC, into `~/Documents/Roms/gc`. The installer searches that folder. Anywhere else works too: give the path with `--rom`.
 
 ## Install
 
-1. Get the repository:
+1. Download `primeframe-1.0.0-linux-arm64.tar.gz` and `SHA256SUMS` from the [Releases](https://github.com/simplysanatori/PrimeFrame/releases) page, onto the Frame.
+2. In a terminal, in the folder you downloaded them to:
 
    ```sh
-   git clone https://github.com/simplysanatori/PrimeFrame.git
-   cd PrimeFrame
+   sha256sum -c --ignore-missing SHA256SUMS
+   mkdir -p ~/Downloads/primeframe && tar xf primeframe-1.0.0-linux-arm64.tar.gz -C ~/Downloads/primeframe
+   ~/Downloads/primeframe/install.sh --rom "/path/to/Metroid Prime (USA).rvz"
    ```
 
-2. Download `primeframe-1.0.0-linux-arm64.tar.gz` and its `.sha256` file from the [Releases](https://github.com/simplysanatori/PrimeFrame/releases) page. Check the download and install it with the path of your disc image:
+   Leave out `--rom` when the image is in `~/Documents/Roms/gc`.
 
-   ```sh
-   sha256sum -c primeframe-1.0.0-linux-arm64.tar.gz.sha256
-   frame/install.sh --rom /path/to/MetroidPrime.rvz ~/Downloads/primeframe-1.0.0-linux-arm64.tar.gz
-   ```
+3. Put the headset on and launch **PrimeFrame** from your Steam library. The first launch stutters while the shaders compile; later launches do not.
 
-   The installer copies the program to `~/Games/PrimeFrame/app`, puts default settings in `~/.local/share/PrimeFrame/user` where files are missing, and adds **PrimeFrame** to your Steam library as a non-Steam shortcut, or updates the entry if it is there. It talks to Steam through its local debugging port, which SteamOS has on by default. Without `--rom` it looks for a Metroid Prime image under `~/Documents/Roms/gc`.
+The installer copies the program to `~/Games/PrimeFrame/app`, puts default settings in `~/.local/share/PrimeFrame` where files are missing, remembers the path of your disc image, adds **PrimeFrame** to your Steam library as a VR shortcut (or updates the entry if it is there) and sets SteamVR's per-app settings for it. It talks to Steam through its local debugging port, which SteamOS has on by default. It changes nothing outside the folders under [Files](#files), the shortcut and those settings. It never writes into a SteamVR file; the launcher sets the per-app settings through SteamVR's own `vrcmd`.
 
-3. Put the headset on and launch **PrimeFrame** from your Steam library. The shortcut has the VR flag set, so SteamVR starts with it.
+To update, download the new tarball and run `install.sh` again. Your settings, memory card and save states stay where they are; the installer only adds files that are missing. To change the disc image later, run `install.sh --rom PATH` again, or edit the one line in `~/.local/share/PrimeFrame/rom`.
 
-To update, download the new tarball and run `install.sh` again. Your settings, memory card and save states stay where they are; the installer only adds files that are missing.
-
-The installer changes nothing outside the folders under [Files](#files) and the Steam shortcut. It never writes into a SteamVR file; the wrapper sets SteamVR's per-app settings through SteamVR's own `vrcmd`.
+To bring over an existing save, copy your memory card and save states into `~/.local/share/PrimeFrame/user` (`GC/` and `StateSaves/`) from a PC Dolphin or PrimedGun install, before the first launch. PrimedGun advises against carrying save states from one build to another.
 
 ## First run
 
-There is no desktop window. The game starts straight into the headset. The first launch stutters while the shaders compile; later launches do not. If the game does not start, open `~/.local/share/PrimeFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimeFrame/rom` does not exist.
+There is no desktop window. The game starts straight into the headset, on the title screen [to confirm in the headset]. If it does not start, open `~/.local/share/PrimeFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimeFrame/rom` does not exist.
 
 PrimedGun's own notes say: click the right stick to set your height, click the left thumbstick to open or close the in-headset settings menu, stay in the centre of your play space and face forward, and use Exit Game at the top right of the menu (press it twice) to leave the game cleanly, which also writes the shader caches. [to confirm in the headset]
+
+Save in the game as usual. The save goes to the memory card in `~/.local/share/PrimeFrame/user/GC` [to confirm in the headset].
 
 ## Controls
 
@@ -130,7 +136,7 @@ Everything the pacing does is in the list above; the account of how I got there 
 | Logs | `~/.local/share/PrimeFrame/sessions/latest/` (`launch.log`, `dolphin.log`, `vrtiming.log`, `report.txt`, `stdout.log`) |
 | One launch of test settings | `~/.local/share/PrimeFrame/session.env`, `NAME=value` lines, used for the next launch only |
 
-Your memory card is `user/GC/MemoryCardA.USA.raw`. Save normally in the game [to confirm in the headset]; PrimedGun advises against carrying save states from one build to another.
+Your memory card is `user/GC/MemoryCardA.USA.raw`. Save normally in the game [to confirm in the headset].
 
 ## Troubleshooting
 

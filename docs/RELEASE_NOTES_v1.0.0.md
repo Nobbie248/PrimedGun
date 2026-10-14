@@ -35,11 +35,11 @@ Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a 
 ## Download
 
 - `primeframe-1.0.0-linux-arm64.tar.gz`
-- `primeframe-1.0.0-linux-arm64.tar.gz.sha256`
+- `SHA256SUMS`
 
 ## Install
 
-Clone the repository, then run `frame/install.sh --rom <your disc image>` with the tarball as its argument. The [README](https://github.com/simplysanatori/PrimeFrame/blob/native/README.md) has the full steps, the settings and the troubleshooting.
+Unpack the tarball on the Frame and run its `install.sh --rom <your disc image>`. The [README](https://github.com/simplysanatori/PrimeFrame/blob/native/README.md) has the full steps, the settings and the troubleshooting.
 
 ## Known
 
