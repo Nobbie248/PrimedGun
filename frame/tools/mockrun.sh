@@ -115,7 +115,7 @@ SRC_USER=${PF_SRC_USER:-$HOME/PrimedGun-podman/src/build-podman/Binaries/user}
 # the API service of podman, shells and git (a command line that merely mentions a name) do not.
 RUNNING='SteamLaunch|dolphin|primedgun|primeframe|lepton|waydroid|podman'
 others() {
-  pgrep -af "$RUNNING" | grep -Ev 'pgrep|mockrun|podman .*system service|^[0-9]+ (/bin/|/usr/bin/)?(bash|sh|git|ssh|flock)( |$)|^[0-9]+ /usr/lib/git-core/' || true
+  pgrep -af "$RUNNING" | grep -Ev 'pgrep|mockrun|podman .*system service|^[0-9]+ (/bin/|/usr/bin/)?(bash|sh|git|ssh|flock)( |$)|^[0-9]+ /usr/lib/git-core/|^[0-9]+ (ccache )?(/usr/bin/)?(clang|clang\+\+|ninja|cmake)( |$)' || true
 }
 if [ -n "$(others)" ]; then
   others >&2
