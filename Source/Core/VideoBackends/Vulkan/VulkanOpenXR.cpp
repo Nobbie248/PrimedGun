@@ -2645,7 +2645,8 @@ void VulkanOpenXR::EmitStats()
                "end_avg_ms={:.2f} end_max_ms={:.2f} end_late={} age_avg_ms={:.2f} "
                "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} extra_avg_ms={:.2f} extra_frames={} "
                "early={} wake_lead_ms={:.2f}{} slot_ms={:.2f} end_mode={} plan={}/{}/{} "
-               "plan_breaks={} plan_catchups={} eye={}x{} game_fps={:.1f} game_vps={:.1f}",
+               "plan_breaks={} plan_catchups={} plan_drops={} eye={}x{} game_fps={:.1f} "
+               "game_vps={:.1f}",
                m_pacing == Pacing::Pipelined ? (m_no_gpu_wait ? "pipelined-nowait" : "pipelined") :
                m_pacing == Pacing::Inline    ? (m_no_gpu_wait ? "inline-nowait" : "inline") :
                m_pacing == Pacing::Cycle     ? (m_no_gpu_wait ? "cycle-nowait" : "cycle") :
@@ -2661,7 +2662,7 @@ void VulkanOpenXR::EmitStats()
                timing.lead_sum_ms / ended, timing.pose_mismatch, timing.extra_sum_ms / ended,
                timing.extra_frames, timing.early_frames, wake_lead_ms, lead_exact ? "" : "?",
                slot_ms, m_end_plan ? "plan" : "asap", timing.plan_slots[0], timing.plan_slots[1],
-               timing.plan_slots[2], timing.plan_breaks, timing.plan_catchups,
+               timing.plan_slots[2], timing.plan_breaks, timing.plan_catchups, timing.plan_drops,
                m_eye_swapchains[0].width,
                m_eye_swapchains[0].height,
                g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
@@ -3026,7 +3027,7 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
   const int64_t wake_ns = item.target - clock.grid_offset_ns;
   const double slack_ms =
       m_end_ontime_ms + item.plan_slots * slot_ms - (fence_ns - wake_ns) / 1e6;
-  VR::g_openxr->NoteCycleFinish(item.wait_seq, fence_ns, slack_ms);
+  VR::g_openxr->NoteCycleFinish(item.wait_seq, item.submit_ns, fence_ns, slack_ms);
   if (m_end_plan && item.plan_slots == 0)
   {
     const int64_t start = SteadyNs();

@@ -235,6 +235,7 @@ public:
     std::array<uint32_t, 3> plan_slots{};
     uint32_t plan_breaks = 0;
     uint32_t plan_catchups = 0;
+    uint32_t plan_drops = 0;  // frames landed on the last frame's refresh: holding them would cost frames
   };
   void TakeFrameTimingStats(FrameTimingStats* out);
 
@@ -277,7 +278,7 @@ public:
   // work finished (its xrWaitFrame return to its fence, for the expected finish of the next
   // frames; slack_ms: how long before the on-time limit of its landing refresh).
   void SetCycleEndLate(bool late) { m_cycle_end_late.store(late, std::memory_order_relaxed); }
-  void NoteCycleFinish(uint64_t wait_seq, int64_t finish_ns, double slack_ms);
+  void NoteCycleFinish(uint64_t wait_seq, int64_t submit_ns, int64_t finish_ns, double slack_ms);
   // No exact lead yet: the next cycle frame start ends whatever is pending and, unless its
   // xrWaitFrame blocks, spends one empty frame so that the next one does (once every 2 s, at
   // most five times).
@@ -583,6 +584,7 @@ private:
   // earlier) and how many a catch-up needs (doubled when a refresh later follows one within 60 s).
   XrTime m_prev_land_time = 0;
   std::array<float, 120> m_finish_ring{};
+  std::array<float, 120> m_submit_ring{};  // xrWaitFrame return to the frame's submit (ms)
   std::array<float, 1200> m_slack_ring{};
   size_t m_finish_next = 0, m_finish_count = 0, m_slack_next = 0;
   size_t m_plan_stable_frames = 0;

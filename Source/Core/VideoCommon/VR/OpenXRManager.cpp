@@ -1564,7 +1564,8 @@ bool OpenXRManager::WantsLeadCalibration() const
 // The frame's xrWaitFrame return to its GPU work finished (the releaser's fence), for the
 // expected finish of later frames (the landing plan, WaitFrame), and its slack before the on-time
 // limit of the refresh it was planned to land on.
-void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t finish_ns, double slack_ms)
+void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t submit_ns, int64_t finish_ns,
+                                    double slack_ms)
 {
   std::lock_guard<std::mutex> lock(m_clock_mutex);
   for (const WaitNote& note : m_wait_notes)
@@ -1576,6 +1577,7 @@ void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t finish_ns, double
     avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
     m_cycle_finish_seen = true;
     m_finish_ring[m_finish_next] = static_cast<float>(sample);
+    m_submit_ring[m_finish_next] = static_cast<float>(std::min((submit_ns - note.return_ns) / 1e6, 60.0));
     m_finish_next = (m_finish_next + 1) % m_finish_ring.size();
     m_finish_count = std::min(m_finish_count + 1, m_finish_ring.size());
     m_slack_ring[m_slack_next] = static_cast<float>(slack_ms);
@@ -1645,17 +1647,24 @@ bool OpenXRManager::WaitFrame()
     int land = 0;
     if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0)
     {
-      double fin95 = finish_avg;
       const size_t n = std::min<size_t>(m_finish_count, 120);
-      if (n >= 10)
-      {
+      const auto pct = [&](const std::array<float, 120>& ring, double p) {
         std::array<float, 120> last{};
         for (size_t i = 0; i < n; ++i)
-          last[i] = m_finish_ring[(m_finish_next + m_finish_ring.size() - 1 - i) % m_finish_ring.size()];
-        const size_t k = std::min(n - 1, static_cast<size_t>(0.95 * n));
+          last[i] = ring[(m_finish_next + ring.size() - 1 - i) % ring.size()];
+        const size_t k = std::min(n - 1, static_cast<size_t>(p * n));
         std::nth_element(last.begin(), last.begin() + k, last.begin() + n);
-        fin95 = last[k];
-      }
+        return static_cast<double>(last[k]);
+      };
+      const double fin95 = n >= 10 ? pct(m_finish_ring, 0.95) : finish_avg;
+      // The next frame's present (where it acquires the eye images this frame still holds):
+      // about a refresh after this call plus the earliest usual call-to-submit time. A frame held
+      // past it would stall the video thread: the hold may not reach it.
+      const double next_present_ms =
+          after_wake_ms + slot_ms + (n >= 10 ? pct(m_submit_ring, 0.1) : 0.0) - 1.0;
+      const auto hold_end_ms = [&](int kk) {
+        return kk <= 0 ? 0.0 : (kk - 1) * slot_ms + predict.ontime_ms + 2.5;
+      };
       const double ready95 = after_wake_ms + fin95;
       const int k_min =
           fin95 <= 0 ? 0 :
@@ -1667,7 +1676,24 @@ bool OpenXRManager::WaitFrame()
         const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
         const int k_cont = static_cast<int>(std::llround(static_cast<double>(cont_ns) / slot_ns));
         k = std::max(k_min, k_cont);
-        if (k == k_cont && k_cont >= 1 && fin95 > 0 &&
+        if (k == k_cont && k_cont > k_min && n >= 10 && hold_end_ms(k_cont) > next_present_ms)
+        {
+          // Continuity would hold this frame into the next one's present: land on the last
+          // frame's refresh instead (that frame is not shown).
+          k = std::max(k_min, k_cont - 1);
+          m_plan_stable_frames = 0;
+          m_frame_timing.plan_drops++;
+          if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)
+          {
+            m_plan_log_ns = m_wait_return_ns;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimeFrame cycle landing: {} refresh earlier (a hold to {:.1f} ms after "
+                         "the wake-up would reach the next frame's present at {:.1f}); the last "
+                         "frame is not shown",
+                         k_cont - k, hold_end_ms(k_cont), next_present_ms);
+          }
+        }
+        else if (k == k_cont && k_cont >= 1 && fin95 > 0 &&
             m_plan_stable_frames >= m_catchup_need_frames &&
             ready95 - (k_cont - 1) * slot_ms <= predict.ontime_ms - 3.0)
         {
