@@ -28,7 +28,8 @@ Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a 
 
 ### Install
 
-- An installer that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag.
+- An installer that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag and the library art.
+- The in-VR menu's settings are saved (the no-window build lost them at exit; its Save and Exit Game buttons work now).
 - A launcher that sets SteamVR's per-app settings at every launch (120 Hz, SteamVR pacing the game at 60, no extra prediction, motion smoothing off, 2160 per eye) and keeps session logs.
 - Tools to collect logs for a bug report and to remove the program again.
 

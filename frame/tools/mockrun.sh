@@ -239,7 +239,7 @@ CMD=("$EXE" -u "$USERDIR" -p "$PLATFORM" -v Vulkan -C 'Dolphin.DSP.Backend=No Au
   echo "exe: $EXE"; echo "state: ${STATE:-none}  window: ${SECS}s  warmup: ${WARMUP}s  drain: $DRAIN  pacing: ${PACING:-default}  nowait: $NOWAIT  window_present: $WINDOW  validate: $VALIDATE  platform: $PLATFORM"
   echo "mock: $XR_RUNTIME_JSON  hz: $MOCK_XR_HZ  eye: ${MOCK_XR_EYE:-1728x1728}  busy_ms: $MOCK_XR_BUSY_MS  skip: $MOCK_XR_SKIP  session seconds: $MOCK_XR_SECONDS"
   echo "user settings from: $SRC_USER  stamp: $STAMP  head: ${MOCK_XR_HEAD_DPS:-default} deg/s  lead: ${MOCK_XR_LEAD:-3}  throttle: ${MOCK_XR_THROTTLE:-0}"
-  env | grep -E '^PRIMEFRAME_|^PRIMEDGUN_' | sort | tr '\n' ' '; echo
+  { env | grep -E '^PRIMEFRAME_|^PRIMEDGUN_' || true; } | sort | tr '\n' ' '; echo
   echo "TU_DEBUG: ${TU_DEBUG:-unset}${GPU_ZONES:+  gpu temp at start: $(( $(maxtemp "$GPU_ZONES") / 1000 )) C}"
   [ ! -s "$RUN/sets.txt" ] || cat "$RUN/sets.txt"
 } | tee "$RUN/info.txt"

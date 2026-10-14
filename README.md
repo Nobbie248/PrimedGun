@@ -43,7 +43,7 @@ The major changes:
 - **Less GPU idle time.** The GPU gets the game's drawing every 100 draws instead of all at the end of the frame, and the eye image is no longer cleared before it is overwritten.
 - **A working shader cache.** The no-window build never created its cache folder, so every launch recompiled every shader. Now only the first launch stutters.
 - **A launcher for the Frame.** It re-applies SteamVR's per-app settings at every launch (120 Hz, SteamVR pacing the game at 60, no extra prediction, motion smoothing off, 2160 per eye) and keeps session logs.
-- **An installer** that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag.
+- **An installer** that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag and the library art.
 - **Tools** to collect logs for a bug report and to remove the program again.
 
 ## Status
@@ -88,7 +88,7 @@ Known:
 
 3. Put the headset on and launch **PrimeFrame** from your Steam library. The first launch stutters while the shaders compile; later launches do not.
 
-The installer copies the program to `~/Games/PrimeFrame/app`, puts default settings in `~/.local/share/PrimeFrame` where files are missing, remembers the path of your disc image, adds **PrimeFrame** to your Steam library as a VR shortcut (or updates the entry if it is there) and sets SteamVR's per-app settings for it. It talks to Steam through its local debugging port, which SteamOS has on by default. It changes nothing outside the folders under [Files](#files), the shortcut and those settings. It never writes into a SteamVR file; the launcher sets the per-app settings through SteamVR's own `vrcmd`.
+The installer copies the program to `~/Games/PrimeFrame/app`, puts default settings in `~/.local/share/PrimeFrame` where files are missing, remembers the path of your disc image, adds **PrimeFrame** to your Steam library as a VR shortcut with its library art (capsule, cover, hero, logo and icon), or updates the entry if it is there, and sets SteamVR's per-app settings for it. It talks to Steam through its local debugging port, which SteamOS has on by default. It changes nothing outside the folders under [Files](#files), the shortcut and those settings. It never writes into a SteamVR file; the launcher sets the per-app settings through SteamVR's own `vrcmd`.
 
 To update, download the new tarball and run `install.sh` again. Your settings, memory card and save states stay where they are; the installer only adds files that are missing. To change the disc image later, run `install.sh --rom PATH` again, or edit the one line in `~/.local/share/PrimeFrame/rom`.
 
@@ -114,6 +114,7 @@ Settings are the ini files in `~/.local/share/PrimeFrame/user`, and PrimedGun's 
 - `GameSettings/GM8E01.ini`: overrides for this game: `InternalResolution = 3`, background shader compilation, and `EnableGPUTextureDecoding = False`. Leave that last one off: with it on, the Frame's GPU reads bad memory and takes SteamVR down.
 - `Config/Dolphin.ini`: backend, sound and the 60 Hz video timing.
 - `Config/Logger.ini`: turns on the log file that carries the once a second statistics line.
+- `Config/PrimedGun.ini`: the in-VR menu's settings, in a `[primedgun]` section. They are saved when the menu closes, when you press Save in it, and at exit. It ships with my HUD placement for the Frame. To use the settings of a PrimedGun desktop build, paste the `[primedgun]` section of its `Qt.ini` into this file.
 
 ## Performance
 
