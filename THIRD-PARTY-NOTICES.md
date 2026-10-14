@@ -16,7 +16,7 @@ These are small tools that I wrote for, or adapted between, my own projects. Eac
 | `frame/tools/privacy-check.sh` | adapted from `tools/privacy-check.sh` of Moonlight XR Native | GPLv3 |
 | `frame/tools/session-report.py`, `frame/primeframe.sh`, `frame/install.sh`, `frame/uninstall.sh`, `frame/collect-logs.sh`, `frame/test-installer.sh`, `frame/release.sh` | adapted from the KartFrame equivalents | GPLv3, as the KartFrame originals |
 | `frame/steam-cef.py` | copied from KartFrame (one added option) | GPLv3, as KartFrame |
-| `frame/tools/xrmock/` | the mock OpenXR runtime of my other ports, extended here | development tool, not in the release tarball |
+| `frame/tools/xrmock/` | the mock OpenXR runtime and session scripts of GalaxyFrame and KartFrame (my own Frame ports), extended here | development tool, not in the release tarball |
 
 The release tarball carries only `vrtiming.py` and `session-report.py` from the tools above, plus the install scripts.
 
