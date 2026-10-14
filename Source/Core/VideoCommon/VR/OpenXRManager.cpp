@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -1362,12 +1363,21 @@ bool OpenXRManager::WaitFrame()
     m_wait_max_us.store(waited_us, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> lock(m_clock_mutex);
+    m_wait_call_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         wait_start.time_since_epoch())
+                         .count();
+    m_wait_return_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           wait_end.time_since_epoch())
+                           .count();
+    m_wait_display_time = m_frame_state.predictedDisplayTime;
     m_clock.display_time = m_frame_state.predictedDisplayTime;
     m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           wait_end.time_since_epoch())
                           .count();
+    // A call that blocked returned at the runtime's wake-up: its lead is exact (the runtime may
+    // change it). One that returned at once was late: its lead is a lower bound.
     const int64_t grid_offset = m_clock.display_time - m_clock.wake_ns;
-    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod ||
+    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod || waited_us > 500 ||
         grid_offset > m_clock.grid_offset_ns)
       m_clock.grid_offset_ns = grid_offset;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
@@ -1424,9 +1434,13 @@ bool OpenXRManager::EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& l
   }
 
   // The runtime's client may submit on our queue inside xrEndFrame (SteamVR does).
-  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
-                                  std::unique_lock<std::mutex>{};
-  XR_CHECK(xrEndFrame(m_session, &end_info));
+  {
+    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                    std::unique_lock<std::mutex>{};
+    XR_CHECK(xrEndFrame(m_session, &end_info));
+  }
+  NoteFrameEnd(end_info.displayTime, m_submitted_eye_views_valid ? m_submitted_locate_time : 0,
+               end_info.layerCount > 0);
   return true;
 }
 
@@ -1450,7 +1464,8 @@ XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
 bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                      XrEnvironmentBlendMode environment_blend_mode,
                                      bool should_render,
-                                     const std::vector<XrCompositionLayerBaseHeader*>& layers)
+                                     const std::vector<XrCompositionLayerBaseHeader*>& layers,
+                                     XrTime pose_time)
 {
   XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
   end_info.displayTime = display_time;
@@ -1462,10 +1477,149 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
     end_info.layers = layers.data();
   }
 
-  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
-                                  std::unique_lock<std::mutex>{};
-  XR_CHECK(xrEndFrame(m_session, &end_info));
+  {
+    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                    std::unique_lock<std::mutex>{};
+    XR_CHECK(xrEndFrame(m_session, &end_info));
+  }
+  NoteFrameEnd(display_time, pose_time, end_info.layerCount > 0);
   return true;
+}
+
+static bool FrameLogEnabled()
+{
+  static const bool s_enabled = [] {
+    const char* env = std::getenv("PRIMEFRAME_FRAME_LOG");
+    return !env || std::string_view(env) != "0";
+  }();
+  return s_enabled;
+}
+
+static double OnTimeMs()
+{
+  static const double s_ms = [] {
+    const char* env = std::getenv("PRIMEFRAME_ONTIME_MS");
+    return env ? std::atof(env) : 2.5;
+  }();
+  return s_ms;
+}
+
+// One line per ended frame (XRF), the per-second sums for XRSTATS. Times in ms: blk how long its
+// xrWaitFrame blocked; lead its predicted display time minus the xrWaitFrame return; r the
+// xrWaitFrame return to the xrEndFrame; rg the wake-up the runtime's grid gives for the display
+// time (the earliest xrWaitFrame return seen for it, display time minus the largest lead seen)
+// to the xrEndFrame (a late xrWaitFrame call returns after it); age the poses' xrLocateViews call
+// to the xrEndFrame (-1: unknown); pdt the poses' display time minus the end's (0: the frame
+// ends with the display time its poses were located for); dd refreshes since the last ended
+// display time; per the display period.
+void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers)
+{
+  const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0;
+  int64_t dd = 0;
+  uint64_t n = 0;
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    const int64_t period = m_clock.period_ns;
+    period_ms = period / 1e6;
+    if (m_wait_display_time == display_time && m_wait_return_ns != 0)
+    {
+      blk = (m_wait_return_ns - m_wait_call_ns) / 1e6;
+      lead = (display_time - m_wait_return_ns) / 1e6;
+      r = (end_ns - m_wait_return_ns) / 1e6;
+    }
+    if (m_clock.grid_offset_ns != 0)
+      rg = (end_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
+    if (pose_time != 0)
+    {
+      pdt = (pose_time - display_time) / 1e6;
+      for (const LocateNote& note : m_locate_notes)
+      {
+        if (note.display_time == pose_time && note.call_ns != 0)
+          age = (end_ns - note.call_ns) / 1e6;
+      }
+    }
+    if (period > 0 && m_prev_end_display_time != 0)
+      dd = (display_time - m_prev_end_display_time + period / 2) / period;
+    m_prev_end_display_time = display_time;
+    if (has_layers)
+    {
+      FrameTimingStats& t = m_frame_timing;
+      t.frames++;
+      if (pose_time != 0 && pose_time != display_time)
+        t.pose_mismatch++;
+      const double rr = rg >= 0 ? rg : r;
+      if (rr > OnTimeMs())
+        t.ended_late++;
+      if (rr >= 0)
+      {
+        t.end_sum_ms += rr;
+        t.end_max_ms = std::max(t.end_max_ms, rr);
+      }
+      if (age >= 0)
+      {
+        t.age_sum_ms += age;
+        t.age_max_ms = std::max(t.age_max_ms, age);
+        t.age_count++;
+      }
+      if (lead >= 0)
+        t.lead_sum_ms += lead;
+    }
+    n = ++m_frame_log_count;
+  }
+  if (FrameLogEnabled())
+  {
+    INFO_LOG_FMT(OPENXR,
+                 "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
+                 "per={:.3f}{}",
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, has_layers ? "" : " empty");
+  }
+}
+
+void OpenXRManager::TakeFrameTimingStats(FrameTimingStats* out)
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  *out = m_frame_timing;
+  m_frame_timing = {};
+}
+
+void OpenXRManager::ArmLazyFrameStart()
+{
+  m_lazy_thread = std::this_thread::get_id();
+  m_lazy_started = false;
+  m_lazy_armed.store(true, std::memory_order_release);
+}
+
+bool OpenXRManager::TakeLazyFrameStarted()
+{
+  m_lazy_armed.store(false, std::memory_order_relaxed);
+  const bool started = m_lazy_started;
+  m_lazy_started = false;
+  return started;
+}
+
+// The pose readers are const (the geometry shader manager reads the views through them); the
+// frame start they trigger is not.
+void OpenXRManager::StartLazyFrameIfArmed() const
+{
+  if (!m_lazy_armed.load(std::memory_order_acquire) ||
+      std::this_thread::get_id() != m_lazy_thread)
+  {
+    return;
+  }
+  OpenXRManager* self = const_cast<OpenXRManager*>(this);
+  self->m_lazy_armed.store(false, std::memory_order_relaxed);
+  if (!self->PollEvents() || !self->IsSessionRunning())
+    return;
+  if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("cycle frame start"))
+    return;
+  if (!self->WaitFrame() || !self->BeginFrame())
+    return;
+  self->m_lazy_started = true;
+  if (self->ShouldRender())
+    self->LocateViews();
 }
 
 bool OpenXRManager::LocateViews()
@@ -1496,6 +1650,14 @@ bool OpenXRManager::LocateViewsAt(XrTime display_time)
   uint32_t view_count = static_cast<uint32_t>(m_views.size());
   m_views.fill({XR_TYPE_VIEW});
   m_eye_views_valid = false;
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    m_locate_notes[m_locate_note_next] = {
+        display_time, std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count()};
+    m_locate_note_next = (m_locate_note_next + 1) % m_locate_notes.size();
+  }
 
   XR_CHECK(xrLocateViews(m_session, &locate_info, &view_state,
                           view_count, &view_count, m_views.data()));
@@ -1668,6 +1830,7 @@ void OpenXRManager::GetEyeProjectionRows(
     std::array<std::array<float, 4>, 4>& out_proj_rows,
     std::array<std::array<float, 4>, 2>& out_z_rows) const
 {
+  StartLazyFrameIfArmed();
   static uint64_t s_proj_log_counter = 0;
   ++s_proj_log_counter;
   const bool do_log = false;
@@ -1810,6 +1973,7 @@ void OpenXRManager::GetRawEyeProjectionRows(
     float units_per_meter,
     std::array<std::array<float, 4>, 4>& out_proj_rows) const
 {
+  StartLazyFrameIfArmed();
   const float s = std::max(units_per_meter, 0.0001f);
 
   // Compute head center (average of both eyes) for extracting per-eye local offset.
@@ -1869,6 +2033,7 @@ bool OpenXRManager::GetHeadCullProjection(float cone_degrees, float units_per_me
                                           std::array<std::array<float, 4>, 4>* out_matrix,
                                           float* out_effective_degrees) const
 {
+  StartLazyFrameIfArmed();
   if (!m_eye_views_valid || !m_home_set)
     return false;
   std::array<XrView, 2> views{};

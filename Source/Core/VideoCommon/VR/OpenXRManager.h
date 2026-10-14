@@ -78,6 +78,10 @@ public:
   virtual bool UsesPipelinedPacing() const { return false; }
   virtual bool SkipsWindowPresent() const { return false; }
   virtual bool LocateNextFramePose() { return false; }
+  // Cycle pacing: each game frame runs in its own xrWaitFrame cycle (as the drain), started at
+  // the frame's first draw that needs the head pose (the presenter arms it, OpenXRManager starts
+  // it), and a releaser thread ends it once the GPU has finished.
+  virtual bool UsesLazyFrameStart() const { return false; }
 };
 
 class OpenXRManager
@@ -129,9 +133,12 @@ public:
 
   // xrEndFrame — submits the completed layer stack to the compositor.
   bool EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& layers);
+  // pose_time: the display time the projection layer's poses were located for (0: none or
+  // unknown), for the per-frame timing.
   bool EndFrameDetached(XrTime display_time, XrEnvironmentBlendMode environment_blend_mode,
                         bool should_render,
-                        const std::vector<XrCompositionLayerBaseHeader*>& layers);
+                        const std::vector<XrCompositionLayerBaseHeader*>& layers,
+                        XrTime pose_time = 0);
 
   // Dedicated OpenXR pacing loop. The pacing thread owns the frame protocol and
   // re-submits the most recently published layers while the game renders its next frame.
@@ -177,6 +184,31 @@ public:
   bool LocateViewsAt(XrTime display_time);
   void RecordRenderedEyeViews();
 
+  // Cycle pacing (frame/PACING.md): the presenter arms the next frame's start at the end of a
+  // present; the first pose read of the next game frame on that thread (a draw) then waits for
+  // the previous frame's end, calls xrWaitFrame and xrBeginFrame and locates the views for the
+  // display time it got. TakeLazyFrameStarted() tells the presenter whether that happened.
+  void ArmLazyFrameStart();
+  void DisarmLazyFrameStart() { m_lazy_armed.store(false, std::memory_order_relaxed); }
+  bool TakeLazyFrameStarted();
+  XrTime GetSubmittedLocateTime() const { return m_submitted_locate_time; }
+
+  // Per-frame timing (all pacing modes), noted at every xrEndFrame: how long the frame's
+  // xrWaitFrame blocked, the time from its return to the xrEndFrame, the age of the poses at the
+  // end, and whether the poses were located for the display time the frame ends with. One
+  // "XRF" line per frame unless PRIMEFRAME_FRAME_LOG=0; per-second sums for XRSTATS.
+  struct FrameTimingStats
+  {
+    uint32_t frames = 0;           // xrEndFrame calls with layers
+    uint32_t pose_mismatch = 0;    // poses located for another display time than the end's
+    uint32_t ended_late = 0;       // ended more than PRIMEFRAME_ONTIME_MS after the wake-up
+    double end_sum_ms = 0, end_max_ms = 0;  // xrWaitFrame return (or the grid wake) to end
+    double age_sum_ms = 0, age_max_ms = 0;  // the poses' xrLocateViews call to end
+    double lead_sum_ms = 0;                 // predicted display time minus xrWaitFrame return
+    uint32_t age_count = 0;
+  };
+  void TakeFrameTimingStats(FrameTimingStats* out);
+
   // The last xrWaitFrame: its predicted display time, the steady clock (ns) when it returned,
   // the display period. Lets another thread place a future refresh on the runtime's grid.
   struct FrameClock
@@ -184,8 +216,9 @@ public:
     XrTime display_time = 0;
     int64_t wake_ns = 0;
     int64_t period_ns = 0;
-    // display_time minus the steady clock at which xrWaitFrame returns on time for it: the
-    // largest seen (a call made late returns at once, later than the runtime's wake-up point).
+    // display_time minus the steady clock at which xrWaitFrame returns on time for it: that of
+    // the last call that blocked, else the largest seen (a call made late returns at once, later
+    // than the runtime's wake-up point).
     int64_t grid_offset_ns = 0;
   };
   FrameClock GetFrameClock() const
@@ -315,6 +348,9 @@ private:
 
   void HandleSessionStateChange(XrSessionState new_state);
   void FrameThreadLoop();
+  // Cycle pacing: called by every pose read; starts the armed frame on the arming thread.
+  void StartLazyFrameIfArmed() const;
+  void NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers);
 
   struct PublishedXRLayer
   {
@@ -425,6 +461,27 @@ private:
   XrTime m_submitted_locate_time = 0;
   XrTime m_draw_pose_min = 0;
   XrTime m_draw_pose_max = 0;
+
+  // Cycle pacing: the armed frame start (video thread).
+  std::atomic<bool> m_lazy_armed{false};
+  std::thread::id m_lazy_thread{};
+  bool m_lazy_started = false;
+
+  // Per-frame timing. The last xrWaitFrame (call, return, display time) and the recent
+  // xrLocateViews calls (display time, call time) by any thread, under m_clock_mutex.
+  int64_t m_wait_call_ns = 0;
+  int64_t m_wait_return_ns = 0;
+  XrTime m_wait_display_time = 0;
+  XrTime m_prev_end_display_time = 0;
+  struct LocateNote
+  {
+    XrTime display_time = 0;
+    int64_t call_ns = 0;
+  };
+  std::array<LocateNote, 16> m_locate_notes{};
+  size_t m_locate_note_next = 0;
+  uint64_t m_frame_log_count = 0;
+  FrameTimingStats m_frame_timing{};
 
   bool m_eye_views_valid = false;
   bool m_submitted_eye_views_valid = false;

@@ -62,6 +62,12 @@
 //                             The head also rises 0.1 mm a second, so no two locates share a pose.
 //   MOCK_XR_LEAD=<refreshes>  predictedDisplayTime this many refreshes after xrWaitFrame's wake-up
 //                             (default 3: SteamVR's lead on the Frame was 25 to 27 ms at 120 Hz)
+//   MOCK_XR_THROTTLE=<n>      SteamVR's framesToThrottle: xrWaitFrame hands out every (1 + n)th
+//                             refresh (predictedDisplayPeriod (1 + n) refreshes); default 0
+//   MOCK_XR_ONTIME_MS=<ms>    the summary's "latency" line counts new eye sets ended later than this
+//                             after the wake-up of their display time (2.5; SteamVR on the Frame
+//                             showed 60 fps frames ended later than ~2.5 ms after it in a 1-3
+//                             cadence when they were not a whole refresh late)
 // Every xrEndFrame must carry the predictedDisplayTime of the xrWaitFrame its xrBeginFrame followed
 // (ERROR otherwise; summary line "end times").
 // The graphics API is chosen by the app's binding (xrmock_gfx.h).
@@ -384,6 +390,13 @@ static int gPoseAge[6];  // display time minus locate time in refreshes: <0, 0, 
 static int gPoseSets = 0, gPoseSameTime = 0, gPoseEarlier = 0, gPoseLater = 0, gPoseSplit = 0, gPoseUnknown = 0;
 static int checkPoses(const XrCompositionLayerProjection* p, XrTime displayTime, int fresh);
 static XrTime locateTime(int i);
+static int64_t locateCallNs(int i);
+// Latency of new eye sets: the xrLocateViews call of their poses to the refresh they land on,
+// and their xrEndFrame against the wake-up of their display time's xrWaitFrame (SteamVR on the
+// Frame showed 60 fps frames ended more than ~2.5 ms after it in a 1-3 cadence; MOCK_XR_ONTIME_MS).
+static double gLatSumMs = 0, gLatMaxMs = 0, gLatMinMs = 1e9, gWakeEndSumMs = 0, gWakeEndMaxMs = 0, gOnTimeMs = 2.5;
+static int gLatN = 0, gOffWindow = 0, gLatHist[6];
+static int gThrottle = 0;  // MOCK_XR_THROTTLE: SteamVR's framesToThrottle (slots every 1 + N refreshes)
 static int gStampOn = 0;
 // Frames by what they showed: a projection layer whose eye images were both released since
 // the last xrEndFrame (fresh), one shown again (repeat), none.
@@ -600,6 +613,14 @@ static XrResult XRAPI_CALL mEndSession(XrSession s) {
             "xrmock: cadence: %d layer stacks ended, %d late (landed after their display time); new eye sets held on screen for 1 refresh %d, "
             "2: %d, 3: %d, 4: %d, 5+: %d; never shown %d; 1-3 or 3-1 flips %d; longest run of 2s %d\n",
             gLayerEnds, gLateLayers, gHeld[1], gHeld[2], gHeld[3], gHeld[4], gHeld[5], gUnseen, gFlips, gRun2Max);
+    if (gLatN) {
+        fprintf(stderr,
+                "xrmock: latency: %d new eye sets: their poses' xrLocateViews call to the refresh they land on avg %.1f ms (min %.1f, max %.1f; "
+                "<20 ms %d, 20-30 %d, 30-40 %d, 40-50 %d, 50-60 %d, more %d); xrEndFrame after the wake-up of their display time avg %.2f ms "
+                "(max %.2f), %d later than %.1f ms after it\n",
+                gLatN, gLatSumMs / gLatN, gLatMinMs, gLatMaxMs, gLatHist[0], gLatHist[1], gLatHist[2], gLatHist[3], gLatHist[4], gLatHist[5],
+                gWakeEndSumMs / gLatN, gWakeEndMaxMs, gOffWindow, gOnTimeMs);
+    }
     if (gReleases) {
         fprintf(stderr, "xrmock: queue drain time at the releases: <0.5 ms %d, 0.5-1 %d, 1-2 %d, 2-4 %d, >4 %d\n", gWaitHist[0], gWaitHist[1], gWaitHist[2],
                 gWaitHist[3], gWaitHist[4]);
@@ -673,8 +694,8 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
     }
     if (skip == 1 && gT0 && now > gT0 + (int64_t)gWaits * gPeriod + gPeriod / 2) {
         gWaits = (int)((now - gT0) / gPeriod) + 1;
-    } else if (skip == 2 && gT0 && now >= gT0 + (int64_t)(gWaits + 1) * gPeriod) {
-        gWaits = (int)((now - gT0) / gPeriod);
+    } else if (skip == 2 && gT0 && now >= gT0 + (int64_t)(gWaits + 1 + gThrottle) * gPeriod) {
+        gWaits = (int)((now - gT0) / gPeriod / (1 + gThrottle) * (1 + gThrottle));
     }
     int64_t wake = gT0 + (int64_t)gWaits * gPeriod;
     if (wake > now) {
@@ -683,9 +704,9 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
     }
     fs->predictedDisplayTime = wake + gLead * gPeriod + gTimeOffset;
     gWaitPredicted = fs->predictedDisplayTime;
-    fs->predictedDisplayPeriod = gPeriod;
+    fs->predictedDisplayPeriod = gPeriod * (1 + gThrottle);
     fs->shouldRender = XR_TRUE;
-    gWaits++;
+    gWaits += 1 + gThrottle;
     if (gEndAt && nowNs() > gEndAt && !gQuitSent) {
         gQuitSent = 1;
         pushState(XR_SESSION_STATE_STOPPING);
@@ -713,6 +734,7 @@ static XrResult XRAPI_CALL mBeginFrame(XrSession s, const XrFrameBeginInfo* bi) 
 static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
     (void)s;
     char buf[1024] = "";
+    int freshLocated = -1;
     if (gBegunPredicted && ei->displayTime == gBegunPredicted) gEndTimeMatch++;
     else if (gBegunPredicted) {
         gEndTimeOff++;
@@ -733,6 +755,7 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                 else gRepeatSets++;
             }
             int located = checkPoses(p, ei->displayTime, fresh);
+            if (i == 0 && fresh) freshLocated = located;
             if (gStampOn && gGfx && gGfx->stamp_read && p->viewCount == 2 && i == 0) {
                 for (int v = 0; v < 2; v++) {
                     Chain* ch = chainOf(p->views[v].subImage.swapchain);
@@ -804,6 +827,19 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                 }
             }
             gLastFreshSlot = landSlot;
+            if (freshLocated >= 0 && locateCallNs(freshLocated)) {
+                double lat = (double)(gT0 + landSlot * gPeriod - locateCallNs(freshLocated)) / 1e6;
+                gLatSumMs += lat;
+                if (lat > gLatMaxMs) gLatMaxMs = lat;
+                if (lat < gLatMinMs) gLatMinMs = lat;
+                gLatN++;
+                int b = lat < 20 ? 0 : lat < 30 ? 1 : lat < 40 ? 2 : lat < 50 ? 3 : lat < 60 ? 4 : 5;
+                gLatHist[b]++;
+                double wakeEnd = (double)(nowNs() - ((int64_t)ei->displayTime - gTimeOffset - gLead * gPeriod)) / 1e6;
+                gWakeEndSumMs += wakeEnd;
+                if (wakeEnd > gWakeEndMaxMs) gWakeEndMaxMs = wakeEnd;
+                if (wakeEnd > gOnTimeMs) gOffWindow++;
+            }
         }
     }
     trace("endFrame layers=%u%s d=%lld at=%lld", ei->layerCount, buf, (long long)wantSlot, (long long)landSlot);
@@ -819,6 +855,7 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
 static struct {
     XrTime time;
     XrPosef pose[2];
+    int64_t callNs;
 } gLocates[LOCATES];
 static int gLocateNext = 0;
 static XrResult XRAPI_CALL mLocateViews(XrSession s, const XrViewLocateInfo* li, XrViewState* vs, uint32_t cap, uint32_t* count, XrView* v) {
@@ -838,6 +875,7 @@ static XrResult XRAPI_CALL mLocateViews(XrSession s, const XrViewLocateInfo* li,
         gLocates[gLocateNext].pose[e] = v[e].pose;
     }
     gLocates[gLocateNext].time = li->displayTime;
+    gLocates[gLocateNext].callNs = nowNs();
     gLocateNext = (gLocateNext + 1) % LOCATES;
     return XR_SUCCESS;
 }
@@ -846,6 +884,7 @@ static int samePose(const XrPosef* a, const XrPosef* b) { return !memcmp(a, b, s
 
 // Both eyes of a projection layer: from one locate, and for which time.
 static XrTime locateTime(int i) { return gLocates[i].time; }
+static int64_t locateCallNs(int i) { return gLocates[i].callNs; }
 static int checkPoses(const XrCompositionLayerProjection* p, XrTime displayTime, int fresh) {
     if (p->viewCount != 2) return -1;
     gPoseSets++;
@@ -1074,6 +1113,8 @@ static void init(void) {
     }
     gStampOn = getenv("MOCK_XR_STAMP") != NULL;
     if (getenv("MOCK_XR_LEAD")) gLead = atoi(getenv("MOCK_XR_LEAD"));
+    if (getenv("MOCK_XR_THROTTLE")) gThrottle = atoi(getenv("MOCK_XR_THROTTLE"));
+    if (getenv("MOCK_XR_ONTIME_MS")) gOnTimeMs = atof(getenv("MOCK_XR_ONTIME_MS"));
     if (getenv("MOCK_XR_HEAD_DEG")) gHeadAmp = atof(getenv("MOCK_XR_HEAD_DEG")) * 3.14159265 / 180.0;
     if (getenv("MOCK_XR_HEAD_DPS") && gHeadAmp > 0.0)
         gHeadHz = atof(getenv("MOCK_XR_HEAD_DPS")) * 3.14159265 / 180.0 / (2.0 * 3.14159265 * gHeadAmp);

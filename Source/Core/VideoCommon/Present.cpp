@@ -1110,6 +1110,15 @@ bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
   if (!VR::g_openxr->PollEvents() || !VR::g_openxr->IsSessionRunning())
     return false;
 
+  // Cycle pacing: the last frame is ended (by the backend's releaser thread) before this one
+  // begins. The other modes return at once.
+  VR::g_openxr->DisarmLazyFrameStart();
+  if (VR::IOpenXRSwapchain* swapchain = VR::g_openxr->GetSwapchain();
+      swapchain && !swapchain->WaitForPendingFrameFinalization("frame start"))
+  {
+    return false;
+  }
+
   if (!VR::g_openxr->WaitFrame() || !VR::g_openxr->BeginFrame())
     return false;
 
@@ -1162,6 +1171,19 @@ void Presenter::PrepareNextOpenXRFrame()
       if (!g_ActiveConfig.VRLockHeadPoseEffective())
         geometry_shader_manager.InvalidateVRHeadPose();
     }
+    m_openxr_frame_prepared = false;
+  }
+  else if (swapchain && swapchain->UsesLazyFrameStart())
+  {
+    // Cycle pacing: the next game frame begins at its first draw that reads the head pose
+    // (OpenXRManager starts it there: xrWaitFrame, xrBeginFrame, xrLocateViews for the display
+    // time it got), so the pose is as fresh as the game's draws allow. The present begins it
+    // itself if no draw did.
+    VR::g_openxr->ArmLazyFrameStart();
+    auto& geometry_shader_manager = Core::System::GetInstance().GetGeometryShaderManager();
+    geometry_shader_manager.SetProjectionChanged();
+    if (!g_ActiveConfig.VRLockHeadPoseEffective())
+      geometry_shader_manager.InvalidateVRHeadPose();
     m_openxr_frame_prepared = false;
   }
   else
@@ -1280,6 +1302,12 @@ void Presenter::Present(PresentInfo* present_info)
           VR::g_openxr->GetSwapchain() :
           nullptr;
   const bool vr_pipelined = vr_swapchain && vr_swapchain->UsesPipelinedPacing();
+  // Cycle pacing: a draw of this game frame may have begun its OpenXR frame already.
+  if (vr_swapchain && vr_swapchain->UsesLazyFrameStart() && !vr_pacing_active &&
+      VR::g_openxr->TakeLazyFrameStarted())
+  {
+    m_openxr_frame_prepared = true;
+  }
   bool vr_frame_started =
       vr_pacing_active || vr_pipelined ? VR::g_openxr->IsSessionRunning() :
                                          m_openxr_frame_prepared;

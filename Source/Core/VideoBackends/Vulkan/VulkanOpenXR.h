@@ -164,6 +164,7 @@ public:
 
   // PrimeFrame pacing (PRIMEFRAME_PACING=pipelined|inline|drain, see frame/PACING.md).
   bool UsesPipelinedPacing() const override { return m_pacing == Pacing::Pipelined; }
+  bool UsesLazyFrameStart() const override { return m_pacing == Pacing::Cycle && m_lazy_start; }
   bool SkipsWindowPresent() const override { return m_skip_window_present; }
   bool LocateNextFramePose() override;
 
@@ -184,6 +185,8 @@ private:
     Pipelined,  // two eye sets; a pacing thread releases each set after its fence and ends it
     Inline,     // one set; fence wait right before the release, same frame
     Drain,      // one set; the submit waits for the GPU (PRIMEDGUN_XR_WAIT_GPU=1)
+    Cycle,      // one set; each game frame in its own xrWaitFrame cycle, begun at its first
+                // pose read; a releaser thread releases it after its fence and ends it
   };
 
   // One eye set handed from the video thread to the pacing thread.
@@ -203,6 +206,8 @@ private:
     VkFence fence = VK_NULL_HANDLE;
     bool complete = false;
     int64_t submit_ns = 0;
+    XrTime pose_time = 0;       // the display time its poses were located for
+    bool should_render = true;  // cycle: the frame's xrWaitFrame said so
   };
 
   std::array<XRVkEyeSwapchain, 2>& EyeSet(uint32_t set)
@@ -212,6 +217,8 @@ private:
   VkFence TakeFence();
   void ReturnFence(VkFence fence);
   bool SubmitFramePipelined();
+  bool SubmitFrameCycle();
+  void CycleLoop();
   bool ReleaseItem(XRFrameItem& item, bool wait_gpu);
   void PacerLoop();
   void StartPacer();
@@ -266,6 +273,14 @@ private:
   bool m_skip_window_present = true;
   // PRIMEFRAME_REPEATS=1: end a frame every refresh, repeating the last eye set between new ones.
   bool m_repeat_layers = false;
+  // Cycle: PRIMEFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
+  bool m_lazy_start = true;
+  bool m_cycle_busy = false;  // the releaser thread is ending a frame (under m_pacer_mutex)
+  // Pipelined: release a set's images as soon as its fence signalled, before its refresh
+  // (PRIMEFRAME_EARLY_RELEASE=0: at its refresh); the margin the pose target leaves before the
+  // runtime's wake-up for it (PRIMEFRAME_PACE_MARGIN_MS, default 3).
+  bool m_early_release = true;
+  double m_pace_margin_ms = 3.0;
 
   // Video thread side of the pipelined pacing.
   uint32_t m_next_set = 0;
@@ -297,7 +312,7 @@ private:
   struct Stats
   {
     uint64_t window_start_us = 0;
-    uint32_t fresh = 0, layers = 0, late = 0, gpu_waits = 0, set_waits = 0;
+    uint32_t fresh = 0, layers = 0, late = 0, gpu_waits = 0, set_waits = 0, discards = 0;
     uint64_t gpu_wait_max_us = 0, drain_sum_us = 0, drain_max_us = 0;
     uint64_t gpu_busy_ns = 0;
   } m_stats;

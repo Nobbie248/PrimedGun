@@ -489,6 +489,22 @@ bool VulkanOpenXR::WaitForPendingFrameFinalization(std::string_view reason)
     ERROR_LOG_FMT(VIDEO, "OpenXR Vulkan: previous async final XR submit failed.");
     return false;
   }
+#else
+  // Cycle: the next frame begins (and its eye images are acquired) only once the releaser
+  // thread has ended the last one.
+  if (m_pacing == Pacing::Cycle && m_pacer.joinable() &&
+      std::this_thread::get_id() != m_pacer.get_id())
+  {
+    std::unique_lock<std::mutex> lock(m_pacer_mutex);
+    if (!m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
+          return (m_pending.empty() && !m_cycle_busy) || m_pacer_exit.load();
+        }))
+    {
+      ERROR_LOG_FMT(OPENXR, "PrimeFrame cycle: the last frame was not ended within 2 s ({}).",
+                    reason);
+      return false;
+    }
+  }
 #endif
 
   return true;
@@ -752,8 +768,10 @@ bool VulkanOpenXR::Initialize()
 
 #if !defined(ANDROID)
   // PrimeFrame pacing (frame/PACING.md). PRIMEDGUN_XR_WAIT_GPU=1 keeps meaning the drain.
-  m_pacing = Pacing::Pipelined;
-  if (EnvIs("PRIMEFRAME_PACING", "inline"))
+  m_pacing = Pacing::Cycle;
+  if (EnvIs("PRIMEFRAME_PACING", "pipelined"))
+    m_pacing = Pacing::Pipelined;
+  else if (EnvIs("PRIMEFRAME_PACING", "inline"))
     m_pacing = Pacing::Inline;
   else if (EnvIs("PRIMEFRAME_PACING", "drain") ||
            (!std::getenv("PRIMEFRAME_PACING") && EnvIs("PRIMEDGUN_XR_WAIT_GPU", "1")))
@@ -761,14 +779,20 @@ bool VulkanOpenXR::Initialize()
   m_no_gpu_wait = EnvIs("PRIMEFRAME_NO_GPU_WAIT", "1");
   m_skip_window_present = !EnvIs("PRIMEFRAME_WINDOW_PRESENT", "1");
   m_repeat_layers = EnvIs("PRIMEFRAME_REPEATS", "1");
+  m_lazy_start = !EnvIs("PRIMEFRAME_CYCLE_LAZY", "0");
+  m_early_release = !EnvIs("PRIMEFRAME_EARLY_RELEASE", "0");
+  if (const char* margin = std::getenv("PRIMEFRAME_PACE_MARGIN_MS"))
+    m_pace_margin_ms = std::clamp(std::atof(margin), 0.0, 20.0);
   m_set_count = m_pacing == Pacing::Pipelined ? 2 : 1;
   INFO_LOG_FMT(OPENXR,
                "PrimeFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={} "
-               "repeats={}",
+               "repeats={} cycle_lazy={} early_release={} margin_ms={:.1f}",
                m_pacing == Pacing::Pipelined ? "pipelined" :
                m_pacing == Pacing::Inline    ? "inline" :
+               m_pacing == Pacing::Cycle     ? "cycle" :
                                                "drain",
-               m_set_count, m_no_gpu_wait, !m_skip_window_present, m_repeat_layers);
+               m_set_count, m_no_gpu_wait, !m_skip_window_present, m_repeat_layers, m_lazy_start,
+               m_early_release, m_pace_margin_ms);
 #endif
 
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Creating swapchains...");
@@ -782,7 +806,7 @@ bool VulkanOpenXR::Initialize()
   // Register this object as the swapchain provider so Presenter can acquire eye images.
   VR::g_openxr->SetSwapchain(this);
 #if !defined(ANDROID)
-  if (m_pacing == Pacing::Pipelined)
+  if (m_pacing == Pacing::Pipelined || m_pacing == Pacing::Cycle)
     StartPacer();
 #endif
 
@@ -1832,6 +1856,8 @@ AbstractFramebuffer* VulkanOpenXR::AcquireEyeFramebuffer(uint32_t eye_index)
 #if !defined(ANDROID)
   // Pipelined: the frame takes the next eye set once the pacing thread released that set's
   // last image (one waited, unreleased image per swapchain).
+  if (m_pacing == Pacing::Cycle && !m_image_acquired[0] && !m_image_acquired[1])
+    WaitForPendingFrameFinalization("eye acquire");
   if (!m_frame_set_chosen)
   {
     m_frame_set = m_set_count == 2 ? m_next_set : 0;
@@ -2211,6 +2237,8 @@ bool VulkanOpenXR::SubmitFrame()
 #if !defined(ANDROID)
   if (m_pacing == Pacing::Pipelined)
     return SubmitFramePipelined();
+  if (m_pacing == Pacing::Cycle)
+    return SubmitFrameCycle();
 
   bool desktop_has_acquired_images = m_layered_image_acquired;
   for (bool acquired : m_image_acquired)
@@ -2471,22 +2499,34 @@ void VulkanOpenXR::EmitStats()
   s_last_gpu_ns = gpu_ns;
   uint32_t waits = 0;
   uint64_t wait_total_us = 0, wait_max_us = 0;
+  VR::OpenXRManager::FrameTimingStats timing{};
   if (VR::g_openxr)
+  {
     VR::g_openxr->TakeWaitFrameStats(&waits, &wait_total_us, &wait_max_us);
+    VR::g_openxr->TakeFrameTimingStats(&timing);
+  }
+  const double ended = std::max<uint32_t>(timing.frames, 1);
   INFO_LOG_FMT(OPENXR,
                "XRSTATS mode={} submitted={} layers={} shown={} late={} gpu_waits={} "
                "gpu_wait_max_ms={:.2f} drain_avg_ms={:.2f} drain_max_ms={:.2f} gpu_ms={:.2f} "
-               "xrwait_avg_ms={:.2f} xrwait_max_ms={:.2f} set_waits={} eye={}x{} game_fps={:.1f} "
+               "xrwait_avg_ms={:.2f} xrwait_max_ms={:.2f} set_waits={} discards={} "
+               "end_avg_ms={:.2f} end_max_ms={:.2f} end_late={} age_avg_ms={:.2f} "
+               "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} eye={}x{} game_fps={:.1f} "
                "game_vps={:.1f}",
                m_pacing == Pacing::Pipelined ? (m_no_gpu_wait ? "pipelined-nowait" : "pipelined") :
                m_pacing == Pacing::Inline    ? (m_no_gpu_wait ? "inline-nowait" : "inline") :
+               m_pacing == Pacing::Cycle     ? (m_no_gpu_wait ? "cycle-nowait" : "cycle") :
                                                (m_no_gpu_wait ? "drain-nowait" : "drain"),
                s_submitted, m_stats.layers, m_stats.fresh, m_stats.late, m_stats.gpu_waits,
                m_stats.gpu_wait_max_us / 1000.0,
                s_submitted ? m_stats.drain_sum_us / 1000.0 / s_submitted : 0.0,
                m_stats.drain_max_us / 1000.0, gpu_ms,
                waits ? wait_total_us / 1000.0 / waits : 0.0, wait_max_us / 1000.0,
-               m_stats.set_waits, m_eye_swapchains[0].width, m_eye_swapchains[0].height,
+               m_stats.set_waits, m_stats.discards, timing.end_sum_ms / ended, timing.end_max_ms,
+               timing.ended_late,
+               timing.age_count ? timing.age_sum_ms / timing.age_count : 0.0, timing.age_max_ms,
+               timing.lead_sum_ms / ended, timing.pose_mismatch, m_eye_swapchains[0].width,
+               m_eye_swapchains[0].height,
                g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
   m_stats = {};
   m_stats.window_start_us = now_us;
@@ -2611,6 +2651,165 @@ bool VulkanOpenXR::SubmitFramePipelined()
   return true;
 }
 
+// Cycle: the frame was begun (xrWaitFrame, xrBeginFrame, xrLocateViews) at its first pose read;
+// submit its work, put a fence behind it and hand it to the releaser thread, which releases the
+// eye images once the fence signalled and ends the frame with the display time of its own
+// xrWaitFrame and the poses it was drawn with. The video thread goes on with the next game frame;
+// the next frame begins only after this one ended (WaitForPendingFrameFinalization).
+bool VulkanOpenXR::SubmitFrameCycle()
+{
+  const bool any_acquired = m_image_acquired[0] || m_image_acquired[1];
+  StateTracker::GetInstance()->EndRenderPass();
+  g_command_buffer_mgr->SubmitCommandBuffer(false, false, m_skip_window_present);
+  StateTracker::GetInstance()->InvalidateCachedState();
+
+  XRFrameItem item;
+  item.id = ++m_frame_id;
+  item.set = 0;
+  item.eye_acquired = m_image_acquired;
+  item.submit_ns = SteadyNs();
+  item.target = VR::g_openxr->GetPredictedDisplayTime();
+  item.should_render = VR::g_openxr->ShouldRender();
+  if (any_acquired && m_no_gpu_wait)
+  {
+    // Negative test: released right after the submit, no wait of any kind.
+    XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    for (uint32_t eye = 0; eye < 2; ++eye)
+    {
+      if (!item.eye_acquired[eye])
+        continue;
+      auto queue_lock = AcquireGraphicsQueueLock();
+      xrReleaseSwapchainImage(m_eye_swapchains[eye].swapchain, &release_info);
+    }
+    item.released = true;
+    item.complete = true;
+  }
+  else if (any_acquired)
+  {
+    item.fence = TakeFence();
+    auto queue_lock = AcquireGraphicsQueueLock();
+    vkQueueSubmit(g_vulkan_context->GetGraphicsQueue(), 0, nullptr, item.fence);
+  }
+  else
+  {
+    item.released = true;
+    item.complete = true;
+  }
+
+  const auto& eye_views = VR::g_openxr->GetSubmittedEyeViews();
+  item.views_valid = any_acquired && VR::g_openxr->AreSubmittedEyeViewsValid();
+  item.pose_time = item.views_valid ? VR::g_openxr->GetSubmittedLocateTime() : 0;
+  for (uint32_t eye = 0; eye < 2; ++eye)
+  {
+    auto& pv = item.views[eye];
+    pv = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+    pv.pose = eye_views[eye].pose;
+    pv.fov = eye_views[eye].fov;
+    pv.subImage.swapchain = m_eye_swapchains[eye].swapchain;
+    pv.subImage.imageArrayIndex = 0;
+    pv.subImage.imageRect = {{0, 0},
+                             {static_cast<int32_t>(m_eye_swapchains[eye].width),
+                              static_cast<int32_t>(m_eye_swapchains[eye].height)}};
+  }
+  if (VR::g_openxr->GetActiveBlendMode() == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+  {
+    item.layer_flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                       XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+  }
+  const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
+  if (overlay.cinematic_screen_active)
+  {
+    item.cinematic = BuildCinematicScreenLayer(m_eye_swapchains,
+                                               overlay.cinematic_screen_generation,
+                                               &item.cinematic_layer);
+  }
+  else
+  {
+    ResetCinematicScreenAnchor();
+  }
+  std::vector<XrCompositionLayerBaseHeader*> quads;
+  AppendPrimedGunOverlayLayers(&quads);
+  for (XrCompositionLayerBaseHeader* quad : quads)
+    item.quads.push_back(*reinterpret_cast<XrCompositionLayerQuad*>(quad));
+
+  m_image_acquired = {false, false};
+  m_frame_set_chosen = false;
+  m_frame_uses_layered_swapchain = false;
+  {
+    std::lock_guard<std::mutex> lock(m_pacer_mutex);
+    m_pending.push_back(std::move(item));
+  }
+  m_pacer_cv.notify_all();
+  EmitStats();
+  return true;
+}
+
+// Cycle: the releaser thread. One frame at a time: wait for its fence, release its eye images,
+// end it. Late: ended more than a refresh after its xrWaitFrame returned.
+void VulkanOpenXR::CycleLoop()
+{
+  Common::SetCurrentThreadName("PrimeFrame XR releaser");
+  const VkDevice device = g_vulkan_context->GetDevice();
+  while (!m_pacer_exit.load())
+  {
+    XRFrameItem item;
+    {
+      std::unique_lock<std::mutex> lock(m_pacer_mutex);
+      m_pacer_cv.wait_for(lock, std::chrono::milliseconds(100),
+                          [&] { return m_pacer_exit.load() || !m_pending.empty(); });
+      if (m_pending.empty())
+        continue;
+      item = std::move(m_pending.front());
+      m_pending.pop_front();
+      m_cycle_busy = true;
+    }
+    if (item.fence != VK_NULL_HANDLE && !item.complete)
+    {
+      const int64_t start = SteadyNs();
+      const bool waited = vkGetFenceStatus(device, item.fence) != VK_SUCCESS;
+      vkWaitForFences(device, 1, &item.fence, VK_TRUE, UINT64_MAX);
+      item.complete = true;
+      NoteGpuWait(static_cast<uint64_t>((SteadyNs() - start) / 1000), waited);
+    }
+    ReleaseItem(item, true);
+
+    XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    std::vector<XrCompositionLayerBaseHeader*> layers;
+    if (item.cinematic)
+    {
+      layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&item.cinematic_layer));
+    }
+    else if (item.views_valid)
+    {
+      projection.layerFlags = item.layer_flags;
+      projection.space = VR::g_openxr->GetReferenceSpace();
+      projection.viewCount = 2;
+      projection.views = item.views.data();
+      layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&projection));
+    }
+    for (XrCompositionLayerQuad& quad : item.quads)
+      layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&quad));
+    VR::g_openxr->EndFrameDetached(item.target, VR::g_openxr->GetActiveBlendMode(),
+                                   item.should_render && !layers.empty(), layers,
+                                   item.views_valid && !item.cinematic ? item.pose_time : 0);
+    const auto clock = VR::g_openxr->GetFrameClock();
+    NoteLayerEnd(item.views_valid,
+                 clock.period_ns > 0 && SteadyNs() - clock.wake_ns > clock.period_ns);
+    {
+      std::lock_guard<std::mutex> lock(m_pacer_mutex);
+      m_cycle_busy = false;
+    }
+    m_pacer_cv.notify_all();
+  }
+  ReleaseCompletedItems(true);
+  {
+    std::lock_guard<std::mutex> lock(m_pacer_mutex);
+    m_cycle_busy = false;
+  }
+  m_pacer_cv.notify_all();
+  INFO_LOG_FMT(OPENXR, "PrimeFrame releaser thread exiting.");
+}
+
 bool VulkanOpenXR::ReleaseItem(XRFrameItem& item, bool wait_gpu)
 {
   if (item.fence != VK_NULL_HANDLE && wait_gpu && !item.complete)
@@ -2678,8 +2877,12 @@ void VulkanOpenXR::StartPacer()
   if (m_pacer.joinable())
     return;
   m_pacer_exit.store(false);
-  m_pacer = std::thread(&VulkanOpenXR::PacerLoop, this);
-  INFO_LOG_FMT(OPENXR, "PrimeFrame pacing thread started.");
+  if (m_pacing == Pacing::Cycle)
+    m_pacer = std::thread(&VulkanOpenXR::CycleLoop, this);
+  else
+    m_pacer = std::thread(&VulkanOpenXR::PacerLoop, this);
+  INFO_LOG_FMT(OPENXR, "PrimeFrame {} thread started.",
+               m_pacing == Pacing::Cycle ? "releaser" : "pacing");
 }
 
 void VulkanOpenXR::StopPacer()
@@ -2777,6 +2980,49 @@ void VulkanOpenXR::PacerLoop()
       }
     }
 
+    // Pipelined: release the finished set now, before its refresh, so that only xrBeginFrame
+    // and xrEndFrame are left between its xrWaitFrame and its end. Its swapchains are not the
+    // ones on show (the sets alternate).
+    if (m_early_release && !m_no_gpu_wait && due_wake != 0)
+    {
+      XRFrameItem* front = nullptr;
+      uint32_t set = 0;
+      std::array<bool, 2> eyes{};
+      {
+        std::lock_guard<std::mutex> lock(m_pacer_mutex);
+        if (!m_pending.empty() && !m_pending.front().released &&
+            m_pending.front().fence != VK_NULL_HANDLE &&
+            (m_pending.front().complete ||
+             vkGetFenceStatus(device, m_pending.front().fence) == VK_SUCCESS) &&
+            (!have_current || current.set != m_pending.front().set))
+        {
+          front = &m_pending.front();
+          set = front->set;
+          eyes = front->eye_acquired;
+        }
+      }
+      if (front)
+      {
+        XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        for (uint32_t eye = 0; eye < 2; ++eye)
+        {
+          if (!eyes[eye])
+            continue;
+          auto queue_lock = AcquireGraphicsQueueLock();
+          xrReleaseSwapchainImage(EyeSet(set)[eye].swapchain, &release_info);
+        }
+        VkFence done_fence = VK_NULL_HANDLE;
+        {
+          std::lock_guard<std::mutex> lock(m_pacer_mutex);
+          // Only the pacing thread removes items, so the front is still this one.
+          front->released = true;
+          front->complete = true;
+          done_fence = front->fence;
+          front->fence = VK_NULL_HANDLE;
+        }
+        ReturnFence(done_fence);
+      }
+    }
     if (due_wake != 0)
     {
       // An xrWaitFrame called after refreshes were skipped returns at once with the refresh that
@@ -2818,6 +3064,17 @@ void VulkanOpenXR::PacerLoop()
         chosen_fence = m_pending[chosen].fence;
         chosen_complete = m_pending[chosen].complete;
       }
+    }
+    if (chosen < 0 && due_wake != 0 && !m_repeat_layers)
+    {
+      // Woken for a set, but the runtime handed out an earlier refresh than its poses were
+      // located for: begin that refresh's frame and leave it unended (the next xrBeginFrame
+      // discards it; the runtime shows the last frame again) rather than end the last set with a
+      // display time its poses were not located for.
+      VR::g_openxr->BeginFrame();
+      std::lock_guard<std::mutex> lock(m_stats_mutex);
+      m_stats.discards++;
+      continue;
     }
     bool waited = false;
     uint64_t wait_us = 0;
@@ -2902,7 +3159,10 @@ void VulkanOpenXR::PacerLoop()
         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&quad));
     }
     VR::g_openxr->EndFrameDetached(display_time, VR::g_openxr->GetActiveBlendMode(),
-                                   should_render && !layers.empty(), layers);
+                                   should_render && !layers.empty(), layers,
+                                   have_current && current.views_valid && !current.cinematic ?
+                                       current.target :
+                                       0);
     if (SteadyNs() - clock.wake_ns > period)
       late = true;
     NoteLayerEnd(fresh, late);
@@ -2926,7 +3186,7 @@ bool VulkanOpenXR::LocateNextFramePose()
   const double span_ms = m_span_ema_ms > 0.0 ? m_span_ema_ms : 15.0;
   const double interval_ms = m_interval_ema_ms > 0.0 ? m_interval_ema_ms : 16.7;
   const int64_t ready =
-      now + static_cast<int64_t>((span_ms + m_gpu_tail_ema_ms.load() + 1.0) * 1e6);
+      now + static_cast<int64_t>((span_ms + m_gpu_tail_ema_ms.load() + m_pace_margin_ms) * 1e6);
   // The runtime's wake-up for clock.display_time (the last xrWaitFrame may have returned late).
   const int64_t grid_wake =
       clock.grid_offset_ns != 0 ? clock.display_time - clock.grid_offset_ns : clock.wake_ns;
