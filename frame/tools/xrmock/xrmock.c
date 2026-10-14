@@ -1087,9 +1087,9 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                     const XrQuaternionf* q = &((const XrCompositionLayerProjection*)ei->layers[0])->views[0].pose.orientation;
                     double shown = 2.0 * atan2(q->y, q->w);
                     double callRate = 0.0;
-                    stopsYaw((double)(locateCallNs(freshLocated) - gT0) / 1e9, &callRate);
+                    stopsYaw((double)(locateCallNs(freshLocated) - gSessionStart) / 1e9, &callRate);
                     double moving = 0.0;
-                    double truth = stopsYaw((double)(landNs - gT0) / 1e9, &moving);
+                    double truth = stopsYaw((double)(landNs - gSessionStart) / 1e9, &moving);
                     double err = (shown - truth) * 180.0 / 3.14159265;
                     double dir = callRate > 0 ? 1.0 : callRate < 0 ? -1.0 : 0.0;
                     gYawAbsSum += fabs(err);
@@ -1138,11 +1138,11 @@ static XrResult XRAPI_CALL mLocateViews(XrSession s, const XrViewLocateInfo* li,
     vs->viewStateFlags = XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_TRACKED_BIT |
                          XR_VIEW_STATE_POSITION_TRACKED_BIT;
     *count = 2;
-    double t = (double)(li->displayTime - xrOff() - gT0) / 1e9;
+    double t = (double)(li->displayTime - xrOff() - gSessionStart) / 1e9;
     float yaw = (float)(gHeadAmp * sin(t * 2.0 * 3.14159265 * gHeadHz));
     if (gHeadStops) {
         // Predicted as a runtime does: from the pose and speed at the call, at constant speed.
-        double now = (double)(nowNs() - gT0) / 1e9, rate = 0.0;
+        double now = (double)(nowNs() - gSessionStart) / 1e9, rate = 0.0;
         yaw = (float)(stopsYaw(now, &rate) + rate * (t - now));
     }
     float rise = (float)(t * 1e-4);  // 0.1 mm a second: the sway repeats, the pose never does
