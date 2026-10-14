@@ -1492,15 +1492,12 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
 
   // The refresh spacing: the smallest step between consecutive display times seen at least four
   // times in the last 64 (a step of 0, the same refresh handed out twice, or two refreshes do
-  // not count). A larger one replaces it only after 30 s without a step of about the old one:
-  // SteamVR can hand out the same refresh twice and then skip one for seconds on end (session
-  // of 2026-10-14, light room: steps of 0 and 33.3 ms only, which made the slot 33.3 ms and the
-  // landing plan wrong by a refresh: the 1-3 cadence).
+  // not count). It never grows: SteamVR can hand out the same refresh twice and then skip one for
+  // as long as the game's phase stays (session of 2026-10-14, light room: steps of 0 and 33.3 ms
+  // only, which made the slot 33.3 ms and the landing plan wrong by a refresh: the 1-3 cadence).
   if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
   {
     const int64_t step_now = m_clock.display_time - m_prev_wait_display_time;
-    if (m_slot_ns > 0 && std::abs(step_now - m_slot_ns) < 500'000)
-      m_slot_seen_ns = m_clock.wake_ns;
     m_display_steps[m_display_step_next] = step_now;
     m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
     m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
@@ -1516,14 +1513,13 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
       if (near >= 4)
         best = step;
     }
-    if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns ||
-                      m_clock.wake_ns - m_slot_seen_ns > 30'000'000'000LL))
+    if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns))
     {
-      if (m_slot_ns != 0 && std::abs(best - m_slot_ns) > 500'000)
-        INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms (was {:.2f} ms)", best / 1e6,
-                     m_slot_ns / 1e6);
-      if (std::abs(best - m_slot_ns) > 500'000)
-        m_slot_seen_ns = m_clock.wake_ns;
+      if (m_slot_ns == 0 || best < m_slot_ns - 500'000)
+      {
+        INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms{}", best / 1e6,
+                     m_slot_ns ? fmt::format(" (was {:.2f} ms)", m_slot_ns / 1e6) : "");
+      }
       m_slot_ns = best;
     }
   }

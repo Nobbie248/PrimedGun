@@ -612,7 +612,6 @@ private:
   size_t m_display_step_next = 0;
   size_t m_display_step_count = 0;
   int64_t m_slot_ns = 0;
-  int64_t m_slot_seen_ns = 0;  // the last step of about m_slot_ns (a larger slot waits 30 s for none)
   int m_calib_attempts = 0;
   int64_t m_calib_last_ns = 0;
 
