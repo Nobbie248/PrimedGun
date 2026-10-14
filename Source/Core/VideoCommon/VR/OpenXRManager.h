@@ -82,9 +82,9 @@ public:
   // the frame's first draw that needs the head pose (the presenter arms it, OpenXRManager starts
   // it), and a releaser thread ends it once the GPU has finished.
   virtual bool UsesLazyFrameStart() const { return false; }
-  // Cycle overlap (PRIMEFRAME_CYCLE_OVERLAP, frame/PACING.md): the next frame's xrWaitFrame does
-  // not wait for the last frame's end; its xrBeginFrame follows that end (on the releaser
-  // thread when the end comes later). CycleBeforeWait blocks until the last waited frame was
+  // Cycle overlap (default, PRIMEFRAME_CYCLE_OVERLAP=0 off; frame/PACING.md): the next frame's
+  // xrWaitFrame does not wait for the last frame's end; its xrBeginFrame follows that end (on
+  // the releaser thread when the end comes later). CycleBeforeWait blocks until the last waited frame was
   // begun; CycleBeginNowAfterWait says whether the caller begins the frame it just waited for
   // (nothing left to end) or the releaser thread does it after its end.
   virtual bool UsesCycleOverlap() const { return false; }
@@ -210,7 +210,6 @@ public:
   // Cycle pacing: xrWaitFrame, xrBeginFrame (or, with the overlap, leave it to the releaser
   // thread), xrLocateViews when locate_views and the runtime wants the frame rendered.
   bool StartCycleFrame(bool locate_views);
-  void AlignCycleStart();
   XrTime GetSubmittedLocateTime() const { return m_submitted_locate_time; }
 
   // Per-frame timing (all pacing modes), noted at every xrEndFrame: how long the frame's
@@ -500,25 +499,7 @@ private:
     XrTime display_time = 0;
     int64_t call_ns = 0;
     int64_t return_ns = 0;
-    int64_t align_ns = 0;  // cycle align: slept before the call
   };
-  int64_t m_align_ns = 0;  // the phase sleep before the next xrWaitFrame (video thread)
-  // Cycle phase (AlignCycleStart): the last two seconds of frames (phase x after the wake-up,
-  // span r; under m_clock_mutex), the mode (0 ontime, 1 late), since when, the recent skips, the
-  // phase seen while on time.
-  struct PhaseSample
-  {
-    double x = 0;
-    double r = 0;
-  };
-  std::array<PhaseSample, 120> m_phase_samples{};
-  size_t m_phase_next = 0;
-  size_t m_phase_count = 0;
-  int m_phase_mode = 0;
-  int64_t m_phase_mode_since_ns = 0;
-  int64_t m_phase_last_skip_ns = 0;
-  int64_t m_phase_dwell_ns = 10'000'000'000LL;
-  double m_phase_ontime_x = 1.5;
   std::array<WaitNote, 4> m_wait_notes{};
   size_t m_wait_note_next = 0;
   XrTime m_prev_end_display_time = 0;

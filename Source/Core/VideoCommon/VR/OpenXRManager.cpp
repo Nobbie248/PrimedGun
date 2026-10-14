@@ -1410,9 +1410,7 @@ bool OpenXRManager::WaitFrame()
                            wait_end.time_since_epoch())
                            .count();
     m_wait_display_time = m_frame_state.predictedDisplayTime;
-    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
-                                      m_align_ns};
-    m_align_ns = 0;
+    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns};
     m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
     m_clock.display_time = m_frame_state.predictedDisplayTime;
     m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1600,7 +1598,7 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now().time_since_epoch())
                              .count();
-  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0, al = 0;
+  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0;
   int64_t dd = 0;
   uint64_t n = 0;
   {
@@ -1614,7 +1612,6 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
         blk = (note.return_ns - note.call_ns) / 1e6;
         lead = (display_time - note.return_ns) / 1e6;
         r = (end_ns - note.return_ns) / 1e6;
-        al = note.align_ns / 1e6;
       }
     }
     if (m_clock.grid_offset_ns != 0)
@@ -1665,13 +1662,6 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
         t.extra_sum_ms += ex;
         t.extra_frames++;
       }
-      if (r >= 0 && lead >= 0 && m_clock.grid_offset_ns != 0)
-      {
-        // Cycle phase: how late the frame's xrWaitFrame returned after the wake-up, and r.
-        m_phase_samples[m_phase_next] = {m_clock.grid_offset_ns / 1e6 - lead, r};
-        m_phase_next = (m_phase_next + 1) % m_phase_samples.size();
-        m_phase_count++;
-      }
       if (r >= 0)
       {
         const double sample = std::min(r, 50.0);
@@ -1685,9 +1675,8 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   {
     INFO_LOG_FMT(OPENXR,
                  "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
-                 "per={:.3f} ex={:.2f} al={:.2f}{}",
-                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, al,
-                 has_layers ? "" : " empty");
+                 "per={:.3f} ex={:.2f}{}",
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, has_layers ? "" : " empty");
   }
 }
 
@@ -1731,160 +1720,12 @@ void OpenXRManager::StartLazyFrameIfArmed() const
   self->m_lazy_started = true;
 }
 
-// Cycle phase (PRIMEFRAME_CYCLE_PHASE=auto|ontime|late|off, frame/PACING.md "Phase"). The game
-// runs at exactly 60 Hz against the runtime's 60 Hz slots, so every frame starts at about the
-// same phase x after the wake-up of the slot that is running, and ends x + r after it (r: the
-// frame's own xrWaitFrame return to its xrEndFrame, most of a refresh period because the game
-// draws all frame long). Ended up to PRIMEFRAME_PREDICT_ONTIME_MS (19.5) after the wake-up it is
-// shown on its display time, later a whole period later; a phase that puts the ends near that
-// limit mixes both (an image held 4 refreshes, the next never shown). The phase is moved by
-// holding this thread back before its xrWaitFrame (the game's draws queue up meanwhile and the
-// game's own phase follows):
-//  ontime: frames start right at the wake-up. When over 5 % of the last two seconds ended past
-//          the limit and the phase is the reason, wait once for the next wake-up (one slot
-//          skipped) so that the frames start there.
-//  late:   keep x at about 21.5 ms minus the short end of r (3 to 13 ms): every frame ends well
-//          inside the next period and is shown a period after its display time, every one
-//          (PRIMEFRAME_PREDICT_EXTRA_MS=auto locates the poses for that refresh).
-//  auto:   ontime while the frames fit (r's 90th percentile plus the phase seen on time plus
-//          1 ms under the limit), else late; a switch at most every 10 s (longer after a
-//          return to ontime that did not hold).
-void OpenXRManager::AlignCycleStart()
-{
-  static const int s_mode_cfg = [] {
-    const char* env = std::getenv("PRIMEFRAME_CYCLE_PHASE");
-    const std::string_view v = env ? env : "auto";
-    const int m = v == "off" ? -1 : v == "ontime" ? 0 : v == "late" ? 1 : 2;
-    INFO_LOG_FMT(OPENXR, "PrimeFrame cycle phase: {}",
-                 m < 0 ? "off" : m == 0 ? "ontime" : m == 1 ? "late" : "auto");
-    return m;
-  }();
-  if (s_mode_cfg < 0)
-    return;
-  const double ontime_ms = GetPredictConfig().ontime_ms;
-  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          std::chrono::steady_clock::now().time_since_epoch())
-                          .count();
-  int64_t wake_running = 0, period = 0;
-  std::vector<PhaseSample> samples;
-  {
-    std::lock_guard<std::mutex> lock(m_clock_mutex);
-    if (m_clock.period_ns <= 0 || m_clock.grid_offset_ns == 0 || m_clock.display_time == 0)
-      return;
-    period = m_clock.period_ns;
-    // The wake-up of the last slot handed out, then of the slot running now.
-    const int64_t wake_last = m_clock.display_time - m_clock.grid_offset_ns;
-    if (now < wake_last + period)
-      return;  // the next slot has not woken yet: xrWaitFrame blocks for it
-    wake_running = wake_last + (now - wake_last) / period * period;
-    samples.assign(m_phase_samples.begin(),
-                   m_phase_samples.begin() +
-                       std::min<size_t>(m_phase_count, m_phase_samples.size()));
-  }
-  const double x = (now - wake_running) / 1e6;
-  const bool full = samples.size() >= m_phase_samples.size();
-
-  // The last two seconds: frames that ended past the limit, the span r (10th and 90th
-  // percentile), the phase.
-  double late_frac = 0, r_lo = 14.0, r_hi = 18.0, x_avg = 0;
-  if (!samples.empty())
-  {
-    std::vector<double> r;
-    int late = 0;
-    for (const PhaseSample& smp : samples)
-    {
-      late += smp.x + smp.r > ontime_ms;
-      r.push_back(smp.r);
-      x_avg += smp.x;
-    }
-    std::sort(r.begin(), r.end());
-    late_frac = static_cast<double>(late) / samples.size();
-    r_lo = r[r.size() / 10];
-    r_hi = r[r.size() * 9 / 10];
-    x_avg /= samples.size();
-  }
-
-  const auto reset_window = [this] {
-    std::lock_guard<std::mutex> lock(m_clock_mutex);
-    m_phase_count = 0;
-    m_phase_next = 0;
-  };
-  const auto log_state = [&](const char* what) {
-    INFO_LOG_FMT(OPENXR,
-                 "PrimeFrame cycle phase: {} (last 2 s: ended past {:.1f} ms {:.0f} %, span "
-                 "{:.2f} to {:.2f} ms, phase {:.2f} ms; phase on time {:.2f} ms)",
-                 what, ontime_ms, late_frac * 100, r_lo, r_hi, x_avg, m_phase_ontime_x);
-  };
-
-  int mode = s_mode_cfg == 2 ? m_phase_mode : s_mode_cfg;
-  bool skip = false;
-  const int64_t dwell = now - m_phase_mode_since_ns;
-  if (mode == 0 && full)
-  {
-    const bool fits = r_hi + std::max(m_phase_ontime_x, 1.0) + 1.0 <= ontime_ms;
-    if (late_frac <= 0.05)
-    {
-      m_phase_ontime_x = x_avg;
-    }
-    else if (fits && x_avg > 2.0 && now - m_phase_last_skip_ns > 10'000'000'000LL)
-    {
-      // The frames would fit: the phase moved. Start again at the next wake-up.
-      skip = true;
-      m_phase_last_skip_ns = now;
-      log_state("ontime, start again at the next wake-up");
-      reset_window();
-    }
-    else if (s_mode_cfg == 2)
-    {
-      // A return to ontime that did not last makes the next one wait longer.
-      m_phase_dwell_ns = dwell < 20'000'000'000LL ?
-                             std::min<int64_t>(m_phase_dwell_ns * 2, 160'000'000'000LL) :
-                             10'000'000'000LL;
-      mode = 1;
-    }
-  }
-  else if (mode == 1 && s_mode_cfg == 2 && full && dwell > m_phase_dwell_ns &&
-           r_hi + std::max(m_phase_ontime_x, 1.0) + 1.0 <= ontime_ms)
-  {
-    mode = 0;
-    skip = true;
-  }
-  if (mode != m_phase_mode)
-  {
-    log_state(mode == 0 ? "ontime" : "late");
-    m_phase_mode = mode;
-    m_phase_mode_since_ns = now;
-    reset_window();
-  }
-
-  int64_t target = 0;
-  if (skip)
-  {
-    // Just after the next wake-up: the call then returns that slot at once.
-    target = wake_running + period + 200'000;
-  }
-  else if (mode == 1)
-  {
-    const double x_target = std::clamp(ontime_ms + 2.0 - r_lo, 3.0, 13.0);
-    if (x < x_target - 1.0)
-      target = wake_running + static_cast<int64_t>(x_target * 1e6);
-  }
-  if (target > now)
-  {
-    std::this_thread::sleep_for(std::chrono::nanoseconds(target - now));
-    m_align_ns = target - now;
-  }
-}
-
 bool OpenXRManager::StartCycleFrame(bool locate_views)
 {
   if (m_swapchain && m_swapchain->UsesCycleOverlap())
   {
     // The last frame may still be ending on the releaser thread: wait only until it was begun.
-    if (!m_swapchain->CycleBeforeWait())
-      return false;
-    AlignCycleStart();
-    if (!WaitFrame())
+    if (!m_swapchain->CycleBeforeWait() || !WaitFrame())
       return false;
     if (m_swapchain->CycleBeginNowAfterWait() && !BeginFrame())
       return false;

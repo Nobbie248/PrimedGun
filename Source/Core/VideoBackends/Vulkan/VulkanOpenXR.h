@@ -287,11 +287,25 @@ private:
   // Cycle: PRIMEFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
   bool m_lazy_start = true;
   bool m_cycle_busy = false;  // the releaser thread is ending a frame (under m_pacer_mutex)
-  // Cycle overlap (PRIMEFRAME_CYCLE_OVERLAP=1): the next frame's xrWaitFrame does not wait for
-  // the last frame's end; the releaser thread begins the waited frame right after that end
-  // (m_cycle_begin_pending, under m_pacer_mutex).
+  // Cycle overlap (default; PRIMEFRAME_CYCLE_OVERLAP=0 turns it off): the next frame's
+  // xrWaitFrame does not wait for the last frame's end; the releaser thread begins the waited
+  // frame right after that end (m_cycle_begin_pending, under m_pacer_mutex).
   bool m_cycle_overlap = false;
   bool m_cycle_begin_pending = false;
+  // Cycle end (PRIMEFRAME_CYCLE_END=auto|asap|late, with the overlap; releaser thread only):
+  // whether a finished frame is ended at once or held until a fixed time after its wake-up, so
+  // that every frame of a room whose frames end near SteamVR's on-time limit is shown a period
+  // later (see CycleEndHold).
+  int m_end_cfg = 2;   // 0 asap, 1 late, 2 auto
+  int m_end_mode = 0;  // 0 asap, 1 hold
+  double m_end_ontime_ms = 19.5;
+  double m_end_earliest_ms = 16.0;
+  int64_t m_end_since_ns = 0;
+  int64_t m_end_dwell_ns = 10'000'000'000LL;
+  std::array<float, 600> m_end_ready{};  // the last frames' finish after their wake-up (ms)
+  size_t m_end_ready_next = 0;
+  size_t m_end_ready_count = 0;
+  int64_t CycleEndHold(const XRFrameItem& item, int64_t fence_ns);
   // Cycle timing, video thread: its wait for the last frame's end in this frame, its CPU clock
   // at the last submit.
   int64_t m_cycle_video_wait_ns = 0;
