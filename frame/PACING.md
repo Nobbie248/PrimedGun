@@ -46,12 +46,12 @@ and advances Dolphin's frame resources instead.
   the next frame's `xrWaitFrame` does not wait for the last frame's end, its `xrBeginFrame` follows that
   end on the releaser thread (`PRIMEFRAME_CYCLE_OVERLAP=0`: the next frame begins only once the last one
   ended, as before); the GPU gets the frame's draws every 100 draws (`PRIMEFRAME_KICK_DRAWS`, 0 off); the
-  eye images are not cleared before the blit (`PRIMEFRAME_EYE_CLEAR=1` clears). Since section "The
-  wake-up": in a room whose frames are ready well inside SteamVR's on-time limit (asap) the next frame's
-  `xrWaitFrame` waits for the last frame's end, so it blocks for SteamVR's wake-up; in a heavy room (late)
-  the overlap stays, a frame expected on time is kept pending until the next frame's `xrWaitFrame`
-  returned, and a frame that will not make the limit is held past it and shown a refresh later, its poses
-  located for that refresh (`PRIMEFRAME_CYCLE_END`).
+  eye images are not cleared before the blit (`PRIMEFRAME_EYE_CLEAR=1` clears). Since section "One
+  landing": every frame is planned at its `xrWaitFrame` to land on the refresh after the last frame's,
+  whatever refresh SteamVR handed it; a frame planned after its display time is held past the on-time
+  limit (at most until the next frame's present) and its poses are located for the landing refresh, a
+  frame planned on its display time is kept pending until the next frame's `xrWaitFrame` returned
+  (`PRIMEFRAME_CYCLE_END=plan`, the default; `asap` is section "The wake-up"'s asap for an A/B).
 - `pipelined`: two eye swapchain sets. A pacing thread owns `xrWaitFrame`/`xrBeginFrame`/`xrEndFrame`. The
   video thread renders frame N into the next free set, submits, puts a fence behind it and hands the set
   over (poses, swapchains, overlay quads, the display time its poses were located for); then it locates
@@ -101,7 +101,13 @@ another display time than the one they were ended with (must be 0; poses located
 display time the frames' poses were located (average over all ended frames) and how many were. Cycle
 (section "The wake-up"): `early` frames whose `xrWaitFrame` returned more than 0.5 ms before SteamVR's
 wake-up for their display time, `wake_lead_ms` SteamVR's lead (wake-up to display time; `?` until a call
-blocked), `slot_ms` the spacing of the refreshes it hands out, `end_mode` asap or late.
+blocked), `slot_ms` the spacing of the refreshes it hands out, `end_mode` plan or asap. Landing plan (section
+"One landing"): `plan` frames planned to land 0 / 1 / 2 or more refreshes after their display time,
+`plan_breaks` frames that had to land a refresh later than the one after the last frame's (one image shown
+twice; a game frame late), `plan_catchups` frames moved a refresh earlier after 5 stable seconds and
+`plan_drops` frames landed on the last frame's refresh because holding them would have reached the next
+frame's present (the last frame is not shown in both), `hold_cuts` holds ended early because the video
+thread already waited for the eye images.
 
 ### Frame log
 
@@ -133,6 +139,10 @@ line `xrmock: cadence` gives the late layers and how many refreshes each new eye
 for new eye sets, the poses' `xrLocateViews` call to the refresh they land on, and the `xrEndFrame` after
 the wake-up of their display time (with how many came later than `MOCK_XR_ONTIME_MS`, 2.5: the headset
 showed such frames in a 1-3 cadence, see "Headset sessions H2"). The mock does not model that cadence.
+`MOCK_XR_EARLY=3` (mockrun `--frame`) is SteamVR's hand-out as session M showed it and `MOCK_XR_PHASE_MS`
+(mockrun `--phase`) puts the game's `xrWaitFrame` calls at a given time after a wake-up (section "One
+landing"); an `xrmock: window` line every 10 s gives the holds, the frames never shown, the landings on
+and after the display time and the hand-outs of those seconds.
 
 ## Results (mock, 120 Hz, eye 1728x1728, InternalResolution 2)
 
@@ -798,6 +808,129 @@ SteamVR composes head-locked without turning it:
   ahead and 12 cm below the centre of view, in a quad layer in a VIEW reference space
   (`VulkanOpenXR::AppendHudTestLayer`, `OpenXRManager::GetViewSpace`). In the headset: if it stays
   perfectly still while the game's HUD moves when the head turns, the layer is worth building.
+
+## One landing: what sessions L and M showed, and the landing plan
+
+### The sessions (2026-10-14, lane L's build)
+
+Two pairs of launches, heavy room (s02) then light room (s01), 120 Hz, framesToThrottle 1, eye 2160, IR 3.
+Session L (lane L's defaults, asap with its wait): "maybe felt less smooth and occasional spikes"; heavy
+56.3 fps (56 s under 57), light 57.6 (28 s under 57). Session M (`PRIMEFRAME_CYCLE_ASAP_WAIT=0`): "HUDs
+good, but more lag spikes, especially the second launch"; game fps fine (heavy 59.5, light 59.6). The HUD
+was steady in both (lane L's wake-up). The spikes in M are changes of SteamVR's cadence, second by second
+in vrtiming.log; frame by frame in the `XRF`/`XRC` lines of the last launch in each dolphin.log.
+
+### How SteamVR hands out refreshes
+
+From every frame of session M (about 11800), the refresh `xrWaitFrame` returned against what was going on
+at the call. Pending: the last frame begun and not yet ended (the overlap; the releaser holds it).
+
+| At the call | SteamVR returned | Frames |
+| --- | --- | --- |
+| a frame pending for the running refresh, its GPU work not done | the next refresh at once, early | 99 % of 4900 |
+| a frame pending for the running refresh, its GPU work done (held) | that same refresh again (`dd=0`) | 75 % of 448 (light); 32 % of 184 (heavy) |
+| a frame pending for a refresh still ahead | that same refresh again | all 400 (light) |
+| a frame pending for the refresh before the running one | the running one (heavy) or the next one (light) | 2178 of 2203 (heavy); 114 of 136 (light) |
+| none pending, the last frame ended after its on-time limit | the refresh after the one it lands on, at once, early (`dd=2`) | 98 % of 861 (light), 64 % of 430 (heavy; the rest mostly the running one) |
+| none pending, the last frame on time | blocks until the next wake-up (session L) | |
+
+So the refresh a frame gets depends on our own holds and on whether its GPU work is done, not only on the
+time of the call; and the game called at nearly the same time after a wake-up all launch long: light room
+13 to 15 ms (2 to 3 ms before the next wake-up), heavy room 0 to 1 ms (4900 of 7730 frames) or 9 to 14 ms.
+
+### What went wrong
+
+1. **Light room, the 1-3 stretches.** With the calls 2.7 ms before a wake-up, the frames alternated: one
+   handed the next refresh early (`w` -2.9) and on time (finished 11.7 ms after its wake-up), the next
+   handed that same refresh again 13.5 ms after its wake-up (the first one pending, its GPU work done) and
+   planned a refresh late. Clean (vrtiming 33:00 to 33:03: vsyncs 2.00, 60 reused, 60 mispresented), but
+   the display times stepped by 0 and 33.3 ms only, so after 64 such steps the refresh step (`slot_ms`)
+   read 33.33: every frame's extra prediction became 33.3 ms and the late-run rule planned both frames of
+   a pair onto one refresh. The two 1-3 stretches (33:04 to 33:07 and 33:22 to 33:27: 30 reused, 90
+   mispresented, vsyncs 1.00) are exactly the seconds with `slot_ms=33.33`; each ended with "frames handed
+   out early end a late run" (the run end resets the alternation, the step goes back to 16.67).
+2. **Light room, never back to asap.** The return condition took the frame's submit after its wake-up as
+   what a blocked start would give; frames handed the running refresh 13.5 ms after its wake-up counted as
+   finishing 27 ms after it. Its 95th percentile, per 10 s from the load: 19.5, 19.5, 26.2, 29.6, 30.8,
+   29.4 ms against the 17.0 needed. With the asap wait off nothing else could bring the frames back.
+3. **Heavy room, v2 and v4.** Calls 0 to 1 ms after a wake-up give two states that both last: a frame
+   handed the running refresh, planned a refresh late and held, so that the next call finds it pending and
+   gets the running refresh again (vsyncs 4); or a frame handed the next refresh 16 ms early and on time,
+   kept pending until the next call, which then gets the next refresh early again (vsyncs 2). Both land on
+   the same refresh. The changes between them cost frames: 9 late-run ends (each replaces a frame) and late
+   starts (an image shown twice) every few seconds from 30:00 to 31:31.
+4. **Heavy room, the drops 31:18 to 31:31** (52 to 57 fps): Dolphin waiting for its own command buffers
+   (`XRC fw` 50 to 100 ms a second against under 1 in clean seconds), video thread CPU time normal: not
+   pacing (as in section "The wake-up").
+
+The mock never showed any of it: with `MOCK_XR_EARLY=1` a pending frame always got the next refresh, and
+its random phase did not put the calls next to a wake-up.
+
+### The mock now
+
+`MOCK_XR_EARLY=3` hands out refreshes by the table above (the GPU work of the pending frame is "done" when
+its first eye image's memory has changed since the app waited for it; the app blits the eyes last; a frame
+handed out more than 4 ms after its wake-up counts as handed out late) and `MOCK_XR_PHASE_MS=<ms>@<s>` moves
+the mock's refresh grid once, at that session second, so that the game's call comes that long after a
+wake-up (14 for the light room, 0.5 for the heavy room, from the session). mockrun `--frame` uses
+`MOCK_XR_EARLY=3`, `--phase` sets the phase. The head moves on the session clock, so a grid move does not
+change the poses. With lane L's build and session M's switch (`PRIMEFRAME_CYCLE_ASAP_WAIT=0`):
+
+| Run | What it showed |
+| --- | --- |
+| s01, phase 14 ms, 90 s | `slot_ms` 33.33 from 7 s on, end mode late from 7 s and never back, extra 33.3 on every frame; every second new image never shown (2475 of 5350, held 4 refreshes 2476): 30 new images a second, the session's 1-3 at its worst |
+| s02, phase 0.5 ms, 160 s | 8 late-run ends; per 10 s after the phase move 259 to 300 frames landed a period late and the rest on time (v2 and v4 mixed), 6 to 43 new images never shown |
+
+### The landing plan (`PRIMEFRAME_CYCLE_END=plan`, the default)
+
+The refresh a frame is shown on is all that matters for the cadence; which refresh SteamVR handed it, and
+whether SteamVR counts it as on time, is bookkeeping. So the cycle loop keeps one rule
+(`OpenXRManager::WaitFrame`, at each frame's `xrWaitFrame`, with the overlap always on):
+
+- **Continuity.** The frame lands on the refresh after the last frame's landing, whatever SteamVR handed
+  it: the next refresh early, the running one, the same one again, one further. A frame handed a refresh
+  before its landing is held by the releaser to 2.5 ms past the on-time limit of the refresh before its
+  landing (`CycleEndHold`), and its views and controller poses are located for the landing refresh (with
+  `PRIMEFRAME_PREDICT_EXTRA_MS=auto`, the wrapper's default). A frame landing on its own display time is
+  kept pending until the next frame's `xrWaitFrame` returned, as before.
+- **Later only when it must.** When the frame cannot make that refresh (its call after the wake-up of its
+  display time plus the 95th percentile of the last 120 frames' return-to-finish time, later than 1 ms
+  inside the 19.5 ms limit), it lands a refresh later: the last image is shown twice (log `PrimeFrame cycle
+  landing: 1 refresh later`, XRSTATS `plan_breaks`). In the mock these came with the game's own late frames.
+- **Earlier only once, while settling.** Within 30 s of the start, a hitch (a call more than one and a half
+  refreshes after the last) or such a break, when every frame of the last 5 s had 3 ms to spare a refresh
+  before its landing, one frame lands on the last frame's refresh (it is not shown; log `one refresh
+  earlier`, `plan_catchups`). A catch-up followed by a break within 60 s doubles the 5 s. No change of
+  landing in steady play.
+- **No hold into the next frame.** With one eye set the next frame's present waits for this frame's
+  release, so a hold reaching it stalls the game (in the mock a room fell to 32 fps that way). The plan does
+  not hold past the next frame's expected present (a refresh after this call plus the 10th percentile of the
+  call-to-submit time) when the limit before the landing is not past by then: it lands the frame on the
+  last frame's refresh instead (`plan_drops`); and the releaser ends a hold at once when the video thread
+  already waits for the eye images (`hold_cuts`; only seen around loads).
+- **The refresh step never grows** (`UpdateWakeGrid`): the smallest recurring step between display times,
+  never replaced by a larger one, so dup and skip hand-outs cannot make it 33.3 ms again.
+- The asap wait, the late mode, the auto switch and the late-run ends are gone. `PRIMEFRAME_CYCLE_END=asap`
+  is section "The wake-up"'s asap (each `xrWaitFrame` after the last end) for an A/B.
+
+What this gives per room: the light room settles on its shortest landing within seconds of the load, the
+alternation of the session included (one frame on time, the next handed the same refresh again and a
+refresh late, every image shown for exactly two refreshes); the heavy room lands every frame a period late,
+held a few ms past the limit, constant. In vrtiming the light room should read vsyncs 2.00 (as 33:00 to 33:03
+did), the heavy room 4.00 with now and then an on-time frame among them (same refresh, SteamVR's count).
+
+### Results
+
+RESULTS_PLACEHOLDER
+
+### Not known until the headset
+
+Whether SteamVR's hand-out on the Frame with the plan is the table's (the plan takes whatever is handed
+out, so a different hand-out changes only the bookkeeping); whether frames held a few ms past the limit
+show anything with SteamVR's compositor on the same queue; how often the heavy room's own late frames break
+the cadence there (the mock's dips are this machine's); the light room's settling on the Frame (catch-ups
+expected within about 10 s of the load); the heavy room's latency (one period late: about 50 ms from the
+locate to the landing in the mock, about 54 on the Frame).
 
 ## Default
 
