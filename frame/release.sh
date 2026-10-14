@@ -5,7 +5,8 @@
 #
 #   --build DIR   the CMake build directory (default <repo>/build-linux): Binaries/dolphin-nogui,
 #                 Binaries/Sys and Binaries/assets (links are followed)
-#   --out DIR     where the tarball and its sha256 go (default <repo>/release)
+#   --out DIR     where the tarball, its .sha256 and SHA256SUMS (the same line, the name the README uses) go
+#                 (default <repo>/release)
 #
 # The tarball has no top level folder: primeframe (the binary), Sys/, assets/, primeframe.sh,
 # install.sh, uninstall.sh, collect-logs.sh, steam-cef.py, tools/{vrtiming.py,session-report.py},
@@ -78,7 +79,7 @@ echo "release: packing"
 echo "release: privacy check"
 "$here/tools/privacy-check.sh" "$tarball"
 
-(cd "$out" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
+(cd "$out" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" && cp "$NAME.tar.gz.sha256" SHA256SUMS)
 trap 'rm -rf "$stage"' EXIT; trap - ERR
 echo "release: $tarball ($(du -h "$tarball" | cut -f1))"
 cat "$tarball.sha256"
