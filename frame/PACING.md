@@ -46,9 +46,12 @@ and advances Dolphin's frame resources instead.
   the next frame's `xrWaitFrame` does not wait for the last frame's end, its `xrBeginFrame` follows that
   end on the releaser thread (`PRIMEFRAME_CYCLE_OVERLAP=0`: the next frame begins only once the last one
   ended, as before); the GPU gets the frame's draws every 100 draws (`PRIMEFRAME_KICK_DRAWS`, 0 off); the
-  eye images are not cleared before the blit (`PRIMEFRAME_EYE_CLEAR=1` clears); and the releaser ends a
-  finished frame no earlier than 16 ms after its wake-up, or, in a room whose frames finish near SteamVR's
-  on-time limit, 22 ms after it so that every frame is shown a period later (`PRIMEFRAME_CYCLE_END`).
+  eye images are not cleared before the blit (`PRIMEFRAME_EYE_CLEAR=1` clears). Since section "The
+  wake-up": in a room whose frames are ready well inside SteamVR's on-time limit (asap) the next frame's
+  `xrWaitFrame` waits for the last frame's end, so it blocks for SteamVR's wake-up; in a heavy room (late)
+  the overlap stays, a frame expected on time is kept pending until the next frame's `xrWaitFrame`
+  returned, and a frame that will not make the limit is held past it and shown a refresh later, its poses
+  located for that refresh (`PRIMEFRAME_CYCLE_END`).
 - `pipelined`: two eye swapchain sets. A pacing thread owns `xrWaitFrame`/`xrBeginFrame`/`xrEndFrame`. The
   video thread renders frame N into the next free set, submits, puts a fence behind it and hands the set
   over (poses, swapchains, overlay quads, the display time its poses were located for); then it locates
@@ -95,7 +98,10 @@ display time (its lead measured as below) to its `xrEndFrame`, `end_late` frames
 `lead_avg_ms` display time minus the `xrWaitFrame` return, `pose_off` frames whose poses were located for
 another display time than the one they were ended with (must be 0; poses located past it on purpose by
 `PRIMEFRAME_PREDICT_EXTRA_MS` count as located for it), `extra_avg_ms` and `extra_frames` how far past their
-display time the frames' poses were located (average over all ended frames) and how many were.
+display time the frames' poses were located (average over all ended frames) and how many were. Cycle
+(section "The wake-up"): `early` frames whose `xrWaitFrame` returned more than 0.5 ms before SteamVR's
+wake-up for their display time, `wake_lead_ms` SteamVR's lead (wake-up to display time; `?` until a call
+blocked), `slot_ms` the spacing of the refreshes it hands out, `end_mode` asap or late.
 
 ### Frame log
 
@@ -111,9 +117,11 @@ return to the `xrEndFrame`, `rg` the runtime's wake-up for the display time (dis
 of the last blocking call, or the largest seen) to the `xrEndFrame` (what SteamVR's timing calls poses to
 frame ready), `age` the poses' `xrLocateViews` call to the `xrEndFrame` (-1 unknown), `pdt` the poses'
 display time minus the end's, `dd` slots since the last ended display time in display periods, `per` the
-`predictedDisplayPeriod`, `ex` how far past the display time its poses were located. `empty` marks an end
-without layers. XrTime and the steady clock are taken to be
-the same clock (both CLOCK_MONOTONIC on SteamVR and the mock); `lead` would show it if not.
+`predictedDisplayPeriod`, `ex` how far past the display time its poses were located, `w` its `xrWaitFrame`
+return minus SteamVR's wake-up for its display time (negative: handed out early), `pl` the refreshes it was
+planned to land after its display time (cycle end late). `empty` marks an end without layers. `lead` is
+display time minus the steady clock: SteamVR's XrTime is CLOCK_MONOTONIC_RAW (section "Prediction for the
+real display time"), so it reads about 4 s; `rg` and `w` convert (section "The wake-up").
 
 ## The mock
 
@@ -564,13 +572,236 @@ SteamVR's compositor on the same GPU and CPUs; and the real phase between the ga
 which may also drift if SteamVR's refresh is not exactly 120 Hz (auto then switches as the finish times
 move).
 
+## The wake-up: what the heavy-room session showed, and asap against late
+
+### The session (2026-10-14, the heavy room build)
+
+Two launches, cycle with the overlap, kicks, end auto, prediction auto, 120 Hz, framesToThrottle 1, eye
+2160, IR 3. The owner: "performance much better! However the HUD was shaky and jittery. There were lag
+spikes occasionally." No doubling. Heavy room (s02) 59.4 fps on average, 9 seconds under 57 (lowest 50);
+the end mode switched 7 times; extra prediction on about 56 frames a second. Light room (s01): late (held)
+from the load to the end, extra prediction on about 59 frames a second.
+
+### Our wake-up was wrong, SteamVR's own timing says so
+
+The cycle end and the prediction both measure a frame against SteamVR's wake-up for its display time,
+which the heavy room build took as the display time minus the largest lead (display time minus
+`xrWaitFrame` return) seen. Joined second by second with SteamVR's vrtiming.log:
+
+| Launch, mode | Our finish after the wake-up (XRF rg) | Lead (log units) | SteamVR poses to frame ready | SteamVR vsyncs to photons | Our extra |
+| --- | --- | --- | --- | --- | --- |
+| light, late (most of it) | 22.3 ms | 46.5 to 47.5 | 6.3 to 7.4 ms | 2.00 (on time) | 22.2 ms |
+| light, late (44:48 to 44:55) | 22.4 ms | 31.3 to 31.7 | 20.6 to 20.8 ms | 4.00 (a period late) | 22.2 ms |
+| heavy, late | 22.2 to 22.4 ms | 30 to 39 | 12 to 15.7 ms | 2.00 (on time) | 22.2 ms |
+| heavy, asap (42:36 to 42:41) | 16.3 ms | 18.4 to 18.6 | 24.5 to 25.6 ms | 3.8 to 4.0 (a period late) | 0 |
+
+Everything was inverted: frames SteamVR showed on time had their poses located 22.2 ms past their display
+time, frames it showed a period late had none. Replayed frame by frame with the right wake-up, 97 % (heavy)
+and 94 % (light) of the frames had the wrong extra. That is the HUD shake: SteamVR turns the whole
+projection layer, the head-locked HUD included, from the submitted poses to the head at display, so every
+frame predicted a period wrong moves the HUD by the head's turning speed times 16.7 to 22.2 ms (2.5 to 3.3
+degrees at 150 degrees a second), and the frames switched between right and wrong with the mode and with
+SteamVR's hand-out.
+
+Why:
+
+1. **SteamVR hands out the next refresh early.** With the overlap the next `xrWaitFrame` comes while the
+   last frame is still pending (begun, not ended). SteamVR then returns at once, often with a refresh whose
+   wake-up is still 6 to 15 ms ahead: the lead looks one period longer than its real lead minus how late the
+   call came (light room 46.7 against 31.9, heavy 39.1 against 29.1). Such frames are on time for that
+   refresh (SteamVR: poses to ready 6 to 15 ms, vsyncs 2). The largest lead took those leads for the wake-up,
+   so it saw every such frame finish 22 ms after it: the light room stuck late, and the extra added a period
+   to frames already aimed at the right refresh.
+2. **SteamVR's lead is exact only from calls that block.** `xrWaitFrame` blocked (over 2 ms) 14 times in
+   the heavy launch and 3 times in the light one; each gave the same lead, and the vrtiming poses to ready
+   matches our finish measured from that lead within about 1.5 ms in every regime.
+3. **SteamVR's XrTime is CLOCK_MONOTONIC_RAW** (section "Prediction for the real display time"): against the
+   steady clock the lead grows by about 33 us a second, 2 ms a minute.
+4. **predictedDisplayPeriod is not the refresh spacing.** SteamVR returned 16.667, 22.222, 33.333, 44.444
+   and 50 ms (22.222 in 92 % of the frames); the display times step by 16.667 ms (throttled 120 Hz). The
+   extra used the 22.222.
+5. **Frames for the same refresh.** 184 frames in 180 s (heavy) and 193 in 75 s (light) were ended for the
+   same display time as the one before (`dd=0`), in bursts of up to 30 a second, nearly all where our end
+   came 5 to 7 ms after the next call (the late hold) or the video thread waited for the last frame's begin.
+
+The real lead (wake-up to display, CLOCK_MONOTONIC_RAW) at framesToThrottle 1, 120 Hz: about 37.5 ms.
+
+### The lag spikes
+
+- Mode switches: every switch to late moved SteamVR to early hand-out within a second, every switch to
+  asap back; each cost a few frames ended for the same display time and 1 to 3 seconds of SteamVR
+  mispresents. They came from the wrong wake-up (the light room never left late).
+- The heavy room's dips (40:34 50 fps, 40:37, 41:25 to 41:43, 42:01 to 42:07 51 to 57) are the video thread
+  itself: CPU time over 16 ms in 7 to 26 frames of those seconds, and Dolphin waiting for its own command
+  buffers (XRC `fw`) 50 to 166 ms in those seconds against under 1 ms in clean ones; the GPU did 5.4 to
+  7.0 ms a frame then (4.9 median), never full. The launch started with an empty shader cache (`Loaded 0
+  cached shaders`): the first pass through a room compiles shaders on the CPUs the video thread needs. The
+  cache is filled now (3.5 MB of pixel shaders after these launches). Not pacing; any end mode has them.
+- The GPU tail depends on the phase: work submitted 0 to 4 ms after SteamVR's wake-up finished 6.2 ms after
+  the submit, at 7 to 16 ms 1.4 to 2.3 ms. Something SteamVR does at its wake-up (probably the compositor)
+  holds our queue about 5 ms; early hand-out puts our submit right there.
+
+### What changed
+
+- **The wake-up** (`OpenXRManager::UpdateWakeGrid`): the XrTime clock is chosen at the first frame (the one
+  whose lead is plausible; CLOCK_MONOTONIC_RAW when both are; `PRIMEFRAME_XR_CLOCK=raw|steady`); the lead is
+  kept in XrTime and converted with the offset of the moment. It is the largest lead of `xrWaitFrame` calls
+  that blocked over 2 ms with no frame pending (a blocked call returns at the wake-up or a little after it;
+  one made while a frame is pending may return early); a shorter one is taken only when every such call of
+  a 10 s window (at least three) was over 1 ms shorter. Until a call blocked, the largest lead seen; a lead
+  calibration at the first cycle frames gets a blocking call (it ends what is pending and, if the call still
+  returns at once, spends one empty frame; every 2 s, five times at most). Early: a frame whose call
+  returned more than 0.5 ms before the wake-up (XRSTATS `early`, XRF `w` negative).
+- **The refresh step** (`slot_ms`): the smallest recurring step between display times, not
+  predictedDisplayPeriod. The extra prediction counts these steps.
+- **asap waits for the last end.** In asap the next frame's `xrWaitFrame` waits for the last frame's end
+  (`OpenXRManager::StartCycleFrame`; `PRIMEFRAME_CYCLE_ASAP_WAIT=0` keeps the overlap), so SteamVR blocks it
+  until its wake-up and the poses are located then: in the light room the overlap only made SteamVR hand
+  out the refresh early, the same refresh with the poses located 7 to 15 ms earlier (a longer prediction,
+  more HUD shake). A room that needs the overlap is late. The asap minimum
+  (`PRIMEFRAME_CYCLE_EARLIEST_MS`) is 0: frames end as soon as their GPU work is done.
+- **late keeps the overlap and plans every frame's landing** at its `xrWaitFrame`
+  (`OpenXRManager::WaitFrame`; XRF `pl`): expected ready = its return after the wake-up (negative when
+  handed out early) plus the average return-to-fence time of frames of its kind (early or not). A frame
+  that came after the wake-up and is expected within 2 ms of the limit, or an early one expected past it,
+  is planned to land a refresh late: its poses are located for that refresh and the releaser holds it to
+  2.5 ms past the limit, so that no such frame straddles the limit. A frame handed the refresh the last
+  frame lands on is planned late too (else it replaces that frame, which is then never shown): a late run.
+  Once 15 frames in a row were handed out at least 2 ms early, the run ends (that late frame is not shown;
+  at most once a second; log line `PrimeFrame cycle: frames handed out early end a late run`). A frame
+  expected on time is kept pending until the next frame's `xrWaitFrame` returned (at most until 1 ms inside
+  the limit): ended before it, the next call would block for the wake-up and start that frame too late
+  for a room whose frames take most of a period; pending, SteamVR hands the next frame its refresh early
+  and it is on time too.
+- **The switch** (`PRIMEFRAME_CYCLE_END=auto`, `CycleEndHold`): asap -> late when the 95th percentile of
+  2 s of finish times (fence after the wake-up) comes within 0.5 ms of the limit; late -> asap after 5 s
+  and the dwell when the video thread's CPU time per frame plus 2.5 ms is 3.5 ms inside a refresh and the
+  expected finish of a blocked start (the later of the frame's submit after the wake-up and its video
+  thread CPU time, plus 2.5 ms) 2.5 ms inside the limit, both 95th percentiles of 5 s. Dwell 4 s, doubled
+  after each return to asap that lasted under 30 s, up to 160 s. One log line per switch.
+- xrmock: `MOCK_XR_CLOCK=raw` (XrTime on CLOCK_MONOTONIC_RAW), `MOCK_XR_EARLY=1` (a call made while a
+  frame is pending before the next refresh's wake-up returns at once with it), `MOCK_XR_EARLY=2` (also one
+  made after that wake-up gets the refresh after it: what SteamVR seems to do, "often with the refresh after
+  the running one"; which one SteamVR does is not known); summary line `waits`. mockrun `--frame` sets the
+  whole Frame-like mock (`MOCK_XR_EARLY=1`).
+
+### What latency each room can have
+
+Locate to display = SteamVR's lead (33.3 in the mock, about 37.5 on the Frame) plus how early the poses are
+located before the wake-up. asap: located at the wake-up, so the lead alone. late: the frames take most of a
+period from their first draw (the video thread is busy all frame), so the game's phase decides: a frame
+whose first draw comes x ms after a wake-up is shown on the next refresh, located 16.7 - x ms before its
+wake-up, whether SteamVR hands it out early or we plan it late; both give lead + 16.7 - x. Only a first
+draw within about 2 ms after a wake-up could make the earlier refresh (the frames take 17 to 21 ms from
+it), and such frames would straddle the limit; the late plan gives them the next refresh too. So in a heavy
+room the prediction is between the lead and the lead plus a period, set by the game's phase, and the
+switch to asap is what shortens it wherever the room allows.
+
+### Results
+
+PLACEHOLDER_RESULTS
+
+## The HUD: why it shakes, and a layer of its own (design; only a test quad built)
+
+The helmet and the 2D HUD are drawn head-locked into the projection layer (geometry shader paths
+`cstereo.w` -2: 2D elements on a head-locked screen, -3: the game's perspective HUD models placed in head
+space; both use the unrotated per-eye projection). SteamVR turns the whole projection layer from the poses
+it was submitted with to the head's pose at display. The world is meant to be turned; the HUD is not: any
+difference between the predicted and the real head pose moves the HUD by that difference. In the session
+the prediction was a period wrong on nearly every frame (section "The wake-up") and switched between right
+and wrong, which is the shake the owner saw; with the wake-up fixed the HUD moves only by SteamVR's own
+prediction error over the lead (about 37 ms in asap, up to 54 ms in late), which a longer prediction makes
+larger: asap's shorter prediction in light rooms matters for the HUD too.
+
+A HUD that does not move at all needs its own composition layer in `XR_REFERENCE_SPACE_TYPE_VIEW`, which
+SteamVR composes head-locked without turning it:
+
+- **Render target.** A second EFB-sized two-layer target (RGBA8 color, cleared to transparent black each
+  frame, and its own depth), the same formats as the EFB so Dolphin's Vulkan pipelines stay compatible. In
+  `VertexManagerBase::Flush`, a draw whose `cstereo.w` is -2 or -3 (known from GeometryShaderManager before
+  the draw) binds the HUD target, any other draw the EFB. Prime draws the HUD after the world, so a frame
+  has one or two switches (render pass breaks; cheap on Turnip in sysmem).
+- **Blending.** The layer must be premultiplied alpha. Alpha blending (source alpha, inverse source alpha)
+  and additive draws map directly (the alpha channel written as coverage: a separate alpha blend
+  1, 1 - source alpha, and 0, 1 for additive); multiplicative or subtractive HUD draws, and any that
+  read destination alpha, cannot be represented over a transparent target and would differ (the EFB has
+  no usable alpha to start from). Each HUD draw needs a pipeline variant with the alpha blend changed:
+  more pipelines to compile once.
+- **Depth.** The -3 models depth-test among themselves against their own depth (the game clears depth for
+  the HUD); nothing from the world reaches them. World-locked things drawn after the HUD (lock-on reticles,
+  scan markers if they are not head-locked) would end up under the HUD layer; most of the HUD is
+  transparent, so that would show only where they overlap.
+- **Visor effects.** Effects that copy the EFB (thermal, X-ray, the scan visor's darkening, a pause
+  screen background taken from the frame) would not see the HUD; the XFB copy that the eye blit reads
+  would not contain it either, so the HUD target is blitted into its own swapchain at the present, with
+  the gamma and brightness of the XFB copy applied by hand.
+- **Submission.** Two more single-level swapchains (or one two-layer one) acquired, waited, released and
+  fenced with the eye set (the cycle's release rules apply to them too), and a second
+  `XrCompositionLayerProjection` with `space` = a VIEW reference space, each view's pose the eye's pose
+  relative to the head (from `xrLocateViews` in the VIEW space) and the frame's field of view, layer flags
+  `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`. xrmock needs VIEW-space projection layers and its
+  stamp and release checks for the second layer.
+- **Cost.** GPU: a 2160 x 2160 x 2 clear and blit (about 0.5 to 1 ms) and SteamVR composing one more full
+  layer (about 0.3 to 0.5 ms), against 5 to 7 ms a frame in the heavy room on the Frame. CPU: small.
+- **Risks.** How SteamVR treats a VIEW-space projection layer is not known: if it turns it anyway (it
+  could place it with the predicted head pose and reproject), nothing is won; a quad layer in VIEW space
+  is the fallback but is mono (no HUD depth). The blend modes above, and every visor and menu screen, need
+  checking in the headset.
+- **Estimate.** Three to five days: the target and the redirection (VertexManagerBase, FramebufferManager:
+  shared headers, a wide rebuild), the blend variants, the swapchains and the layer in the cycle and the
+  other loops, xrmock, then headset rounds for SteamVR's behaviour and each visor. Not built: it is
+  neither small nor clean (shared headers, pipeline variants, visor effects), and the first thing to learn
+  is whether SteamVR keeps a VIEW-space layer still.
+- **The test that is built.** `PRIMEFRAME_HUD_TEST=1` (cycle): a white ring with a cross, 8 cm wide, 1 m
+  ahead and 12 cm below the centre of view, in a quad layer in a VIEW reference space
+  (`VulkanOpenXR::AppendHudTestLayer`, `OpenXRManager::GetViewSpace`). In the headset: if it stays
+  perfectly still while the game's HUD moves when the head turns, the layer is worth building.
+
 ## Default
 
-`cycle` with the overlap, the GPU kicks every 100 draws, no eye clear and `PRIMEFRAME_CYCLE_END=auto`,
-`PRIMEFRAME_PREDICT_EXTRA_MS=auto` (the wrapper's default), framesToThrottle 1. The headset settled `cycle`
-against `pipelined` on 2026-10-14 (cycle clean, every pipelined variant doubled).
+`cycle` with the GPU kicks every 100 draws, no eye clear, `PRIMEFRAME_CYCLE_END=auto` (asap: each
+`xrWaitFrame` after the last end; late: the overlap with each frame's landing planned),
+`PRIMEFRAME_PREDICT_EXTRA_MS=auto` (the wrapper's default), framesToThrottle 1. A/B switches:
+`PRIMEFRAME_CYCLE_ASAP_WAIT=0` (asap keeps the overlap, as before), `PRIMEFRAME_CYCLE_OVERLAP=0`,
+`PRIMEFRAME_CYCLE_END=asap|late`, `PRIMEFRAME_XR_CLOCK=raw|steady`, `PRIMEFRAME_HUD_TEST=1` (section
+"The HUD"). The headset settled `cycle` against `pipelined` on 2026-10-14 (cycle clean, every pipelined
+variant doubled).
 
-## Next headset session: the heavy room (two launches, under a minute of play each)
+## Next headset session: HUD and lag spikes (two launches, about a minute of play each)
+
+Install this build (`install.sh --dev`), same SteamVR settings as the last session (120 Hz,
+framesToThrottle 1 by the wrapper, motion smoothing off, eye 2160). `session.env`: `PRIMEFRAME_STATE=2`;
+`session.env.next`: `PRIMEFRAME_STATE=1` and `PRIMEFRAME_HUD_TEST=1`. The shader cache is warm now, so
+the first pass through a room no longer compiles on the video thread's CPUs.
+
+1. Heavy room (s02). Wait the 95 s of flight until Samus stands next to the ship. Turn the head steadily
+   left and right for ten seconds, then quick turns and stops. Watch the helmet and the HUD while turning:
+   still against the view, or shaking? Any lag spikes (a hitch, a jump) in about a minute? Smooth?
+2. Light room (s01), with a small white ring and cross below the centre of view (the HUD test: a
+   head-locked layer of its own). The same turns. Is the HUD steadier than in launch 1, and than in the
+   last session? Does the ring stay perfectly still while the game's HUD moves, or does it move with it?
+   Lag compared with launch 1?
+
+The logs must show, launch 1 in the player view: one `PrimeFrame cycle end: late` line after the start
+(a heavy room keeps the overlap), XRSTATS `end_mode=late`, `wake_lead_ms` about 37.5 with no `?`,
+`slot_ms` 16.67, `pose_off` 0, and either `early` near 60 with `extra_frames` near 0 (SteamVR hands each
+frame its refresh early) or `early` near 0 with `extra_frames` near 60 (late calls planned a refresh
+late): one of the two steadily, not alternating; `late run` lines rare (under one in 10 s); `game_fps`
+59 to 60. vrtiming: 60 frames a second, vsyncs to photons the same every second, about one mispresent per
+frame. Launch 2: `end_mode=asap` within a few seconds of the load and no switch after it, `early` 0,
+`extra_frames` 0, XRF `blk` several ms (each `xrWaitFrame` blocks for SteamVR's wake-up), `w` 0 to 0.3,
+`rg` about 7 to 12; vrtiming vsyncs 2 every second, poses to frame ready about 7 to 12 ms; no
+`no VIEW reference space` warning.
+
+How it decides: HUD steady and no spikes -> done. Launch 2's HUD steadier than launch 1's -> the
+prediction length is what moves it (late rooms predict up to 16 ms longer). The ring still while the HUD
+moves -> a HUD layer of its own is worth building (section "The HUD"); the ring moving too -> SteamVR
+turns VIEW layers as well and the layer would not help. Lag spikes in launch 1 with `late run` lines at
+the same seconds -> the run ends cost frames (more evidence needed before ending runs); spikes with XRC
+`vcpu` over 16 or `fw` over 2 ms -> the video thread's CPU or Dolphin's command buffers, not the pacing.
+Launch 2 not in asap -> `PRIMEFRAME_CYCLE_END=asap` for a launch and compare.
+
+## Earlier session plan: the heavy room (two launches, done 2026-10-14)
 
 Install this build (`install.sh --dev`), same SteamVR settings as the last session (120 Hz,
 framesToThrottle 1 by the wrapper, motion smoothing off, eye 2160). `session.env`:
