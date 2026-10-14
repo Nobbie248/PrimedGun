@@ -224,10 +224,16 @@ sessions). In short:
 - While the OpenXR session runs the desktop window is neither drawn nor presented
   (`PRIMEFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
   present, which hid every early release and cost the heavy room about 40 % of its frame rate.
+- `PRIMEFRAME_PREDICT_EXTRA_MS=<ms>|auto` (off by default; cycle, drain, inline): head views and controller
+  poses located that far past the frame's display time, `auto` one period for each period the frame is
+  expected to be ready past `PRIMEFRAME_PREDICT_ONTIME_MS` (19.5) after SteamVR's wake-up; `xrEndFrame`
+  keeps the display time and the drawn poses. PACING.md "Prediction for the real display time".
 - `PRIMEFRAME_NO_GPU_WAIT=1` releases with no wait at all: the negative test, which the mock's release
   check must fail (`mockrun.sh --nowait`).
 - mockrun: `--pacing M`, `--nowait`, `--window`, `--stamp`, `--head DPS`; it sets `MOCK_XR_SKIP=late` (a
   late xrWaitFrame returns at once, as SteamVR does), passes `MOCK_XR_THROTTLE` (SteamVR's
   framesToThrottle) through, waits while `~/.cache/headset-in-use` names a live process and marks a run
-  INVALID (exit 3) when a headset session starts during it. The mock adds the `xrmock: cadence` and
+  INVALID (exit 3) when a headset session starts during it. The mock's `MOCK_XR_HEAD_PROFILE=stops`, `MOCK_XR_LAND=throttled`, `MOCK_XR_LEAD`
+  and `MOCK_XR_LATCH_MS` model turns with dead stops and SteamVR's throttled landing; the summary's
+  `prediction` lines give the head and controller shortfall and the yaw error at the landing refresh. The mock adds the `xrmock: cadence` and
   `xrmock: latency` summary lines.

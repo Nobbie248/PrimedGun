@@ -87,7 +87,9 @@ From the per-frame timing of the frames ended with layers: `end_*` the runtime's
 display time (its lead measured as below) to its `xrEndFrame`, `end_late` frames ended more than
 `PRIMEFRAME_ONTIME_MS` (2.5) after it, `age_*` the poses' `xrLocateViews` call to the `xrEndFrame`,
 `lead_avg_ms` display time minus the `xrWaitFrame` return, `pose_off` frames whose poses were located for
-another display time than the one they were ended with (must be 0).
+another display time than the one they were ended with (must be 0; poses located past it on purpose by
+`PRIMEFRAME_PREDICT_EXTRA_MS` count as located for it), `extra_avg_ms` and `extra_frames` how far past their
+display time the frames' poses were located (average over all ended frames) and how many were.
 
 ### Frame log
 
@@ -103,7 +105,8 @@ return to the `xrEndFrame`, `rg` the runtime's wake-up for the display time (dis
 of the last blocking call, or the largest seen) to the `xrEndFrame` (what SteamVR's timing calls poses to
 frame ready), `age` the poses' `xrLocateViews` call to the `xrEndFrame` (-1 unknown), `pdt` the poses'
 display time minus the end's, `dd` slots since the last ended display time in display periods, `per` the
-`predictedDisplayPeriod`. `empty` marks an end without layers. XrTime and the steady clock are taken to be
+`predictedDisplayPeriod`, `ex` how far past the display time its poses were located. `empty` marks an end
+without layers. XrTime and the steady clock are taken to be
 the same clock (both CLOCK_MONOTONIC on SteamVR and the mock); `lead` would show it if not.
 
 ## The mock
@@ -346,6 +349,77 @@ What the table says:
   (0.3 ms when `xrWaitFrame` blocks for the next slot at throttle 1), the window the headset showed clean.
   It holds 60 in the heavy room.
 
+## Prediction for the real display time (`PRIMEFRAME_PREDICT_EXTRA_MS`, off by default)
+
+### What the headset session of 2026-10-14 (cycle, framesToThrottle 1, 120 Hz) showed
+
+- SteamVR's XrTime is not the steady clock: `lead` in the log reads about 3990 ms. It runs with
+  `CLOCK_MONOTONIC_RAW`: the difference to `CLOCK_MONOTONIC` was 3975 ms at the time of the check and grows by
+  32 us a second (NTP's rate correction), and the logged leads grew by the same 0.03 ms a second. So SteamVR's
+  real lead (its wake-up to the predicted display time) was about 36.5 ms at framesToThrottle 1, with a
+  `predictedDisplayPeriod` of 16.667 ms.
+- How late each `xrWaitFrame` call returned after SteamVR's wake-up (`x`: the largest lead of the last 20 s
+  minus the call's lead) plus `r` (its return to `xrEndFrame`, about 16.5 ms: the game draws all frame long)
+  matches SteamVR's own "poses to frame ready" second by second within about 0.5 ms. `x` is a sawtooth: the
+  game's 59.94 Hz against SteamVR's 60 slots moves it by about 1 ms a second, from 0 to a whole slot in 16 s.
+- Frames ready up to about 19.5 ms after the wake-up were shown on the predicted vsync (vsyncs to photons 2,
+  one mispresent per frame: the repeat); frames ready later were shown a whole throttled period (16.7 ms,
+  vsyncs 4, two mispresents) after it, a few two periods. Over the launch about half the frames were late
+  (average shortfall 8.0 ms from the vsync counts), in its second half nearly all.
+- So the head and controller poses were predicted 0 or 16.7 ms short of the refresh that showed them; the
+  controller poses are located in the same `xrWaitFrame` (`UpdateInputActions`), right before the views.
+
+### What the switch does
+
+`PRIMEFRAME_PREDICT_EXTRA_MS=<ms>` locates the views and the controller poses (aim and grip spaces, which
+PrimedGun uses for the arm cannon, the laser and aiming) of every frame that much past the display time its
+`xrWaitFrame` returned; `auto` adds one display period for every period the frame is expected to be ready
+later than `PRIMEFRAME_PREDICT_ONTIME_MS` (19.5) after SteamVR's wake-up: expected ready = `x` (the largest
+lead of two 10 s windows minus this call's) + the average of `r`, capped at three periods. Replayed on the
+session's log, auto's late frames match SteamVR's late frames per second within 3 % (47 % against 46 %).
+`xrEndFrame` keeps the frame's own display time and exactly the poses the frame was drawn with; nothing else
+changes (frame order, input sync). Only cycle, drain and inline (the pipelined loop picks its refresh itself).
+SteamVR's compositor still turns each layer from its poses to the head at display time, so for the world the
+switch mostly changes how far it has to turn; for the arm cannon and the laser, drawn into the frame, it is
+the whole difference.
+
+### Mock (owner's settings: IR 3, eye 2160, sysmem, `--stamp --head 150`, cycle, `MOCK_XR_THROTTLE=1`)
+
+The mock set to the Frame's timing: `MOCK_XR_LEAD=4` (33.3 ms), `MOCK_XR_LATCH_MS=13.8` (on time when
+ready by 19.5 ms after the wake-up), `MOCK_XR_LAND=throttled` (a late frame lands a whole period later).
+Shortfall: the refresh a new eye set lands on minus the time its poses were located for.
+
+| Run (60 s) | Game fps steady | Head shortfall avg ms | Located for the landing refresh (+-1 ms) | One period short | Locate call to landing avg ms | Controllers shortfall avg ms | Stamps exact | Errors, unfinished, end times off |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| s01 off | 59.9 | 11.05 | 1613 of 4756 | 3141 | 38.3 | 11.05 | 9508 of 9512 (4 unstamped) | 0, 0, 0 |
+| s01 auto | 59.9 | -0.01 | 4653 of 4758 | 48 (55 a period or two early) | 38.5 | -0.01 | 9516 of 9516 | 0, 0, 0 |
+| s02 off | 47.5 | 17.73 | 118 of 3819 | 3342 (359 more) | 42.5 | 17.73 | 7638 of 7638 | 0, 0, 0 |
+| s02 auto | 47.4 | 0.10 | 3405 of 3768 | 189 (172 early) | 42.9 | 0.10 | 7536 of 7536 | 0, 0, 0 |
+
+The latency itself (the locate call to the landing, 38 to 43 ms, plus the game frame for the arm cannon,
+below) does not change: the switch only aims the poses at the refresh that shows them.
+
+Overshoot (`MOCK_XR_HEAD_PROFILE=stops`: the head turns at 150 deg/s for 0.3 s and stops dead, 60 stops a
+minute; the mock predicts at constant speed from the call, as a runtime might), yaw of each new eye set
+against the head at the refresh it lands on, s01:
+
+| Run | avg abs error | while turning | overshoot max | sets more than 0.5 deg past the head | trail max |
+| --- | --- | --- | --- | --- | --- |
+| off | 0.52 deg | 1.61 deg | 2.50 deg | 79 | 2.50 deg |
+| auto | 0.20 deg | 0.37 deg | 5.00 deg | 141 | 2.50 deg |
+
+At a dead stop a prediction made while turning swings past by the turning speed times the part of its
+horizon after the stop: up to one more period (2.5 deg at 150 deg/s) with auto, for two or three frames
+per stop. A real head decelerates, so less; SteamVR's compositor turns the world back at display either way.
+
+### Not known
+
+How SteamVR's own prediction behaves 53 ms ahead (its extrapolation, overshoot at stops); whether the
+19.5 ms window holds in heavy rooms and at framesToThrottle 0; the arm cannon: PrimedGun writes the aim
+pose into the game in `OnFrameEnd` on the CPU thread from the last `xrWaitFrame`'s poses, so the cannon is
+drawn in the next game frame, about one more game frame (16.7 ms) after the pose's display time; the
+switch does not cover that frame (it predicts for the frame begun with the pose).
+
 ## Default
 
 `cycle`: the drain's frame order (the only one the headset has shown clean with a 60 fps game, at
@@ -353,7 +427,23 @@ framesToThrottle 1) without the CPU drain. The next headset session decides whet
 each frame on the refresh its poses were predicted for, can replace it (lower latency: the world does not
 trail the head by the 2 to 4 refreshes the drain's frames came late).
 
-## Next headset session (two launches, s01, under a minute each)
+## Next headset session: prediction (two launches, s01, under a minute each)
+
+1. `PRIMEFRAME_PREDICT_EXTRA_MS=auto`, 2. `PRIMEFRAME_PREDICT_EXTRA_MS=0` (today's default), both cycle
+with `PRIMEFRAME_THROTTLE=1`, same SteamVR settings. In each: quick head turns and stops looking at a door
+frame (does the world trail the head, or swing past and settle back?), then move the arm cannon quickly
+and stop (does it follow the hand closely, trail, or swing past?); then which launch lagged less.
+
+The logs must show, launch 1: XRSTATS `pose_off` 0, `extra_frames` about the frames vrtiming shows late in
+the same second (two mispresents per frame, vsyncs 4) and 0 in seconds at vsyncs 2, `extra_avg_ms` 0 to
+16.7; XRF `ex` 16.67 on frames with `r` plus their lateness above 19.5 ms. vrtiming as launch 2 (the
+switch does not change when frames end). Launch 2: `extra_frames` 0.
+
+How it decides: launch 1 lags less without swinging past -> auto becomes the default. Swings past at stops
+-> a smaller fixed extra (`PRIMEFRAME_PREDICT_EXTRA_MS=8`) or off. No difference -> off stays (the
+compositor's turn already hides it); the arm cannon then needs the extra game frame looked at.
+
+## Earlier session plan (pipelined against cycle, done 2026-10-14)
 
 1. `PRIMEFRAME_PACING=pipelined`, `PRIMEFRAME_THROTTLE=1`. 2. `PRIMEFRAME_PACING=cycle`,
 `PRIMEFRAME_THROTTLE=1`. Same SteamVR settings for both (120 Hz, motion smoothing off, eye 2160), so only the
