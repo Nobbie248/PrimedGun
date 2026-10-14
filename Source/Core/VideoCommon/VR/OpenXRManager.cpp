@@ -1650,11 +1650,11 @@ bool OpenXRManager::WaitFrame()
     // frame's landing: a frame handed a refresh before that is held past the on-time limit and its
     // poses are located for the landing refresh. Only a frame expected to miss that refresh (95th
     // percentile of the last frames' return-to-finish time, later than 1 ms inside the limit) lands
-    // a refresh later (one image shown twice). Only within 30 s of the start, a hitch or such a
-    // break (a load, a room settling), when every frame of the last 5 s (more after a catch-up that
-    // did not hold) had 3 ms to spare a refresh before its landing, one frame lands on the last
-    // frame's refresh (that frame is not shown): the latency gets shorter once and the cadence
-    // stays. No other change of landing during play.
+    // a refresh later (one image shown twice). Only within 40 s of the start or a load (a call over
+    // 100 ms after the last), when every frame of the last 5 s (more after a catch-up that did not
+    // hold) had 3 ms to spare a refresh before its landing, one frame lands on the last frame's
+    // refresh (that frame is not shown): the latency gets shorter and the cadence stays. No other
+    // change of landing during play.
     int land = 0;
     if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0)
     {
@@ -1685,8 +1685,9 @@ bool OpenXRManager::WaitFrame()
                        std::max(0, static_cast<int>(std::ceil((ready95 - (predict.ontime_ms - 1.0)) / slot_ms)));
       int k = k_min;
       m_plan_stable_frames = hitch ? 0 : m_plan_stable_frames + 1;
-      if (hitch)
-        m_settle_until_ns = m_wait_return_ns + 30'000'000'000LL;
+      // A load (a call over 100 ms after the last) or the start: the room settles.
+      if (prev_call_ns == 0 || m_wait_call_ns - prev_call_ns > 100'000'000LL)
+        m_settle_until_ns = m_wait_return_ns + 40'000'000'000LL;
       if (m_prev_land_time != 0)
       {
         const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
@@ -1739,7 +1740,6 @@ bool OpenXRManager::WaitFrame()
           m_plan_breaks_total++;
           m_frame_timing.plan_breaks++;
           m_plan_stable_frames = 0;
-          m_settle_until_ns = m_wait_return_ns + 30'000'000'000LL;
           if (m_last_catchup_ns != 0 && m_wait_return_ns - m_last_catchup_ns < 60'000'000'000LL)
             m_catchup_need_frames = std::min<size_t>(m_catchup_need_frames * 2, m_slack_ring.size());
           if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)

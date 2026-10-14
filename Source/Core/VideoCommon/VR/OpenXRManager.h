@@ -590,7 +590,7 @@ private:
   size_t m_plan_stable_frames = 0;
   size_t m_catchup_need_frames = 300;
   int64_t m_last_catchup_ns = 0;
-  int64_t m_settle_until_ns = 0;  // catch-ups only until 30 s after the start, a hitch or a break
+  int64_t m_settle_until_ns = 0;  // catch-ups only until 40 s after the start or a load
   uint32_t m_plan_breaks_total = 0, m_plan_catchups_total = 0;
   int64_t m_plan_log_ns = 0;
 

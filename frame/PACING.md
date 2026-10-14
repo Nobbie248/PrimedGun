@@ -897,11 +897,12 @@ whether SteamVR counts it as on time, is bookkeeping. So the cycle loop keeps on
   display time plus the 95th percentile of the last 120 frames' return-to-finish time, later than 1 ms
   inside the 19.5 ms limit), it lands a refresh later: the last image is shown twice (log `PrimeFrame cycle
   landing: 1 refresh later`, XRSTATS `plan_breaks`). In the mock these came with the game's own late frames.
-- **Earlier only once, while settling.** Within 30 s of the start, a hitch (a call more than one and a half
-  refreshes after the last) or such a break, when every frame of the last 5 s had 3 ms to spare a refresh
-  before its landing, one frame lands on the last frame's refresh (it is not shown; log `one refresh
-  earlier`, `plan_catchups`). A catch-up followed by a break within 60 s doubles the 5 s. No change of
-  landing in steady play.
+- **Earlier only while settling.** Within 40 s of the start or a load (a call over 100 ms after the
+  last), when every frame of the last 5 s had 3 ms to spare a refresh before its landing, one frame lands
+  on the last frame's refresh (it is not shown; log `one refresh earlier`, `plan_catchups`); a catch-up
+  followed by a break within 60 s doubles the 5 s. No change of landing in steady play: a game whose
+  phase drifts against SteamVR's refreshes (the mock's drifted 75 us a second) may end up to a refresh
+  later than it could until the next load.
 - **No long hold into the next frame.** With one eye set the next frame's present waits for this frame's
   release, so a hold reaching it stalls the game (in the mock a room fell to 32 fps that way). The plan
   lets a hold reach the next frame's expected present (a refresh after this call plus the 10th percentile of
