@@ -1432,41 +1432,39 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   const int64_t lead = m_clock.display_time - (m_clock.wake_ns + m_xr_offset_ns);
 
   // A call that blocked (over 2 ms; returning at once still takes a fraction of a ms) returned at
-  // the runtime's wake-up: its lead is exact. A different exact lead is taken at once while the
-  // known one is only the largest seen, else after three blocking calls that agree.
+  // the runtime's wake-up or a little after it (the thread is woken late now and then): the
+  // largest lead of such calls is the runtime's. A longer one is taken at once; a shorter one
+  // (by over 1 ms) only when every blocked call of a 10 s window (at least three) was.
   m_last_wait_blocked = waited_us > 2000;
   if (m_last_wait_blocked)
   {
-    if (!m_wake_lead_exact || std::abs(lead - m_wake_lead_ns) < 3'000'000)
+    if (!m_wake_lead_exact || lead > m_wake_lead_ns)
     {
-      if (!m_wake_lead_exact)
+      if (!m_wake_lead_exact || lead > m_wake_lead_ns + 1'000'000)
       {
-        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms)",
-                     lead / 1e6, waited_us / 1e3);
+        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms{})",
+                     lead / 1e6, waited_us / 1e3, m_wake_lead_exact ? "; was shorter" : "");
       }
       m_wake_lead_ns = lead;
       m_wake_lead_exact = true;
-      m_lead_disagree = 0;
     }
-    else
-    {
-      if (m_lead_disagree > 0 && std::abs(lead - m_lead_candidate_ns) < 1'000'000)
-        m_lead_disagree++;
-      else
-        m_lead_disagree = 1;
-      m_lead_candidate_ns = lead;
-      if (m_lead_disagree >= 3)
-      {
-        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (was {:.2f} ms)", lead / 1e6,
-                     m_wake_lead_ns / 1e6);
-        m_wake_lead_ns = lead;
-        m_lead_disagree = 0;
-      }
-    }
+    m_lead_window_max_ns = m_lead_window_n == 0 ? lead : std::max(m_lead_window_max_ns, lead);
+    m_lead_window_n++;
   }
   else if (!m_wake_lead_exact && lead > m_wake_lead_ns && lead < 500'000'000LL)
   {
     m_wake_lead_ns = lead;
+  }
+  if (m_lead_window_start_ns == 0 || m_clock.wake_ns - m_lead_window_start_ns > 10'000'000'000LL)
+  {
+    if (m_lead_window_n >= 3 && m_lead_window_max_ns < m_wake_lead_ns - 1'000'000)
+    {
+      INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (was {:.2f} ms; {} calls that blocked)",
+                   m_lead_window_max_ns / 1e6, m_wake_lead_ns / 1e6, m_lead_window_n);
+      m_wake_lead_ns = m_lead_window_max_ns;
+    }
+    m_lead_window_start_ns = m_clock.wake_ns;
+    m_lead_window_n = 0;
   }
   m_clock.grid_offset_ns = m_wake_lead_ns + m_xr_offset_ns;
   m_clock.early = m_wake_lead_exact && lead > m_wake_lead_ns + 500'000;
@@ -1580,30 +1578,29 @@ bool OpenXRManager::WaitFrame()
     // is then not shown).
     int land = 0;
     const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
+    m_early_streak = m_clock.early && after_wake_ms <= -2.0 ? m_early_streak + 1 : 0;
     if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0 && finish_avg > 0)
     {
       if (ready_ms > predict.ontime_ms - 2.0)
-        land = std::max(1, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)));
-      land = std::min(land, 2);
-      if (m_prev_land_time != 0 &&
-          m_clock.display_time + land * slot_ns <= m_prev_land_time + slot_ns / 2)
+        land = std::clamp(static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)), 1, 2);
+      if (land == 0 && m_prev_land_time != 0 &&
+          m_clock.display_time <= m_prev_land_time + slot_ns / 2)
       {
-        const bool can_end_run = land == 0 && m_clock.early && after_wake_ms <= -3.0 &&
-                                 m_wait_return_ns - m_late_run_end_ns > 5'000'000'000LL;
-        if (can_end_run)
+        // Handed the refresh the last frame lands on. A late run ends (that frame is then not
+        // shown) only after 30 frames in a row were handed out at least 2 ms early, once every
+        // 5 s at most; else this frame lands a refresh late too.
+        if (m_early_streak >= 30 && m_wait_return_ns - m_late_run_end_ns > 5'000'000'000LL)
         {
           m_late_run_end_ns = m_wait_return_ns;
           m_late_run_ends++;
           INFO_LOG_FMT(OPENXR,
-                       "PrimeFrame cycle: a frame handed out {:.2f} ms early ends a late run ({}); "
-                       "the late frame before it is replaced",
-                       -after_wake_ms, m_late_run_ends);
+                       "PrimeFrame cycle: frames handed out early end a late run ({}); the late "
+                       "frame before this one is replaced",
+                       m_late_run_ends);
         }
         else
         {
-          const int needed = static_cast<int>(
-              std::llround(static_cast<double>(m_prev_land_time - m_clock.display_time) / slot_ns)) + 1;
-          land = std::clamp(needed, land, 2);
+          land = 1;
         }
       }
     }

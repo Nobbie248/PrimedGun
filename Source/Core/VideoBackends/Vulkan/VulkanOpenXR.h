@@ -305,8 +305,9 @@ private:
   int64_t m_end_since_ns = 0;
   int64_t m_end_dwell_ns = 4'000'000'000LL;
   std::array<float, 600> m_end_ready{};  // the last frames' finish after their wake-up (ms)
-  // The last frames' video thread CPU time plus a GPU tail allowance (ms): how long after
-  // SteamVR's wake-up a frame would finish if its xrWaitFrame blocked for it (late -> asap).
+  // Late -> asap (CycleEndHold), the last frames' (ms): the video thread's CPU time plus a GPU
+  // tail allowance; when after SteamVR's wake-up they would finish had their xrWaitFrame blocked.
+  std::array<float, 600> m_end_vcpu{};
   std::array<float, 600> m_end_est{};
   size_t m_end_ready_next = 0;
   size_t m_end_ready_count = 0;

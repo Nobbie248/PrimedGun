@@ -557,19 +557,21 @@ private:
   XrTime m_prev_land_time = 0;
   int64_t m_late_run_end_ns = 0;
   uint32_t m_late_run_ends = 0;
+  int m_early_streak = 0;  // frames in a row handed out at least 2 ms early
 
   // The runtime's wake-up grid (frame/PACING.md "The wake-up"), under m_clock_mutex. XrTime
   // clock: 0 not chosen, 1 CLOCK_MONOTONIC_RAW, 2 the steady clock (CLOCK_MONOTONIC); its offset
-  // to the steady clock at the last xrWaitFrame return. The lead in XrTime: exact from calls
+  // to the steady clock at the last xrWaitFrame return. The lead in XrTime: the largest of calls
   // that blocked for the wake-up (a call made later returns at once with a shorter lead, one
-  // SteamVR hands out early with a longer one), else the largest seen. The refresh spacing:
+  // SteamVR hands out early with a longer one; see UpdateWakeGrid), else the largest seen. The refresh spacing:
   // the smallest step between consecutive display times that recurs.
   int m_xr_clock = 0;
   int64_t m_xr_offset_ns = 0;
   int64_t m_wake_lead_ns = 0;
   bool m_wake_lead_exact = false;
-  int64_t m_lead_candidate_ns = 0;
-  int m_lead_disagree = 0;
+  int64_t m_lead_window_max_ns = 0;
+  int64_t m_lead_window_start_ns = 0;
+  int m_lead_window_n = 0;
   bool m_last_wait_blocked = false;
   XrTime m_prev_wait_display_time = 0;
   std::array<int64_t, 64> m_display_steps{};
