@@ -48,3 +48,5 @@ Nothing below has a verdict yet.
 - The per-frame XRF log line (PRIMEFRAME_FRAME_LOG=0 turns it off) on long sessions (about 20 MB an hour).
 - Prediction for the real display time (PRIMEFRAME_PREDICT_EXTRA_MS=auto, the default; the owner felt slightly less lag): heavy rooms,
   and the arm cannon, and how far it swings past on quick stops.
+- The game at exactly 60 Hz (VIOverclock 1.001001 in Dolphin.ini): no frames landing late in the headset, and
+  no audible or visible change to the game.
