@@ -14,7 +14,7 @@
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
 #   PRIMEFRAME_MOTION_SMOOTHING  SteamVR motionSmoothingOverride for the app: 0 global, 1 on, 2 off (default), 3 always on
 #   PRIMEFRAME_PREDICT_EXTRA_MS  <ms>|auto: the game predicts head and controller poses that much past
-#                           SteamVR's display time (auto: one period per period the frame lands late); off by default
+#                           SteamVR's display time (auto, the default: one period per period the frame lands late; 0 off)
 #   PRIMEFRAME_PREDICT_ONTIME_MS  with auto, how long after SteamVR's wake-up a frame still lands on time (19.5)
 #   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (default 1: SteamVR paces the app at half the
 #                           refresh, for PRIMEFRAME_PACING cycle and drain)
@@ -62,6 +62,8 @@ unset DOLPHIN_EMU_USERPATH
 # Direct rendering by default: the stereo geometry shader made each draw run once per GMEM tile.
 [ "${PRIMEFRAME_SYSMEM:-1}" = 1 ] && { export TU_DEBUG=${TU_DEBUG:+$TU_DEBUG,}sysmem; log "TU_DEBUG=$TU_DEBUG"; }
 [ -n "$PRIMEFRAME_PACING" ] && { export PRIMEFRAME_PACING; log "PRIMEFRAME_PACING=$PRIMEFRAME_PACING"; }
+# Predict head and controller poses for the refresh a frame really lands on (owner A/B 2026-10-14: less lag).
+export PRIMEFRAME_PREDICT_EXTRA_MS=${PRIMEFRAME_PREDICT_EXTRA_MS:-auto}; log "PRIMEFRAME_PREDICT_EXTRA_MS=$PRIMEFRAME_PREDICT_EXTRA_MS"
 
 # The game. Steam's %command% is a chain of Steam's own helpers (steam-launch-wrapper, reaper
 # SteamLaunch AppId=...) ending with the binary the shortcut names: it runs as given, with the game's
