@@ -2903,6 +2903,61 @@ void VulkanOpenXR::StopPacer()
   INFO_LOG_FMT(OPENXR, "PrimeFrame pacing thread stopped.");
 }
 
+// Pipelined: release the images of finished sets before their slot, in order, so that only
+// xrBeginFrame and xrEndFrame are left between a slot's xrWaitFrame and its end, and the game
+// gets the set back as soon as the GPU is done with it. A set's new images are released only
+// once the layer that last used the set was ended and is no longer the one on show (shown_set:
+// the set of the last ended layer, -1 none): SteamVR shows a released image at once.
+void VulkanOpenXR::ReleaseFinishedEarly(int shown_set)
+{
+  const VkDevice device = g_vulkan_context->GetDevice();
+  while (true)
+  {
+    XRFrameItem* item = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(m_pacer_mutex);
+      std::array<bool, 2> used{shown_set == 0, shown_set == 1};
+      for (XRFrameItem& pending : m_pending)
+      {
+        if (pending.released)
+        {
+          used[pending.set] = true;
+          continue;
+        }
+        if (used[pending.set] || pending.fence == VK_NULL_HANDLE ||
+            (!pending.complete && vkGetFenceStatus(device, pending.fence) != VK_SUCCESS))
+        {
+          break;
+        }
+        item = &pending;
+        break;
+      }
+      if (!item)
+        return;
+    }
+    // Only the pacing thread releases and removes items, so the item stays where it is.
+    XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    for (uint32_t eye = 0; eye < 2; ++eye)
+    {
+      if (!item->eye_acquired[eye])
+        continue;
+      auto queue_lock = AcquireGraphicsQueueLock();
+      xrReleaseSwapchainImage(EyeSet(item->set)[eye].swapchain, &release_info);
+    }
+    VkFence done_fence = VK_NULL_HANDLE;
+    {
+      std::lock_guard<std::mutex> lock(m_pacer_mutex);
+      item->released = true;
+      item->complete = true;
+      done_fence = item->fence;
+      item->fence = VK_NULL_HANDLE;
+    }
+    ReturnFence(done_fence);
+    // The game may draw into the set's next images now.
+    m_pacer_cv.notify_all();
+  }
+}
+
 // The pacing thread: one xrWaitFrame/xrBeginFrame/xrEndFrame per display refresh. A new eye set
 // is shown on the refresh its pose was located for (its target) once the GPU finished it: its
 // images are released then (never before the fence signalled) and the projection layer ends
@@ -2949,115 +3004,102 @@ void VulkanOpenXR::PacerLoop()
         due_wake = due - clock.grid_offset_ns;
     }
 
-    // Until shortly before the next refresh starts (pipelined without repeats: the refresh the
-    // oldest set is due on): wait for the oldest unfinished set (its GPU time measures the tail
-    // the next targets allow for).
+    // Until the xrWaitFrame call: release finished sets as they finish, and measure the GPU tail.
+    // The call: when the due set is for the very next slot the runtime hands out (SteamVR
+    // throttling the app to every second refresh: consecutive slots) 1 ms before the estimated
+    // wake-up, and xrWaitFrame blocks until the runtime's own wake-up; when slots are skipped
+    // (an xrWaitFrame called after skipped slots returns at once with the slot that is running:
+    // SteamVR on the Frame, the mock's MOCK_XR_SKIP=late) just after the due slot's wake-up.
+    // Without a due set (repeats, start): before the next refresh.
     {
-      VkFence fence = VK_NULL_HANDLE;
-      int64_t submit_ns = 0;
-      uint64_t id = 0;
+      int64_t call_at = 0;
+      if (due_wake != 0)
       {
-        std::lock_guard<std::mutex> lock(m_pacer_mutex);
-        for (const XRFrameItem& item : m_pending)
+        const int64_t slot =
+            std::max(m_slot_ns.load(), VR::g_openxr->GetFrameClock().period_ns);
+        XrTime due = 0;
         {
-          if (!item.complete && item.fence != VK_NULL_HANDLE)
-          {
-            fence = item.fence;
-            submit_ns = item.submit_ns;
-            id = item.id;
-            break;
-          }
+          std::lock_guard<std::mutex> lock(m_pacer_mutex);
+          if (!m_pending.empty())
+            due = m_pending.front().target;
         }
+        const bool next_slot =
+            m_last_handed != 0 && due != 0 && due <= m_last_handed + slot + slot / 2;
+        call_at = next_slot ? due_wake - 1'000'000 : due_wake + 250'000;
       }
-      const auto clock = VR::g_openxr->GetFrameClock();
-      const int64_t next_wake = due_wake != 0 ? due_wake : clock.wake_ns + clock.period_ns;
-      const int64_t timeout = clock.period_ns > 0 ? next_wake - 500'000 - SteadyNs() : 0;
-      if (fence != VK_NULL_HANDLE && timeout > 0 &&
-          vkWaitForFences(device, 1, &fence, VK_TRUE, static_cast<uint64_t>(timeout)) ==
-              VK_SUCCESS)
+      else
       {
+        const auto clock = VR::g_openxr->GetFrameClock();
+        if (clock.period_ns > 0)
+          call_at = clock.wake_ns + clock.period_ns - 500'000;
+      }
+      // A finished set: its GPU tail (submit to finished) sets the margin the next targets allow.
+      const auto note_done = [&](VkFence, int64_t submit_ns, uint64_t id) {
         const double tail_ms = (SteadyNs() - submit_ns) / 1e6;
         const double ema = m_gpu_tail_ema_ms.load();
-        m_gpu_tail_ema_ms.store(tail_ms > ema ? ema * 0.7 + tail_ms * 0.3 : ema * 0.95 + tail_ms * 0.05);
+        m_gpu_tail_ema_ms.store(tail_ms > ema ? ema * 0.7 + tail_ms * 0.3 :
+                                                ema * 0.95 + tail_ms * 0.05);
         std::lock_guard<std::mutex> lock(m_pacer_mutex);
         for (XRFrameItem& item : m_pending)
         {
           if (item.id == id)
             item.complete = true;
         }
-      }
-    }
-
-    // Pipelined: release the finished set now, before its refresh, so that only xrBeginFrame
-    // and xrEndFrame are left between its xrWaitFrame and its end. Its swapchains are not the
-    // ones on show (the sets alternate).
-    if (m_early_release && !m_no_gpu_wait && due_wake != 0)
-    {
-      XRFrameItem* front = nullptr;
-      uint32_t set = 0;
-      std::array<bool, 2> eyes{};
+      };
+      while (!m_pacer_exit.load())
       {
-        std::lock_guard<std::mutex> lock(m_pacer_mutex);
-        if (!m_pending.empty() && !m_pending.front().released &&
-            m_pending.front().fence != VK_NULL_HANDLE &&
-            (m_pending.front().complete ||
-             vkGetFenceStatus(device, m_pending.front().fence) == VK_SUCCESS) &&
-            (!have_current || current.set != m_pending.front().set))
-        {
-          front = &m_pending.front();
-          set = front->set;
-          eyes = front->eye_acquired;
-        }
-      }
-      if (front)
-      {
-        XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-        for (uint32_t eye = 0; eye < 2; ++eye)
-        {
-          if (!eyes[eye])
-            continue;
-          auto queue_lock = AcquireGraphicsQueueLock();
-          xrReleaseSwapchainImage(EyeSet(set)[eye].swapchain, &release_info);
-        }
-        VkFence done_fence = VK_NULL_HANDLE;
+        // Not within 3 ms of the call: a release takes the queue lock, which the game's submits
+        // may hold for a while, and the runtime's own work (the mock copies the image) (the due
+        // set is released at its slot then).
+        if (!m_no_gpu_wait && m_early_release && (call_at == 0 || SteadyNs() < call_at - 3'000'000))
+          ReleaseFinishedEarly(have_current ? static_cast<int>(current.set) : -1);
+        VkFence fence = VK_NULL_HANDLE;
+        int64_t submit_ns = 0;
+        uint64_t id = 0, newest = 0;
         {
           std::lock_guard<std::mutex> lock(m_pacer_mutex);
-          // Only the pacing thread removes items, so the front is still this one.
-          front->released = true;
-          front->complete = true;
-          done_fence = front->fence;
-          front->fence = VK_NULL_HANDLE;
+          for (const XRFrameItem& item : m_pending)
+          {
+            if (fence == VK_NULL_HANDLE && !item.complete && item.fence != VK_NULL_HANDLE)
+            {
+              fence = item.fence;
+              submit_ns = item.submit_ns;
+              id = item.id;
+            }
+            newest = item.id;
+          }
         }
-        ReturnFence(done_fence);
-        // The video thread may render into the set's next images now.
-        m_pacer_cv.notify_all();
-      }
-    }
-    // When the set is due on the very next slot the runtime hands out (SteamVR throttling the app
-    // to every second refresh: consecutive slots), xrWaitFrame is called at once and blocks until
-    // the runtime's own wake-up for it. Otherwise slots are skipped, and an xrWaitFrame called
-    // after skipped slots returns at once with the slot that is running (SteamVR on the Frame;
-    // the mock's MOCK_XR_SKIP=late): it is called just after the due slot's wake-up.
-    if (due_wake != 0)
-    {
-      const int64_t slot = std::max(m_slot_ns.load(), VR::g_openxr->GetFrameClock().period_ns);
-      XrTime due = 0;
-      {
-        std::lock_guard<std::mutex> lock(m_pacer_mutex);
-        if (!m_pending.empty())
-          due = m_pending.front().target;
-      }
-      const bool next_slot = m_last_handed != 0 && due != 0 && due <= m_last_handed + slot + slot / 2;
-      if (!next_slot)
-      {
-        const auto deadline = std::chrono::steady_clock::time_point(
-            std::chrono::nanoseconds(due_wake + 250'000));
-        std::unique_lock<std::mutex> lock(m_pacer_mutex);
-        m_pacer_cv.wait_until(lock, deadline, [&] { return m_pacer_exit.load(); });
+        const int64_t now = SteadyNs();
+        if (call_at == 0 || now >= call_at)
+          break;
+        // A fence wait's timeout may overshoot by a few ms (the kernel's wait), so the last 3 ms
+        // before the call are a plain timed sleep.
+        if (fence != VK_NULL_HANDLE && now < call_at - 3'000'000)
+        {
+          if (vkWaitForFences(device, 1, &fence, VK_TRUE,
+                              static_cast<uint64_t>(call_at - 3'000'000 - now)) == VK_SUCCESS)
+            note_done(fence, submit_ns, id);
+        }
+        else
+        {
+          // Sleep until the call, or until the game hands over a new set (or, with a set on the
+          // GPU, 0.5 ms to look at its fence again).
+          const int64_t until =
+              fence != VK_NULL_HANDLE ? std::min(call_at, now + 500'000) : call_at;
+          const auto deadline =
+              std::chrono::steady_clock::time_point(std::chrono::nanoseconds(until));
+          {
+            std::unique_lock<std::mutex> lock(m_pacer_mutex);
+            m_pacer_cv.wait_until(lock, deadline, [&] {
+              return m_pacer_exit.load() || (!m_pending.empty() && m_pending.back().id != newest);
+            });
+          }
+          if (fence != VK_NULL_HANDLE && vkGetFenceStatus(device, fence) == VK_SUCCESS)
+            note_done(fence, submit_ns, id);
+        }
       }
     }
 
-    const int64_t wait_call_ns = SteadyNs();
     if (!VR::g_openxr->WaitFrame())
     {
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -3065,16 +3107,18 @@ void VulkanOpenXR::PacerLoop()
     }
     const auto clock = VR::g_openxr->GetFrameClock();
     const XrTime display_time = clock.display_time;
-    // The runtime's slot: the spacing of consecutive display times it hands out (a blocking
-    // xrWaitFrame follows the slot handed out before it).
-    if (m_last_handed != 0 && clock.wake_ns - wait_call_ns > 500'000)
+    // The runtime's slot: the smallest spacing of the display times it handed out (the pacing
+    // thread asks for every slot at the start, so at the full refresh rate this is one refresh;
+    // with SteamVR throttling the app it is two).
+    if (m_last_handed != 0)
     {
       const int64_t spacing = display_time - m_last_handed;
-      if (spacing > 5'000'000 && spacing < 40'000'000)
+      const int64_t slot = m_slot_ns.load();
+      if (spacing > 5'000'000 && (slot == 0 || spacing < slot))
         m_slot_ns.store(spacing);
     }
     m_last_handed = display_time;
-    const int64_t period = std::max<int64_t>(std::max(clock.period_ns, m_slot_ns.load()), 1);
+    const int64_t period = std::max<int64_t>(clock.period_ns, 1);
     const bool should_render = VR::g_openxr->ShouldRender();
 
     // The newest set due on this refresh (or the oldest when the game waits for a free set).

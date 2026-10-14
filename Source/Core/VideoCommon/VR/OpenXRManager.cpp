@@ -1374,10 +1374,14 @@ bool OpenXRManager::WaitFrame()
     m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           wait_end.time_since_epoch())
                           .count();
-    // A call that blocked returned at the runtime's wake-up: its lead is exact (the runtime may
-    // change it). One that returned at once was late: its lead is a lower bound.
+    // A call made before the (estimated) wake-up that blocked (over 2 ms; returning at once still
+    // takes a fraction of a ms) returned at the runtime's wake-up: its lead is exact (the runtime
+    // may change it). One that returned at once was late: its lead is a lower bound.
     const int64_t grid_offset = m_clock.display_time - m_clock.wake_ns;
-    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod || waited_us > 500 ||
+    const bool blocked_for_wake =
+        waited_us > 2000 &&
+        (m_clock.grid_offset_ns == 0 || m_wait_call_ns < m_clock.display_time - m_clock.grid_offset_ns);
+    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod || blocked_for_wake ||
         grid_offset > m_clock.grid_offset_ns)
       m_clock.grid_offset_ns = grid_offset;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;

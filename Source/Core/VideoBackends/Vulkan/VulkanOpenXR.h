@@ -222,6 +222,7 @@ private:
   void CycleLoop();
   bool ReleaseItem(XRFrameItem& item, bool wait_gpu);
   void PacerLoop();
+  void ReleaseFinishedEarly(int shown_set);
   void StartPacer();
   void StopPacer();
   void ReleaseCompletedItems(bool block);
@@ -306,8 +307,8 @@ private:
   std::thread m_pacer;
   std::atomic<bool> m_pacer_exit{false};
   std::atomic<double> m_gpu_tail_ema_ms{2.0};
-  // Pipelined: the spacing of the display times the runtime hands out (0 until a blocking
-  // xrWaitFrame measured it; the display period is the floor) and the last one handed out.
+  // Pipelined: the smallest spacing of the display times the runtime handed out (its slot; the
+  // display period until measured) and the last one handed out.
   std::atomic<int64_t> m_slot_ns{0};
   XrTime m_last_handed = 0;
 
