@@ -159,11 +159,11 @@ profiles (no Frame profile yet), haptics.
 `VulkanOpenXR.cpp` logs one line a second at INFO level (category OpenXR):
 
 ```
-XRSTATS mode= submitted= layers= shown= late= gpu_waits= gpu_wait_max_ms= drain_avg_ms= drain_max_ms= gpu_ms= xrwait_avg_ms= xrwait_max_ms= set_waits= eye= game_fps= game_vps=
+XRSTATS mode= submitted= layers= shown= late= gpu_waits= gpu_wait_max_ms= drain_avg_ms= drain_max_ms= gpu_ms= xrwait_avg_ms= xrwait_max_ms= set_waits= discards= end_avg_ms= end_max_ms= end_late= age_avg_ms= age_max_ms= lead_avg_ms= pose_off= eye= game_fps= game_vps=
 ```
 
-frame/PACING.md explains every field. `gpu_ms` is GPU busy time per eye set from the kernel's DRM
-fdinfo. `frame/tools/session-report.py` reads the fields generically.
+frame/PACING.md explains every field and the per-frame `XRF` line. `gpu_ms` is GPU busy time per eye
+set from the kernel's DRM fdinfo. `frame/tools/session-report.py` reads the fields generically.
 
 ## Install, wrapper and release
 
@@ -208,25 +208,26 @@ mapping (`GCPadNew.ini`) are not carried over: PrimedGun applies its OpenXR bind
 
 ## Pacing
 
-frame/PACING.md has the whole account (the loop before and now, the mock's cadence model, the table).
-In short:
+frame/PACING.md has the whole account (the loops, the mock's cadence model, the tables, the headset
+sessions). In short:
 
-- `PRIMEFRAME_PACING=pipelined` (default) | `inline` | `drain`; `PRIMEDGUN_XR_WAIT_GPU=1` alone still
-  means `drain`. Pipelined: two eye swapchain sets; the video thread renders a set, puts a fenced empty
-  submission behind it and hands it to a pacing thread, which runs xrWaitFrame, xrBeginFrame and
-  xrEndFrame every refresh, releases a set only after its fence and ends it with exactly the poses it
-  was rendered with; the pacing thread ends a frame only for the refresh a new set is due on, with the
-  display time its poses were located for, and SteamVR shows it again itself on the refreshes between
-  (XRSTATS layers about 60 at 60 fps; `PRIMEFRAME_REPEATS=1` is the old every-refresh repeat, which
-  doubled images in the headset). Controller actions are polled on the pacing thread. Keep
-  `ImmediateXFBEnable = True`: with it off the mock's stamp check shows images drawn a game frame before
-  their pose.
+- `PRIMEFRAME_PACING=cycle` (default) | `pipelined` | `drain` | `inline`; `PRIMEDGUN_XR_WAIT_GPU=1` alone
+  still means `drain`. Cycle: each game frame in its own `xrWaitFrame` cycle (the drain's order as SteamVR
+  sees it), begun at the frame's first draw that reads the head pose, released after its fence and ended
+  by a releaser thread, no CPU drain. Pipelined: two eye swapchain sets; a pacing thread ends each set
+  right after the `xrWaitFrame` of the slot its poses were located for (blocking for it when it is the
+  next slot, i.e. with SteamVR throttling the app to 60), sets are freed for the game as soon as their
+  fence signalled. Keep `ImmediateXFBEnable = True`: with it off the mock's stamp check shows images drawn
+  a game frame before their pose.
+- An `XRF` line per ended frame and the per-second XRSTATS fields `end_*`, `age_*`, `lead_avg_ms`,
+  `pose_off`, `discards` give the timing against SteamVR's wake-up (PACING.md "Frame log").
 - While the OpenXR session runs the desktop window is neither drawn nor presented
   (`PRIMEFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
   present, which hid every early release and cost the heavy room about 40 % of its frame rate.
 - `PRIMEFRAME_NO_GPU_WAIT=1` releases with no wait at all: the negative test, which the mock's release
   check must fail (`mockrun.sh --nowait`).
-- mockrun: `--pacing M`, `--nowait`, `--window`; it sets `MOCK_XR_SKIP=late` (a late xrWaitFrame returns
-  at once, as SteamVR does), waits while `~/.cache/headset-in-use` names a live process and marks a run
-  INVALID (exit 3) when a headset session starts during it. The mock adds an `xrmock: cadence` summary
-  line (late layers, how many refreshes each new set stayed on screen).
+- mockrun: `--pacing M`, `--nowait`, `--window`, `--stamp`, `--head DPS`; it sets `MOCK_XR_SKIP=late` (a
+  late xrWaitFrame returns at once, as SteamVR does), passes `MOCK_XR_THROTTLE` (SteamVR's
+  framesToThrottle) through, waits while `~/.cache/headset-in-use` names a live process and marks a run
+  INVALID (exit 3) when a headset session starts during it. The mock adds the `xrmock: cadence` and
+  `xrmock: latency` summary lines.
