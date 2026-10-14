@@ -1585,27 +1585,29 @@ bool OpenXRManager::WaitFrame()
     const double ready_ms = after_wake_ms + finish_avg;
 
     // Cycle end late (frame/PACING.md "The wake-up"): a frame that will not make SteamVR's
-    // on-time limit (with a 2 ms margin, so that no frame straddles it) is planned to land whole
-    // refreshes after its display time: the releaser holds it past the limit and its poses are
-    // located for the refresh it lands on. No two frames may land on one refresh (the second
-    // replaces the first, which is then never shown): a frame handed a display time at or before
-    // the last frame's landing is planned late too, except that a frame handed out at least
-    // 3 ms early that makes the limit may end the late run (once every 5 s; the last late frame
-    // is then not shown).
+    // on-time limit is planned to land whole refreshes after its display time: the releaser
+    // holds it past the limit and its poses are located for the refresh it lands on. No two
+    // frames should land on one refresh (the second replaces the first, which is then never
+    // shown): a frame handed the refresh the last frame lands on is planned late too (a late
+    // run), until frames handed out early end the run.
     int land = 0;
     const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
     m_early_streak = m_clock.early && after_wake_ms <= -2.0 ? m_early_streak + 1 : 0;
     if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0 && finish_avg > 0)
     {
-      if (ready_ms > predict.ontime_ms - 2.0)
+      // A frame handed out early that misses the limit anyway lands on the refresh the next
+      // (early) frame gets and is replaced by it: one frame lost, no late run. One that came after
+      // the wake-up is planned late with the margin, so that such frames do not straddle it.
+      const double margin_ms = m_clock.early ? 0.0 : 2.0;
+      if (ready_ms > predict.ontime_ms - margin_ms)
         land = std::clamp(static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)), 1, 2);
       if (land == 0 && m_prev_land_time != 0 &&
           m_clock.display_time <= m_prev_land_time + slot_ns / 2)
       {
         // Handed the refresh the last frame lands on. A late run ends (that frame is then not
-        // shown) only after 30 frames in a row were handed out at least 2 ms early, once every
-        // 5 s at most; else this frame lands a refresh late too.
-        if (m_early_streak >= 30 && m_wait_return_ns - m_late_run_end_ns > 5'000'000'000LL)
+        // shown) once 15 frames in a row were handed out at least 2 ms early, at most once a
+        // second; else this frame lands a refresh late too.
+        if (m_early_streak >= 15 && m_wait_return_ns - m_late_run_end_ns > 1'000'000'000LL)
         {
           m_late_run_end_ns = m_wait_return_ns;
           m_late_run_ends++;
