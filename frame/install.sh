@@ -10,8 +10,8 @@
 #   --name NAME        shortcut name (default "PrimeFrame", with --dev "PrimeFrame (dev)")
 #   --rom PATH         your Metroid Prime (USA) disc image (.rvz .iso .gcm); written to PRIMEFRAME_HOME/rom.
 #                      Without it, an existing rom file is kept, else ~/Documents/Roms/gc is searched
-#   --import-podman [DIR]  owner only: copy the memory card, SRAM, save states and the VR / game
-#                      overrides from the old Podman user folder (default
+#   --import-podman [DIR]  owner only: copy the memory card, SRAM, save states, the VR / game
+#                      overrides and the [primedgun] settings (Qt.ini) from the old Podman user folder (default
 #                      ~/PrimedGun-podman/src/build-podman/Binaries/user). Copies, never moves.
 #   --force            with --import-podman: replace saves that already exist (a backup copy is made first)
 #   -h, --help
@@ -24,6 +24,7 @@
 #                            instead of the live one: DIR/userdata/*/config/shortcuts.vdf, grid art
 #                            beside it. Used for dry runs; nothing of the real Steam is touched.
 # Your user folder is seeded from seed/ only where files are missing; nothing there is overwritten.
+# The library art (art/) is always written for the shortcut's appid into Steam's grid folder.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 export PYTHONDONTWRITEBYTECODE=1
@@ -166,17 +167,19 @@ if [ "$IMPORT" = 1 ]; then
     copy_item GC/MemoryCardA.USA.raw
     copy_item GC/SRAM.raw
     copy_item StateSaves
-    # ini sections: [VR] of GFX.ini, [Video_Settings] of GameSettings/GM8E01.ini, [VR] of Dolphin.ini
+    # ini sections: [VR] of GFX.ini, [Video_Settings] of GameSettings/GM8E01.ini, [VR] of Dolphin.ini,
+    # [primedgun] of Qt.ini (the in-VR menu settings, into Config/PrimedGun.ini)
     # (only those sections; the rest of the file and everything personal stay out)
-    for spec in "Config/GFX.ini:VR" "GameSettings/GM8E01.ini:Video_Settings" "Config/Dolphin.ini:VR"; do
-        f=${spec%%:*}; sec=${spec##*:}
-        [ -f "$P/$f" ] || continue
-        grep -q "^\[$sec\]" "$P/$f" || continue
+    for spec in "Config/GFX.ini:VR:Config/GFX.ini" "GameSettings/GM8E01.ini:Video_Settings:GameSettings/GM8E01.ini" \
+        "Config/Dolphin.ini:VR:Config/Dolphin.ini" "Config/Qt.ini:primedgun:Config/PrimedGun.ini"; do
+        IFS=: read -r src sec f <<< "$spec"
+        [ -f "$P/$src" ] || continue
+        grep -q "^\[$sec\]" "$P/$src" || continue
         if [ -f "$U/$f" ] && ! cmp -s "$U/$f" "$ROOT/seed/user/$f" && [ "$FORCE" != 1 ]; then
             echo "import: $f was changed here, [$sec] kept (--force replaces it, after a backup)"; continue
         fi
         backup "$f"
-        python3 -I - "$P/$f" "$U/$f" "$sec" << 'PY'
+        python3 -I - "$P/$src" "$U/$f" "$sec" << 'PY'
 import re, sys
 src, dst, sec = sys.argv[1:]
 def sections(text):
@@ -196,7 +199,7 @@ for s in cur:
 if not hit: cur.append(new)
 open(dst, "w").write("".join(("[%s]\n" % n if n else "") + "".join(l + "\n" for l in ls) for n, ls in cur))
 PY
-        echo "import: [$sec] of $f copied"
+        echo "import: [$sec] of $src copied to $f"
     done
     [ -d "$BK" ] && echo "import: replaced files were saved first in $BK"
 fi
@@ -231,35 +234,25 @@ else
     GRID=$(ls -d "$STEAM"/userdata/*/config 2> /dev/null | head -1)/grid
 fi
 
-# ---- library art: copy the art of the owner's old shortcut (if it exists) to the new appid
+# ---- library art: always written for the shortcut's appid (earlier copies of it are overwritten)
 if [ "$APPID" != none ] && [ -n "$GRID" ]; then
-    OLDID=$(python3 -I -B - "$HERE/steam-cef.py" "$STEAM" << 'PY'
-import glob, importlib.util, sys
-spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-for p in sorted(glob.glob(sys.argv[2] + "/userdata/*/config/shortcuts.vdf")):
-    for v in m.vdf_load(p)["shortcuts"].values():
-        if v.get("AppName") == "PrimedGun - Metroid Prime VR":
-            print(v["appid"] & 0xffffffff); sys.exit(0)
-PY
-) || OLDID=
-    NEWID=$(( APPID & 0xffffffff ))
-    if [ -n "$OLDID" ]; then
+    if [ -d "$ROOT/art" ]; then
+        NEWID=$(( APPID & 0xffffffff ))
         mkdir -p "$GRID"
-        for suffix in "" p _hero _logo _icon; do
-            for ext in png ico jpg; do
-                f=$GRID/$OLDID$suffix.$ext
-                [ -f "$f" ] && [ ! -e "$GRID/$NEWID$suffix.$ext" ] && cp "$f" "$GRID/$NEWID$suffix.$ext" && echo "art: $GRID/$NEWID$suffix.$ext"
-            done
+        for pair in grid.png:.png grid_p.png:p.png hero.png:_hero.png logo.png:_logo.png icon.ico:_icon.ico; do
+            [ -f "$ROOT/art/${pair%%:*}" ] || continue
+            cp "$ROOT/art/${pair%%:*}" "$GRID/$NEWID${pair##*:}"
         done
+        echo "art: library images written to $GRID ($NEWID*)"
         # offline copies only: the vdf icon field (a live Steam rewrites shortcuts.vdf itself)
-        if [ -n "$PRIMEFRAME_STEAM_DIR" ] && [ -f "$GRID/$NEWID""_icon.ico" ]; then
+        if [ -n "$PRIMEFRAME_STEAM_DIR" ] && [ -f "$GRID/${NEWID}_icon.ico" ]; then
             for CFG in "$STEAM"/userdata/*/config; do
                 [ -d "$CFG" ] && python3 "$HERE/steam-cef.py" --vdf "$CFG/shortcuts.vdf" --name "$NAME" --exe "\"$EXE\"" \
-                    --startdir "\"$APP\"" --opts "$LAUNCH" --icon "$CFG/grid/$NEWID""_icon.ico" > /dev/null
+                    --startdir "\"$APP\"" --opts "$LAUNCH" --icon "$CFG/grid/${NEWID}_icon.ico" > /dev/null
             done
         fi
     else
-        echo "no art copied (no \"PrimedGun - Metroid Prime VR\" shortcut found)"
+        echo "warning: no art/ folder in $ROOT; the library entry has no images"
     fi
 fi
 
