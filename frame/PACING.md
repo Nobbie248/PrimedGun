@@ -699,7 +699,40 @@ switch to asap is what shortens it wherever the room allows.
 
 ### Results
 
-PLACEHOLDER_RESULTS
+Frame-like mock (`mockrun.sh --frame`: throttled, lead 4, latch 13.8, late frames a period later, XrTime on
+CLOCK_MONOTONIC_RAW, `MOCK_XR_EARLY=1`), owner's settings (IR 3, eye 2160, sysmem, VI at 60, prediction
+auto, `--stamp --head 150`). SteamVR was idling on the machine through all of these runs (about one core)
+and the CPU ran at about 80 C: the video thread's CPU time per frame in s02 was 14.6 to 16.1 ms against
+12.3 in the heavy room section's runs, so the frame rates below are lower for every build (the heavy room
+build run under the same conditions: 59.2 fps). Shortfall: the refresh a new eye set lands on minus the
+time its poses were located for.
+
+| Run | Game fps (lowest second) | End mode, switches | Extra / early frames a second | Locate to landing avg ms | Shortfall within 1 ms | One period short | Holds 2 / 4 / 5+, never shown | Stamps exact, end times right, errors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| s01 60 s, the wake-up commit only | 60.0 (60.0) | asap, 0 | 0 / 47.6 | 40.1 (3440 of 4758 calls handed out early) | 4735 of 4755 | 1 | 4748 / 2 / 1, 3 | 9510 of 9510, 4758 of 4758, 0 |
+| s01 90 s | 60.0 (59.1) | asap, 0 | 0 / 0 (6231 of 6559 calls blocked) | 33.1 | 6541 of 6555 | 0 | 6549 / 2 / 1, 2 | 13110 of 13110, 6558 of 6558, 0 |
+| s02 60 s, the heavy room build | 59.2 (57.9) | late | 59.7 / (not counted) | 41.0 | 253 of 9464 (9208 located 1 to 2 periods too far) | 0 | 9187 / 181 / 4, 91 | all, all, 0 |
+| s02 90 s, the wake-up commit only | 58.8 (56.2) | late | 45.7 / 14.0 | 45.5 | 10380 of 11198 | 779 | 9689 / 827 / 3, 678 | all, all, 0 |
+| s02 90 s | 58.7 (57.3) | late, 1 (at the start) | 59.1 / 9.8 | 46.6 | 10879 of 11202 | 302 | 10702 / 327 / 2, 170 | 22404 of 22404, 11205 of 11205, 0 |
+| s02 60 s, `MOCK_XR_EARLY=2` | 59.5 (58.2) | late, 1 | 3.7 / 59.3 | 51.0 | 9335 of 9485 | 144 | 9243 / 157 / 2, 82 | all, all, 0 |
+| s02 soak 300 s | 57.5 (54.5) | late, 1 | 56.5 / 6.6 | 43.8 | 22220 of 23139 | 912 | 21646 / 1154 / 2, 336 | 46278 of 46278, 23142 of 23142, 0 |
+| s02 30 s, `--nowait` | | | | | | | | 15305 of 15309 releases changed after release: FAIL, as it must |
+| s01 30 s, `PRIMEFRAME_HUD_TEST=1` | | asap | | | 2952 of 2954 | | | the VIEW-space quad on all 2957 frames, 0 errors |
+
+(Holds and never shown are for the whole session, the s02 ones with the 95 s opening and the load.)
+
+- Light room: asap from the load to the end, every `xrWaitFrame` blocking for the wake-up, no extra, the
+  poses located 33.1 ms before the landing instead of 40.1 (the mock's lead is 33.3; on the Frame the
+  session's light room was handed out about 15 ms early, so there the difference should be larger).
+- Heavy room: late from the start and no switch after it. The game's first draw came a few ms after the
+  wake-up (XRF `w` 1.7 median), so most frames were late calls planned a refresh late (`pl=1`, extra
+  16.67); 97 % landed on the refresh their poses were located for, against 3 % with the heavy room build
+  in the same mock. With `MOCK_XR_EARLY=2` (SteamVR's hand-out as the session suggests) nearly every frame
+  was handed out early and on time, with no extra (3.7 frames a second). Late runs ended 10 times in the
+  s02 run, 9 of them in the opening flight; 30 in the soak's 400 s.
+- Dips: in every s02 run the seconds under 59 fps are the video thread's own CPU time (84 to 93 % of the
+  frames over 17.5 ms had over 15.5 ms of CPU; its wait for the last frame, XRC `vw`, was 0); in the soak
+  that CPU time rose from 14.7 to 16.1 ms a frame over the five minutes (heat), and the rate with it.
 
 ## The HUD: why it shakes, and a layer of its own (design; only a test quad built)
 
