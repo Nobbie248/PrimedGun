@@ -1068,7 +1068,8 @@ void OpenXRManager::UpdateInputActions()
     location.next = &velocity;
 
     if (XR_FAILED(
-            xrLocateSpace(space, m_reference_space, m_frame_state.predictedDisplayTime, &location)))
+            xrLocateSpace(space, m_reference_space,
+                          m_frame_state.predictedDisplayTime + m_frame_extra_ns, &location)))
     {
       return;
     }
@@ -1348,6 +1349,45 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
   }
 }
 
+// PRIMEFRAME_PREDICT_EXTRA_MS (frame/PACING.md "Prediction for the real display time"): unset or 0
+// off; <ms> a fixed extra; auto: one display period for every period the frame is expected to
+// end past PRIMEFRAME_PREDICT_ONTIME_MS (19.5) after the runtime's wake-up for it (SteamVR on the
+// Frame at framesToThrottle 1 showed frames ended later than that a whole period after their
+// predicted display time). Expected end: how late the xrWaitFrame call returned after the wake-up
+// plus the average xrWaitFrame return to xrEndFrame time.
+namespace
+{
+struct PredictConfig
+{
+  int mode = 0;  // 0 off, 1 fixed, 2 auto
+  int64_t fixed_ns = 0;
+  double ontime_ms = 19.5;
+};
+const PredictConfig& GetPredictConfig()
+{
+  static const PredictConfig s_config = [] {
+    PredictConfig c;
+    const char* extra = std::getenv("PRIMEFRAME_PREDICT_EXTRA_MS");
+    if (extra && std::string_view(extra) == "auto")
+      c.mode = 2;
+    else if (extra && std::atof(extra) > 0.0)
+    {
+      c.mode = 1;
+      c.fixed_ns = static_cast<int64_t>(std::min(std::atof(extra), 100.0) * 1e6);
+    }
+    if (const char* ontime = std::getenv("PRIMEFRAME_PREDICT_ONTIME_MS"))
+      c.ontime_ms = std::atof(ontime);
+    INFO_LOG_FMT(OPENXR, "PrimeFrame predict extra: {} (on time within {:.1f} ms of the wake-up)",
+                 c.mode == 2 ? std::string("auto") :
+                 c.mode == 1 ? fmt::format("{:.2f} ms", c.fixed_ns / 1e6) :
+                               std::string("off"),
+                 c.ontime_ms);
+    return c;
+  }();
+  return s_config;
+}
+}  // namespace
+
 bool OpenXRManager::WaitFrame()
 {
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
@@ -1381,10 +1421,41 @@ bool OpenXRManager::WaitFrame()
     const bool blocked_for_wake =
         waited_us > 2000 &&
         (m_clock.grid_offset_ns == 0 || m_wait_call_ns < m_clock.display_time - m_clock.grid_offset_ns);
-    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod || blocked_for_wake ||
-        grid_offset > m_clock.grid_offset_ns)
+    const bool period_changed = m_clock.period_ns != m_frame_state.predictedDisplayPeriod;
+    if (period_changed || blocked_for_wake || grid_offset > m_clock.grid_offset_ns)
       m_clock.grid_offset_ns = grid_offset;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
+
+    // The runtime's lead for the prediction: the largest of the last two 10 s windows (a late
+    // call returns at once with a shorter lead; the windows let a changed lead or a drifting
+    // XrTime clock through).
+    if (period_changed || m_lead_window_start_ns == 0 ||
+        m_clock.wake_ns - m_lead_window_start_ns > 10'000'000'000LL)
+    {
+      m_lead_window_max = {period_changed ? 0 : m_lead_window_max[1], 0};
+      m_lead_window_start_ns = m_clock.wake_ns;
+    }
+    m_lead_window_max[1] = std::max(m_lead_window_max[1], grid_offset);
+    const int64_t full_lead = std::max(m_lead_window_max[0], m_lead_window_max[1]);
+
+    const PredictConfig& predict = GetPredictConfig();
+    m_frame_extra_ns = 0;
+    if (m_predict_allowed && predict.mode == 1)
+    {
+      m_frame_extra_ns = predict.fixed_ns;
+    }
+    else if (m_predict_allowed && predict.mode == 2 && m_end_after_wait_avg_ms > 0 &&
+             m_clock.period_ns > 0)
+    {
+      const double period_ms = m_clock.period_ns / 1e6;
+      const double ready_ms = (full_lead - grid_offset) / 1e6 + m_end_after_wait_avg_ms;
+      if (ready_ms > predict.ontime_ms)
+      {
+        const int periods =
+            std::min(3, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / period_ms)));
+        m_frame_extra_ns = periods * m_clock.period_ns;
+      }
+    }
   }
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
                                           std::memory_order_release);
@@ -1521,7 +1592,7 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now().time_since_epoch())
                              .count();
-  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0;
+  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0;
   int64_t dd = 0;
   uint64_t n = 0;
   {
@@ -1536,14 +1607,21 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
     }
     if (m_clock.grid_offset_ns != 0)
       rg = (end_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
+    int64_t extra_ns = 0;
     if (pose_time != 0)
     {
-      pdt = (pose_time - display_time) / 1e6;
       for (const LocateNote& note : m_locate_notes)
       {
         if (note.display_time == pose_time && note.call_ns != 0)
+        {
           age = (end_ns - note.call_ns) / 1e6;
+          extra_ns = note.extra_ns;
+        }
       }
+      // Poses located past their display time on purpose count as located for it.
+      pose_time -= extra_ns;
+      pdt = (pose_time - display_time) / 1e6;
+      ex = extra_ns / 1e6;
     }
     if (period > 0 && m_prev_end_display_time != 0)
       dd = (display_time - m_prev_end_display_time + period / 2) / period;
@@ -1570,6 +1648,17 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
       }
       if (lead >= 0)
         t.lead_sum_ms += lead;
+      if (extra_ns != 0)
+      {
+        t.extra_sum_ms += ex;
+        t.extra_frames++;
+      }
+      if (r >= 0)
+      {
+        const double sample = std::min(r, 50.0);
+        m_end_after_wait_avg_ms =
+            m_end_after_wait_avg_ms <= 0 ? sample : m_end_after_wait_avg_ms * 0.9 + sample * 0.1;
+      }
     }
     n = ++m_frame_log_count;
   }
@@ -1577,8 +1666,8 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   {
     INFO_LOG_FMT(OPENXR,
                  "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
-                 "per={:.3f}{}",
-                 n, blk, lead, r, rg, age, pdt, dd, period_ms, has_layers ? "" : " empty");
+                 "per={:.3f} ex={:.2f}{}",
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, has_layers ? "" : " empty");
   }
 }
 
@@ -1633,15 +1722,15 @@ bool OpenXRManager::LocateViews()
   if (snapshot_time == 0)
     return false;
 
-  const XrTime display_time =
-      IsFrameThreadActive() ?
-          snapshot_time +
-              m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
-          snapshot_time;
-  return LocateViewsAt(display_time);
+  if (IsFrameThreadActive())
+  {
+    return LocateViewsAt(snapshot_time +
+                         m_predicted_display_period_snapshot.load(std::memory_order_acquire));
+  }
+  return LocateViewsAt(snapshot_time + m_frame_extra_ns, m_frame_extra_ns);
 }
 
-bool OpenXRManager::LocateViewsAt(XrTime display_time)
+bool OpenXRManager::LocateViewsAt(XrTime display_time, int64_t extra_ns)
 {
   if (display_time == 0)
     return false;
@@ -1657,9 +1746,11 @@ bool OpenXRManager::LocateViewsAt(XrTime display_time)
   {
     std::lock_guard<std::mutex> lock(m_clock_mutex);
     m_locate_notes[m_locate_note_next] = {
-        display_time, std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          std::chrono::steady_clock::now().time_since_epoch())
-                          .count()};
+        display_time,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count(),
+        extra_ns};
     m_locate_note_next = (m_locate_note_next + 1) % m_locate_notes.size();
   }
 

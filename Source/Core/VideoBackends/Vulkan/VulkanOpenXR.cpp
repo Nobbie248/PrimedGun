@@ -784,6 +784,8 @@ bool VulkanOpenXR::Initialize()
   if (const char* margin = std::getenv("PRIMEFRAME_PACE_MARGIN_MS"))
     m_pace_margin_ms = std::clamp(std::atof(margin), 0.0, 20.0);
   m_set_count = m_pacing == Pacing::Pipelined ? 2 : 1;
+  // The pipelined loop picks the refresh its poses are shown on itself.
+  VR::g_openxr->SetPredictExtraAllowed(m_pacing != Pacing::Pipelined);
   INFO_LOG_FMT(OPENXR,
                "PrimeFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={} "
                "repeats={} cycle_lazy={} early_release={} margin_ms={:.1f}",
@@ -2525,8 +2527,8 @@ void VulkanOpenXR::EmitStats()
                "gpu_wait_max_ms={:.2f} drain_avg_ms={:.2f} drain_max_ms={:.2f} gpu_ms={:.2f} "
                "xrwait_avg_ms={:.2f} xrwait_max_ms={:.2f} set_waits={} discards={} "
                "end_avg_ms={:.2f} end_max_ms={:.2f} end_late={} age_avg_ms={:.2f} "
-               "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} eye={}x{} game_fps={:.1f} "
-               "game_vps={:.1f}",
+               "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} extra_avg_ms={:.2f} extra_frames={} "
+               "eye={}x{} game_fps={:.1f} game_vps={:.1f}",
                m_pacing == Pacing::Pipelined ? (m_no_gpu_wait ? "pipelined-nowait" : "pipelined") :
                m_pacing == Pacing::Inline    ? (m_no_gpu_wait ? "inline-nowait" : "inline") :
                m_pacing == Pacing::Cycle     ? (m_no_gpu_wait ? "cycle-nowait" : "cycle") :
@@ -2539,7 +2541,8 @@ void VulkanOpenXR::EmitStats()
                m_stats.set_waits, m_stats.discards, timing.end_sum_ms / ended, timing.end_max_ms,
                timing.ended_late,
                timing.age_count ? timing.age_sum_ms / timing.age_count : 0.0, timing.age_max_ms,
-               timing.lead_sum_ms / ended, timing.pose_mismatch, m_eye_swapchains[0].width,
+               timing.lead_sum_ms / ended, timing.pose_mismatch, timing.extra_sum_ms / ended,
+               timing.extra_frames, m_eye_swapchains[0].width,
                m_eye_swapchains[0].height,
                g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
   m_stats = {};

@@ -181,8 +181,16 @@ public:
   // Call between BeginFrame and rendering.
   bool LocateViews();
   // xrLocateViews for an explicit display time (the pipelined pacing picks the refresh).
-  bool LocateViewsAt(XrTime display_time);
+  // extra_ns: how far past display_time the frame is predicted to be shown (the views are
+  // located for display_time; the frame itself still ends with display_time - extra_ns).
+  bool LocateViewsAt(XrTime display_time, int64_t extra_ns = 0);
   void RecordRenderedEyeViews();
+
+  // Prediction for the real display time (PRIMEFRAME_PREDICT_EXTRA_MS=<ms>|auto, frame/PACING.md):
+  // the head views and the controller poses of a frame are located that much after the
+  // predicted display time its xrWaitFrame returned; xrEndFrame keeps that display time. Only
+  // where the frame is located right after its own xrWaitFrame (cycle, drain, inline).
+  void SetPredictExtraAllowed(bool allowed) { m_predict_allowed = allowed; }
 
   // Cycle pacing (frame/PACING.md): the presenter arms the next frame's start at the end of a
   // present; the first pose read of the next game frame on that thread (a draw) then waits for
@@ -206,6 +214,8 @@ public:
     double age_sum_ms = 0, age_max_ms = 0;  // the poses' xrLocateViews call to end
     double lead_sum_ms = 0;                 // predicted display time minus xrWaitFrame return
     uint32_t age_count = 0;
+    double extra_sum_ms = 0;  // how far past their display time the poses were located
+    uint32_t extra_frames = 0;  // frames located past their display time
   };
   void TakeFrameTimingStats(FrameTimingStats* out);
 
@@ -477,6 +487,7 @@ private:
   {
     XrTime display_time = 0;
     int64_t call_ns = 0;
+    int64_t extra_ns = 0;  // located this far past the frame's display time
   };
   std::array<LocateNote, 16> m_locate_notes{};
   size_t m_locate_note_next = 0;
@@ -485,6 +496,16 @@ private:
 
   bool m_eye_views_valid = false;
   bool m_submitted_eye_views_valid = false;
+
+  // Prediction for the real display time (SetPredictExtraAllowed). The extra of the frame begun
+  // by the last xrWaitFrame; the runtime's lead (display time minus the steady clock at its
+  // wake-up) as the largest of two 10 s windows; the xrWaitFrame return to xrEndFrame time
+  // (average). Under m_clock_mutex, except m_frame_extra_ns (the thread calling xrWaitFrame).
+  bool m_predict_allowed = false;
+  int64_t m_frame_extra_ns = 0;
+  std::array<int64_t, 2> m_lead_window_max{};
+  int64_t m_lead_window_start_ns = 0;
+  double m_end_after_wait_avg_ms = 0;
 
   // "Home" head-center position. With stage space this remains the runtime's play-space origin;
   // local-space fallback records the first usable head-center position.

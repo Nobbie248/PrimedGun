@@ -60,6 +60,16 @@
 //   MOCK_XR_HEAD_DPS=<deg/s>  the head's peak turning speed (yaw, a sine; default 54, the old
 //                             +-17 degrees at 0.5 Hz); MOCK_XR_HEAD_DEG=<deg> its amplitude (17.2).
 //                             The head also rises 0.1 mm a second, so no two locates share a pose.
+//   MOCK_XR_HEAD_PROFILE=stops  instead of the sine: the head turns at MOCK_XR_HEAD_DPS (yaw) for
+//                             0.3 s, stops dead for 0.7 s, turns back, and so on; xrLocateViews then
+//                             predicts as a runtime does, from the head's pose and speed at the call
+//                             (constant speed), so a pose predicted past a stop overshoots it. The
+//                             summary line "prediction" gives the yaw error of each new eye set
+//                             against the head at the refresh it lands on (overshoot: past it in the
+//                             direction of the last turn; trail: behind it)
+//   MOCK_XR_LAND=throttled    with MOCK_XR_THROTTLE, a layer stack that misses its display time lands
+//                             a whole throttled period later, not on the next refresh (SteamVR on the
+//                             Frame at framesToThrottle 1: 2 vsyncs to photons on time, 4 when late)
 //   MOCK_XR_LEAD=<refreshes>  predictedDisplayTime this many refreshes after xrWaitFrame's wake-up
 //                             (default 3: SteamVR's lead on the Frame was 25 to 27 ms at 120 Hz)
 //   MOCK_XR_THROTTLE=<n>      SteamVR's framesToThrottle: xrWaitFrame hands out every (1 + n)th
@@ -68,6 +78,9 @@
 //                             after the wake-up of their display time (2.5; SteamVR on the Frame
 //                             showed 60 fps frames ended later than ~2.5 ms after it in a 1-3
 //                             cadence when they were not a whole refresh late)
+// The "latency" line also gives, per new eye set, the refresh it lands on minus the time its head
+// poses were located for (the prediction's shortfall) and the same for the controllers
+// (xrLocateSpace calls after the xrWaitFrame the frame began with; the poses themselves stay fixed).
 // Every xrEndFrame must carry the predictedDisplayTime of the xrWaitFrame its xrBeginFrame followed
 // (ERROR otherwise; summary line "end times").
 // The graphics API is chosen by the app's binding (xrmock_gfx.h).
@@ -154,6 +167,27 @@ static const char* gProfile = NULL;
 static int64_t gT0 = 0, gPeriod = 8333333, gEndAt = 0;
 static int64_t gLead = 3;  // MOCK_XR_LEAD (refreshes)
 static double gHeadAmp = 0.3, gHeadHz = 0.5;  // MOCK_XR_HEAD_DEG, MOCK_XR_HEAD_DPS
+static int gHeadStops = 0;                     // MOCK_XR_HEAD_PROFILE=stops
+static double gHeadRate = 0.0;                 // its turning speed, rad/s
+static int gLandThrottled = 0;                 // MOCK_XR_LAND=throttled
+// MOCK_XR_HEAD_PROFILE=stops: yaw and its rate at t seconds (display-time clock, from the session's start).
+static double stopsYaw(double t, double* rate) {
+    const double turn = 0.3;
+    long seg = (long)floor(t);
+    double ph = t - (double)seg, moved = ph < turn ? ph : turn;
+    int up = (seg % 2) == 0;
+    if (rate) *rate = ph < turn ? (up ? gHeadRate : -gHeadRate) : 0.0;
+    return up ? gHeadRate * moved : gHeadRate * (turn - moved);
+}
+// Controller locates (xrLocateSpace) of the frame: the last one after its xrWaitFrame.
+static XrTime gCtlTime = 0, gBegunCtlTime = 0;
+static int64_t gCtlCallNs = 0, gBegunCtlCallNs = 0;
+// Prediction shortfall of new eye sets (landing refresh minus the time located for), head and controllers,
+// and the yaw error with MOCK_XR_HEAD_PROFILE=stops.
+static double gShortSumMs = 0, gShortMinMs = 1e9, gShortMaxMs = -1e9, gCtlShortSumMs = 0, gCtlAgeSumMs = 0;
+static int gShortN = 0, gCtlN = 0, gShortHist[5];
+static double gYawAbsSum = 0, gYawOverMax = 0, gYawTrailMax = 0, gYawMovingAbsSum = 0;
+static int gYawN = 0, gYawMovingN = 0, gYawOverN = 0;
 // xrEndFrame against the frame's predicted display time (the one its xrBeginFrame followed).
 static XrTime gWaitPredicted = 0, gBegunPredicted = 0;
 static int gEndTimeMatch = 0, gEndTimeOff = 0;
@@ -291,7 +325,8 @@ static XrResult XRAPI_CALL mDestroyActionSet(XrActionSet a) { (void)a; return XR
 static XrResult XRAPI_CALL mLocateSpace(XrSpace sp, XrSpace base, XrTime t, XrSpaceLocation* loc) {
     (void)sp;
     (void)base;
-    (void)t;
+    gCtlTime = t;
+    gCtlCallNs = nowNs();
     loc->locationFlags = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT |
                          XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
     loc->pose.orientation = (XrQuaternionf){0, 0, 0, 1};
@@ -621,6 +656,20 @@ static XrResult XRAPI_CALL mEndSession(XrSession s) {
                 gLatN, gLatSumMs / gLatN, gLatMinMs, gLatMaxMs, gLatHist[0], gLatHist[1], gLatHist[2], gLatHist[3], gLatHist[4], gLatHist[5],
                 gWakeEndSumMs / gLatN, gWakeEndMaxMs, gOffWindow, gOnTimeMs);
     }
+    if (gShortN) {
+        fprintf(stderr,
+                "xrmock: prediction: %d new eye sets: the refresh they land on minus the time their head poses were located for avg %.2f ms "
+                "(min %.2f, max %.2f; <-1 ms %d, -1..1 %d, 1..9.3 %d, 9.3..17.7 %d, more %d); controllers (%d sets): located for %.2f ms before "
+                "the landing, the xrLocateSpace call %.2f ms before it\n",
+                gShortN, gShortSumMs / gShortN, gShortMinMs, gShortMaxMs, gShortHist[0], gShortHist[1], gShortHist[2], gShortHist[3], gShortHist[4],
+                gCtlN, gCtlN ? gCtlShortSumMs / gCtlN : 0.0, gCtlN ? gCtlAgeSumMs / gCtlN : 0.0);
+    }
+    if (gYawN) {
+        fprintf(stderr,
+                "xrmock: prediction yaw error at the landing refresh (stops profile, %d sets): avg |err| %.2f deg (while turning %.2f over %d sets), "
+                "overshoot max %.2f deg (%d sets past the head by more than 0.5 deg), trail max %.2f deg\n",
+                gYawN, gYawAbsSum / gYawN, gYawMovingN ? gYawMovingAbsSum / gYawMovingN : 0.0, gYawMovingN, gYawOverMax, gYawOverN, gYawTrailMax);
+    }
     if (gReleases) {
         fprintf(stderr, "xrmock: queue drain time at the releases: <0.5 ms %d, 0.5-1 %d, 1-2 %d, 2-4 %d, >4 %d\n", gWaitHist[0], gWaitHist[1], gWaitHist[2],
                 gWaitHist[3], gWaitHist[4]);
@@ -704,6 +753,8 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
     }
     fs->predictedDisplayTime = wake + gLead * gPeriod + gTimeOffset;
     gWaitPredicted = fs->predictedDisplayTime;
+    gCtlTime = 0;
+    gCtlCallNs = 0;
     fs->predictedDisplayPeriod = gPeriod * (1 + gThrottle);
     fs->shouldRender = XR_TRUE;
     gWaits += 1 + gThrottle;
@@ -728,6 +779,8 @@ static XrResult XRAPI_CALL mBeginFrame(XrSession s, const XrFrameBeginInfo* bi) 
     (void)s;
     (void)bi;
     gBegunPredicted = gWaitPredicted;
+    gBegunCtlTime = gCtlTime;
+    gBegunCtlCallNs = gCtlCallNs;
     trace("beginFrame");
     return XR_SUCCESS;
 }
@@ -805,6 +858,10 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
         int64_t earliest = nowNs() + latch - gT0;
         landSlot = (earliest + gPeriod - 1) / gPeriod;
         if (landSlot < wantSlot) landSlot = wantSlot;
+        if (gLandThrottled && gThrottle > 0 && landSlot > wantSlot) {
+            int64_t step = 1 + gThrottle;
+            landSlot = wantSlot + (landSlot - wantSlot + step - 1) / step * step;
+        }
         if (landSlot > wantSlot) {
             gLateLayers++;
             trace("late: ended for refresh %lld, lands on %lld", (long long)wantSlot, (long long)landSlot);
@@ -835,6 +892,37 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                 gLatN++;
                 int b = lat < 20 ? 0 : lat < 30 ? 1 : lat < 40 ? 2 : lat < 50 ? 3 : lat < 60 ? 4 : 5;
                 gLatHist[b]++;
+                const int64_t landNs = gT0 + landSlot * gPeriod;
+                double shortMs = (double)(landNs - ((int64_t)locateTime(freshLocated) - gTimeOffset)) / 1e6;
+                gShortSumMs += shortMs;
+                if (shortMs < gShortMinMs) gShortMinMs = shortMs;
+                if (shortMs > gShortMaxMs) gShortMaxMs = shortMs;
+                gShortHist[shortMs < -1 ? 0 : shortMs < 1 ? 1 : shortMs < 9.3 ? 2 : shortMs < 17.7 ? 3 : 4]++;
+                gShortN++;
+                if (gBegunCtlTime) {
+                    gCtlShortSumMs += (double)(landNs - ((int64_t)gBegunCtlTime - gTimeOffset)) / 1e6;
+                    gCtlAgeSumMs += (double)(landNs - gBegunCtlCallNs) / 1e6;
+                    gCtlN++;
+                }
+                if (gHeadStops) {
+                    const XrQuaternionf* q = &((const XrCompositionLayerProjection*)ei->layers[0])->views[0].pose.orientation;
+                    double shown = 2.0 * atan2(q->y, q->w);
+                    double callRate = 0.0;
+                    stopsYaw((double)(locateCallNs(freshLocated) - gT0) / 1e9, &callRate);
+                    double moving = 0.0;
+                    double truth = stopsYaw((double)(landNs - gT0) / 1e9, &moving);
+                    double err = (shown - truth) * 180.0 / 3.14159265;
+                    double dir = callRate > 0 ? 1.0 : callRate < 0 ? -1.0 : 0.0;
+                    gYawAbsSum += fabs(err);
+                    gYawN++;
+                    if (moving != 0.0) {
+                        gYawMovingAbsSum += fabs(err);
+                        gYawMovingN++;
+                    }
+                    if (dir != 0.0 && err * dir > gYawOverMax) gYawOverMax = err * dir;
+                    if (dir != 0.0 && err * dir > 0.5) gYawOverN++;
+                    if (dir != 0.0 && -err * dir > gYawTrailMax) gYawTrailMax = -err * dir;
+                }
                 double wakeEnd = (double)(nowNs() - ((int64_t)ei->displayTime - gTimeOffset - gLead * gPeriod)) / 1e6;
                 gWakeEndSumMs += wakeEnd;
                 if (wakeEnd > gWakeEndMaxMs) gWakeEndMaxMs = wakeEnd;
@@ -865,6 +953,11 @@ static XrResult XRAPI_CALL mLocateViews(XrSession s, const XrViewLocateInfo* li,
     *count = 2;
     double t = (double)(li->displayTime - gTimeOffset - gT0) / 1e9;
     float yaw = (float)(gHeadAmp * sin(t * 2.0 * 3.14159265 * gHeadHz));
+    if (gHeadStops) {
+        // Predicted as a runtime does: from the pose and speed at the call, at constant speed.
+        double now = (double)(nowNs() - gT0) / 1e9, rate = 0.0;
+        yaw = (float)(stopsYaw(now, &rate) + rate * (t - now));
+    }
     float rise = (float)(t * 1e-4);  // 0.1 mm a second: the sway repeats, the pose never does
     float c = cosf(yaw), sn = sinf(yaw);
     for (uint32_t e = 0; e < 2 && e < cap; e++) {
@@ -1118,6 +1211,11 @@ static void init(void) {
     if (getenv("MOCK_XR_HEAD_DEG")) gHeadAmp = atof(getenv("MOCK_XR_HEAD_DEG")) * 3.14159265 / 180.0;
     if (getenv("MOCK_XR_HEAD_DPS") && gHeadAmp > 0.0)
         gHeadHz = atof(getenv("MOCK_XR_HEAD_DPS")) * 3.14159265 / 180.0 / (2.0 * 3.14159265 * gHeadAmp);
+    if (getenv("MOCK_XR_HEAD_PROFILE") && !strcmp(getenv("MOCK_XR_HEAD_PROFILE"), "stops")) {
+        gHeadStops = 1;
+        gHeadRate = (getenv("MOCK_XR_HEAD_DPS") ? atof(getenv("MOCK_XR_HEAD_DPS")) : 54.0) * 3.14159265 / 180.0;
+    }
+    gLandThrottled = getenv("MOCK_XR_LAND") && !strcmp(getenv("MOCK_XR_LAND"), "throttled");
     gProfile = getenv("MOCK_XR_PROFILE");
     if (gProfile && !*gProfile) gProfile = NULL;
     const char* list = getenv("MOCK_XR_EXTENSIONS");
