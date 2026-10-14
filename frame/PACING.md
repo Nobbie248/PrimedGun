@@ -925,7 +925,37 @@ did), the heavy room 4.00 with now and then an on-time frame among them (same re
 
 ### Results
 
-RESULTS_PLACEHOLDER
+Frame-like mock (`mockrun.sh --frame`: `MOCK_XR_EARLY=3`, throttled, lead 4, latch 13.8, late frames a
+period later, XrTime on CLOCK_MONOTONIC_RAW), owner's settings (IR 3, eye 2160, sysmem, VI at 60,
+prediction auto, `--stamp --head 150`), the game's phase set at 10 s (s01) or at 100 s, the end of the
+flight (s02). Holds: refreshes each new image stayed on screen, summed over the mock's 10 s windows after
+settling (2 is the cadence; 4 an image shown twice; never shown: a frame replaced). Events: frames that
+moved the landing (`plan_breaks`, `plan_catchups`, `plan_drops`) after settling.
+
+| Run | Game fps avg (lowest second) | Settled | After settling: held 2 / held 4 / never shown | Events after settling | Locate to landing avg ms | Stamps exact, end times right, errors, releases unfinished |
+| --- | --- | --- | --- | --- | --- | --- |
+| lane L's build, `ASAP_WAIT=0`, s01 phase 14 ms, 90 s | 59.2 | never | 181 / 2309 / 2309 (10 to 90 s) | end mode late from 7 s, `slot_ms` 33.33 | | 10704 of 10706 (2 from the grid move, since fixed), all, 0, 0 |
+| lane L's build, `ASAP_WAIT=0`, s02 phase 0.5 ms, 60 s after the flight | 59.9 | never | 3332 / 134 / 131 | 8 late-run ends in the session | 42.7 | all, all, 0, 0 |
+| s01 phase 14 ms, 180 s | 60.0 (59.0) | 28 s (1 break, 2 catch-ups) | 10801 / 0 / 0 (30 to 210 s) | none | 41.3 | 25124 of 25124, 12564 of 12564, 0, 0 of 25127 |
+| s02 phase 0.5 ms, 180 s after the flight | 59.9 (53.8) | at the end of the flight | 10792 / 3 / 1 (the last 100 s: 6000 / 0 / 0) | 5, all in seconds the game ran under 60 fps (53.8 to 59.4) | 52.5 | 33488 of 33488, 16746 of 16746, 0, 0 of 33491 |
+| s02 phase 8 ms, 60 s after the flight | 60.0 (56.5) | at the end of the flight | 3596 / 1 / 1 | 2, in the 56.5 fps second | 49.6 | 19106 of 19106, 9555 of 9555, 0, 0 of 19109 |
+| s01 phase 3 ms, 60 s | 60.0 (59.0) | 25 s | 3600 / 0 / 0 | none | 47.9 | 10726 of 10726, 5365 of 5365, 0, 0 of 10729 |
+| s01 phase 8 ms, 60 s (the build before the last catch-up rule) | 60.0 (59.1) | 30 s | 3600 / 0 / 0 | none | 43.8 | all, all, 0, 0 |
+| s02 soak, 300 s after the flight | 59.2 (47.2) | at the end of the flight | 17929 / 34 / 1 | 52: 48 in 12 s when the game fell to 47 to 57 fps (another project's mock run on the machine), 4 at 59 to 60 fps 22 s apart (the game a little under 60 frames a second: an image has to repeat) | 49.1 | 47490 of 47490, 23747 of 23747, 0, 0 of 47493 |
+| s01 `PRIMEFRAME_CYCLE_END=asap` (A/B, the build before the hold changes), 60 s | 59.9 (57.5) | | 4196 / 0 / 0 | | 33.2 | all, all, 0, 0 |
+| s02 `--nowait`, 30 s | | | | | | 7126 of 7126 releases changed after release: FAIL, as it must |
+
+- The light room settles on its shortest landing for the game's phase within 30 s of the load and stays
+  there (one frame on time, the next handed the same refresh again and landing a refresh later, or all on
+  time): every image is shown 33.3 ms plus the time from the call to the next wake-up after its poses were
+  located (about 40 ms at the phase the mock drifted to). asap (each call blocked until the wake-up) gives
+  33.2 ms in the mock, but its waits cost frames on the Frame (session L).
+- The heavy room lands every frame a period late (about 50 ms), constant; what moves its landing is the
+  game's own late frames, one image shown twice each.
+- No 1-3, no alternation between landings, no mode switches, no catch-up after settling; `slot_ms` 16.67 in
+  every second of every run. The mock's game phase drifted (from 14 to about 9.5 ms in a minute of s01);
+  on the Frame it held 13 to 15 ms for the whole light launch of session M.
+
 
 ### Not known until the headset
 
