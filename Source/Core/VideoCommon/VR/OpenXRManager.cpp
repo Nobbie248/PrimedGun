@@ -1366,6 +1366,10 @@ bool OpenXRManager::WaitFrame()
     m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           wait_end.time_since_epoch())
                           .count();
+    const int64_t grid_offset = m_clock.display_time - m_clock.wake_ns;
+    if (m_clock.period_ns != m_frame_state.predictedDisplayPeriod ||
+        grid_offset > m_clock.grid_offset_ns)
+      m_clock.grid_offset_ns = grid_offset;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
   }
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,

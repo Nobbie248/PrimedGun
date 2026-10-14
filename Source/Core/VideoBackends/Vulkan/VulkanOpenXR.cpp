@@ -760,13 +760,15 @@ bool VulkanOpenXR::Initialize()
     m_pacing = Pacing::Drain;
   m_no_gpu_wait = EnvIs("PRIMEFRAME_NO_GPU_WAIT", "1");
   m_skip_window_present = !EnvIs("PRIMEFRAME_WINDOW_PRESENT", "1");
+  m_repeat_layers = EnvIs("PRIMEFRAME_REPEATS", "1");
   m_set_count = m_pacing == Pacing::Pipelined ? 2 : 1;
   INFO_LOG_FMT(OPENXR,
-               "PrimeFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={}",
+               "PrimeFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={} "
+               "repeats={}",
                m_pacing == Pacing::Pipelined ? "pipelined" :
                m_pacing == Pacing::Inline    ? "inline" :
                                                "drain",
-               m_set_count, m_no_gpu_wait, !m_skip_window_present);
+               m_set_count, m_no_gpu_wait, !m_skip_window_present, m_repeat_layers);
 #endif
 
   INFO_LOG_FMT(VIDEO, "OpenXR Vulkan: Creating swapchains...");
@@ -2711,8 +2713,34 @@ void VulkanOpenXR::PacerLoop()
       continue;
     }
 
-    // Until shortly before the next refresh starts: wait for the oldest unfinished set (its
-    // GPU time measures the tail the next targets allow for).
+    // Unless PRIMEFRAME_REPEATS=1, a frame is ended only on a refresh that shows a new eye set,
+    // and that is the refresh its poses were located for: every layer goes out with the display
+    // time of its poses. On the refreshes in between the runtime shows the last frame again
+    // itself, reprojected from the pose and the display time it was ended with. (Ending a repeat
+    // on the next refresh with the previous refresh's poses gave SteamVR, at 60 fps, every second
+    // layer with poses a refresh older than its display time.)
+    int64_t due_wake = 0;
+    if (!m_repeat_layers && have_current)
+    {
+      XrTime due = 0;
+      {
+        std::unique_lock<std::mutex> lock(m_pacer_mutex);
+        // Without a new set for 100 ms (loading, paused, not rendering) a frame repeats the last.
+        m_pacer_cv.wait_for(lock, std::chrono::milliseconds(100),
+                            [&] { return m_pacer_exit.load() || !m_pending.empty(); });
+        if (!m_pending.empty())
+          due = m_pending.front().target;
+      }
+      if (m_pacer_exit.load())
+        break;
+      const auto clock = VR::g_openxr->GetFrameClock();
+      if (due != 0 && clock.period_ns > 0)
+        due_wake = due - clock.grid_offset_ns;
+    }
+
+    // Until shortly before the next refresh starts (pipelined without repeats: the refresh the
+    // oldest set is due on): wait for the oldest unfinished set (its GPU time measures the tail
+    // the next targets allow for).
     {
       VkFence fence = VK_NULL_HANDLE;
       int64_t submit_ns = 0;
@@ -2731,8 +2759,8 @@ void VulkanOpenXR::PacerLoop()
         }
       }
       const auto clock = VR::g_openxr->GetFrameClock();
-      const int64_t timeout =
-          clock.period_ns > 0 ? clock.wake_ns + clock.period_ns - 500'000 - SteadyNs() : 0;
+      const int64_t next_wake = due_wake != 0 ? due_wake : clock.wake_ns + clock.period_ns;
+      const int64_t timeout = clock.period_ns > 0 ? next_wake - 500'000 - SteadyNs() : 0;
       if (fence != VK_NULL_HANDLE && timeout > 0 &&
           vkWaitForFences(device, 1, &fence, VK_TRUE, static_cast<uint64_t>(timeout)) ==
               VK_SUCCESS)
@@ -2747,6 +2775,19 @@ void VulkanOpenXR::PacerLoop()
             item.complete = true;
         }
       }
+    }
+
+    if (due_wake != 0)
+    {
+      // An xrWaitFrame called after refreshes were skipped returns at once with the refresh that
+      // is running (SteamVR on the Frame; the mock's MOCK_XR_SKIP=late): call it just after the
+      // due refresh started.
+      // As with repeats, a set is shown early when the game waits for a free one.
+      const auto deadline = std::chrono::steady_clock::time_point(
+          std::chrono::nanoseconds(due_wake + 250'000));
+      std::unique_lock<std::mutex> lock(m_pacer_mutex);
+      m_pacer_cv.wait_until(lock, deadline,
+                            [&] { return m_pacer_exit.load() || m_video_waiting_for_set; });
     }
 
     if (!VR::g_openxr->WaitFrame())
@@ -2886,7 +2927,10 @@ bool VulkanOpenXR::LocateNextFramePose()
   const double interval_ms = m_interval_ema_ms > 0.0 ? m_interval_ema_ms : 16.7;
   const int64_t ready =
       now + static_cast<int64_t>((span_ms + m_gpu_tail_ema_ms.load() + 1.0) * 1e6);
-  int64_t slots = (ready - clock.wake_ns + period - 1) / period;
+  // The runtime's wake-up for clock.display_time (the last xrWaitFrame may have returned late).
+  const int64_t grid_wake =
+      clock.grid_offset_ns != 0 ? clock.display_time - clock.grid_offset_ns : clock.wake_ns;
+  int64_t slots = (ready - grid_wake + period - 1) / period;
   if (slots < 1)
     slots = 1;
   const XrTime t_ready = clock.display_time + slots * period;

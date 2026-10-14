@@ -264,6 +264,8 @@ private:
   Pacing m_pacing = Pacing::Pipelined;
   bool m_no_gpu_wait = false;
   bool m_skip_window_present = true;
+  // PRIMEFRAME_REPEATS=1: end a frame every refresh, repeating the last eye set between new ones.
+  bool m_repeat_layers = false;
 
   // Video thread side of the pipelined pacing.
   uint32_t m_next_set = 0;

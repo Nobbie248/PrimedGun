@@ -184,6 +184,9 @@ public:
     XrTime display_time = 0;
     int64_t wake_ns = 0;
     int64_t period_ns = 0;
+    // display_time minus the steady clock at which xrWaitFrame returns on time for it: the
+    // largest seen (a call made late returns at once, later than the runtime's wake-up point).
+    int64_t grid_offset_ns = 0;
   };
   FrameClock GetFrameClock() const
   {
