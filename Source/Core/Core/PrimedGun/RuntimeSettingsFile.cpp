@@ -3,6 +3,7 @@
 
 #include "Core/PrimedGun/RuntimeSettingsFile.h"
 
+#include <charconv>
 #include <mutex>
 #include <utility>
 
@@ -80,6 +81,14 @@ constexpr const char* SECTION = "primedgun";
   B(snap_turn_enabled)                                                                             \
   I(snap_turn_degrees)
 
+// Shortest text that reads back as the same float ("1", "0.08", "1.15"), like the Qt frontend writes.
+std::string FloatText(float value)
+{
+  char buffer[32];
+  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  return std::string(buffer, result.ptr);
+}
+
 std::mutex s_persist_mutex;
 std::string s_persist_path;
 std::function<void()> s_exit_game;
@@ -120,10 +129,12 @@ bool SaveRuntimeSettingsFile(const std::string& path, const RuntimeSettings& set
   ini.Load(path);  // keep unrelated sections and keys; a missing file is fine
   Common::IniFile::Section* section = ini.GetOrCreateSection(SECTION);
 #define PG_SAVE_B(name) section->Set(#name, std::string(settings.name ? "true" : "false"));
-#define PG_SAVE(name) section->Set(#name, settings.name);
-  PRIMEDGUN_RS_KEYS(PG_SAVE_B, PG_SAVE, PG_SAVE)
+#define PG_SAVE_F(name) section->Set(#name, FloatText(settings.name));
+#define PG_SAVE_I(name) section->Set(#name, settings.name);
+  PRIMEDGUN_RS_KEYS(PG_SAVE_B, PG_SAVE_F, PG_SAVE_I)
 #undef PG_SAVE_B
-#undef PG_SAVE
+#undef PG_SAVE_F
+#undef PG_SAVE_I
   return ini.Save(path);
 }
 
