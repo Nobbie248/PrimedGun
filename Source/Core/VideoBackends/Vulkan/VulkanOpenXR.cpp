@@ -2758,6 +2758,7 @@ bool VulkanOpenXR::SubmitFrameCycle()
   item.target = VR::g_openxr->GetPredictedDisplayTime();
   item.should_render = VR::g_openxr->ShouldRender();
   item.plan_slots = VR::g_openxr->GetFrameClock().plan_slots;
+  item.wait_seq = VR::g_openxr->GetFrameClock().wait_seq;
   {
     const int64_t cpu = ThreadCpuNs();
     item.wake_ns = VR::g_openxr->GetFrameClock().wake_ns;
@@ -2957,7 +2958,8 @@ void VulkanOpenXR::CycleLoop()
 // each frame ends as soon as its GPU work is done (PRIMEFRAME_CYCLE_EARLIEST_MS: not before that
 // long after the wake-up; 0 by default). late (rooms whose video thread has no time to spare):
 // the overlap; SteamVR hands the next refresh out at once while a frame is pending, often before
-// its wake-up (on time for it, no hold); a frame OpenXRManager planned to land late (it will not
+// its wake-up (on time for it; such a frame is kept pending until the next frame's xrWaitFrame
+// returned, at most until 1 ms inside the limit); a frame OpenXRManager planned to land late (it will not
 // make the limit, or it was handed the refresh the frame before lands on) is held until 2.5 ms
 // past the limit, so that all of them are shown a whole refresh later, with their poses located
 // for that refresh. auto: asap -> late when the 95th percentile of the last 120 finish times
@@ -3046,6 +3048,17 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
       m_end_ready_count = 0;
       VR::g_openxr->SetCycleEndLate(mode == 1);
     }
+  }
+  if (m_end_mode == 1 && item.plan_slots == 0)
+  {
+    // Late mode, a frame expected on time: keep it pending until the next frame's xrWaitFrame
+    // returned (SteamVR then hands that frame the next refresh at once, early, and it is on time
+    // too; ended before it, the next call would block for the wake-up and start the frame too
+    // late), but no later than 1 ms inside the on-time limit.
+    const int64_t start = SteadyNs();
+    VR::g_openxr->WaitForWaitAfter(item.wait_seq,
+                                   wake_ns + static_cast<int64_t>((m_end_ontime_ms - 1.0) * 1e6));
+    return SteadyNs() - start;
   }
   double end_ms = m_end_earliest_ms;
   if (item.plan_slots > 0)

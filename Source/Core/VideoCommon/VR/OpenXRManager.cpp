@@ -1503,6 +1503,18 @@ void OpenXRManager::GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_
   *slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
 }
 
+bool OpenXRManager::WaitForWaitAfter(uint64_t seq, int64_t deadline_ns)
+{
+  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  std::unique_lock<std::mutex> lock(m_wait_seq_mutex);
+  if (m_wait_seq > seq || deadline_ns <= now)
+    return m_wait_seq > seq;
+  return m_wait_seq_cv.wait_for(lock, std::chrono::nanoseconds(deadline_ns - now),
+                                [&] { return m_wait_seq > seq; });
+}
+
 bool OpenXRManager::WantsLeadCalibration() const
 {
   std::lock_guard<std::mutex> lock(m_clock_mutex);
@@ -1626,7 +1638,12 @@ bool OpenXRManager::WaitFrame()
     m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
                                       m_clock.early, m_clock.plan_slots};
     m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
+    {
+      std::lock_guard<std::mutex> seq_lock(m_wait_seq_mutex);
+      m_clock.wait_seq = ++m_wait_seq;
+    }
   }
+  m_wait_seq_cv.notify_all();
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
                                           std::memory_order_release);
   m_predicted_display_period_snapshot.store(m_frame_state.predictedDisplayPeriod,

@@ -212,6 +212,7 @@ private:
     XrTime pose_time = 0;       // the display time its poses were located for
     bool should_render = true;  // cycle: the frame's xrWaitFrame said so
     int plan_slots = 0;  // cycle: refreshes it is planned to land late (held past the on-time limit)
+    uint64_t wait_seq = 0;  // cycle: its xrWaitFrame's number (OpenXRManager::FrameClock)
     // Cycle timing (XRC line): the frame's xrWaitFrame return, how long the video thread waited
     // for the last frame's end at this frame's start, its CPU and wall time since the last submit.
     int64_t wake_ns = 0;

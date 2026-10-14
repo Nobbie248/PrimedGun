@@ -248,6 +248,7 @@ public:
     // SetCycleEndLate: held past the on-time limit, its poses located for the landing refresh).
     bool early = false;
     int plan_slots = 0;
+    uint64_t wait_seq = 0;  // xrWaitFrame calls returned so far, this one included
   };
   FrameClock GetFrameClock() const
   {
@@ -272,6 +273,10 @@ public:
   // xrWaitFrame blocks, spends one empty frame so that the next one does (once every 2 s, at
   // most five times).
   bool WantsLeadCalibration() const;
+  // Cycle end late, releaser thread: wait until an xrWaitFrame after the seq-th has returned (so
+  // the next frame was handed its refresh while this one was pending) or the steady clock passes
+  // deadline_ns. Returns whether it returned.
+  bool WaitForWaitAfter(uint64_t seq, int64_t deadline_ns);
 
   // ---- Accessors ----
 
@@ -435,6 +440,9 @@ private:
   mutable std::mutex m_clock_mutex;
   FrameClock m_clock;
   std::atomic<uint32_t> m_wait_count{0};
+  uint64_t m_wait_seq = 0;  // under m_wait_seq_mutex
+  std::mutex m_wait_seq_mutex;
+  std::condition_variable m_wait_seq_cv;
   std::atomic<uint64_t> m_wait_total_us{0};
   std::atomic<uint64_t> m_wait_max_us{0};
   std::atomic<XrTime> m_predicted_display_time_snapshot{0};
