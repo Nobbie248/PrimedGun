@@ -1658,8 +1658,11 @@ bool OpenXRManager::WaitFrame()
       // past it would stall the video thread: the hold may not reach it.
       const double next_present_ms =
           after_wake_ms + slot_ms + (n >= 10 ? pct(m_submit_ring, 0.1) : 0.0) - 1.0;
+      // The releaser holds such a frame to 2.5 ms past the limit of the refresh before its landing
+      // and ends the hold early when the next frame's present comes; past that limit it still
+      // lands right.
       const auto hold_end_ms = [&](int kk) {
-        return kk <= 0 ? 0.0 : (kk - 1) * slot_ms + predict.ontime_ms + 2.5;
+        return kk <= 0 ? 0.0 : (kk - 1) * slot_ms + predict.ontime_ms + 0.5;
       };
       const double ready95 = after_wake_ms + fin95;
       const int k_min =
