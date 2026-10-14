@@ -52,3 +52,19 @@ not CLOCK_MONOTONIC), the recommended eye size of the Frame (1728x1728, `MOCK_XR
 focus blips (`MOCK_XR_FOCUS_BLIP=<ms>[@<s>]`), a current interaction profile
 (`MOCK_XR_PROFILE`), and a second summary line counting frames that showed newly released eyes
 (and for which display time their one locate was made) apart from repeated layers.
+
+PrimeFrame additions (headset session H1, doubled images when turning the head):
+
+- `MOCK_XR_STAMP=1` (mockrun `--stamp`, which also sets the game's `PRIMEFRAME_FRAME_STAMP=1`): the
+  game writes into a 256x20 block of each eye image the oldest and the newest locate (the display
+  time it was made for) whose poses the draws of the XFB shown used; the mock copies the block out
+  at every release of a colour-attachment swapchain and, for every projection layer, compares both
+  with the locate the layer's poses came from ("xrmock: stamps"; any image drawn with another
+  locate, or with several, is an ERROR). With `ImmediateXFBEnable = False` it fails as it must
+  (the XFB shown is a game frame older than the pose submitted with it).
+- `MOCK_XR_HEAD_DPS=<deg/s>` and `MOCK_XR_HEAD_DEG=<deg>`: the head's peak yaw speed and amplitude
+  (default 54 deg/s, 17.2 deg); the head also rises 0.1 mm a second so no two locates share a pose.
+- `MOCK_XR_LEAD=<refreshes>`: predictedDisplayTime this many refreshes after the wake-up (default 3,
+  SteamVR's 25 to 27 ms on the Frame; it was 2).
+- "xrmock: end times": every xrEndFrame against the predicted display time of the xrWaitFrame its
+  xrBeginFrame followed (an ERROR when they differ).

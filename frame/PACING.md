@@ -42,7 +42,10 @@ advances Dolphin's frame resources instead.
   `xrWaitFrame` returns it waits for the set's fence (normally already signalled; at most half a refresh,
   otherwise it repeats the last set and shows the new one a refresh later), releases the images, and ends
   the projection layer with exactly the poses the set was rendered with (both eyes from the one
-  `xrLocateViews` of that game frame). Refreshes without a new set repeat the last layer. The pose target is
+  `xrLocateViews` of that game frame). On the refreshes between new sets the pacing thread ends no frame
+  (it calls `xrWaitFrame` only for the refresh the next set is due on, just after that refresh started) and
+  the runtime shows the last frame again itself; `PRIMEFRAME_REPEATS=1` is the first headset build's way,
+  a frame every refresh repeating the last layer (see "Headset session H1" below). The pose target is
   the first refresh the next frame can make (now + the game's pose-to-submit time + the GPU tail + 1 ms),
   kept a fixed number of refreshes after the previous target (2 for 60 fps at 120 Hz) when that is not
   earlier: a steady 2:2 cadence.
@@ -157,6 +160,58 @@ without margin. Not a default; wiring it is a separate job.
   from about 12 ms to 18.7 ms after two minutes and stayed there (the GPU was then about 99 % busy): either the
   scene in the save state changes or the GPU clock came down (not told apart; the GPU's devfreq was not
   logged). Worth a look in lane B.
+
+## Headset session H1: doubled images when turning the head
+
+The owner, first session (pipelined, IR 3, eye 2160, sysmem, 120 Hz): "bad ghosting when moving my head,
+like every image is doubled or tripled"; head still was fine. The old Podman build (inline, a frame per
+game frame) never doubled. Checked in this order:
+
+1. **Image and pose from different locates: no.** New exact check (`mockrun.sh --stamp`, xrmock's
+   `MOCK_XR_STAMP`): the draws note the locate their geometry shader constants came from, every XFB copy keeps
+   the oldest and newest of its draws, and the present writes those of the XFB it shows into a corner block of
+   each eye image (`PRIMEFRAME_FRAME_STAMP=1`); the mock compares both with the locate of the poses the layer
+   was submitted with. With the owner's settings (`LockHeadPosePerFrame = False`, `ImmediateXFBEnable = True`,
+   IR 3, eye 2160, sysmem) and the head turning at 150 deg/s, the first build was already exact: s01 19064 of
+   19064 eye images, s02 18902 of 19012 (110 from the load, before any XFB was stamped). Immediate XFB
+   presents each XFB at its copy, in FIFO order, so no draw of the next frame runs before the present. The
+   check does catch it: with `ImmediateXFBEnable = False` 17442 of 19076 images showed an XFB drawn a game frame
+   before the pose submitted with it and 1556 mixed two locates (mockrun FAILS). Keep immediate XFB on.
+2. **Display time: yes, every second layer.** At 60 fps on 120 Hz the pacing thread ended a frame every
+   refresh and, on the refresh between two new sets, repeated the last layer with the poses located for the
+   refresh before: 4790 of 9538 layers (s01) went out with a display time one refresh after their poses
+   (xrEndFrame always carried its own refresh's predicted time, as SteamVR expects). The Podman build ended
+   each frame with the display time its pose was located for, and SteamVR repeated the frame itself.
+3. **Cadence and head-locked content.** PrimedGun draws the helmet HUD into the projection layer with the
+   head's unrotated projection (geometry shader paths `cstereo.w` -2 and -3), so whenever a frame is shown
+   twice the compositor turns it with the world: the HUD moves on the second refresh. That held for the
+   Podman build too (60 frames a second either way), so it does not explain the difference; it is the
+   first suspect if the HUD alone still doubles.
+
+The change: a frame is ended only for a refresh that shows a new eye set, and that refresh is the one its
+poses were located for. The runtime's wake-up grid is kept as the largest "display time minus the time
+`xrWaitFrame` returned" (a late call returns later than the wake-up, never earlier), so a late call made just
+after the due refresh started returns that refresh. Mock, owner's settings, head at 150 deg/s:
+
+| Run (60 s) | Layers/s | Layers at their poses' display time | 2-refresh holds | Stamps exact | Errors / unfinished releases |
+| --- | --- | --- | --- | --- | --- |
+| s01, first build | 121.3 | 4728 of 9538 (49.6 %) | 4712 of 4740 | 19064 of 19064 | 0 / 0 |
+| s01, now | 61.0 | 4727 of 4755 (99.4 %) | 4717 of 4746 | 9510 of 9510 | 0 / 0 |
+| s02, first build | 122.2 | 4674 of 9506 (49.2 %) | 4597 of 4689 | 18902 of 19012 | 0 / 0 |
+| s02, now | 61.1 | 4716 of 4755 (99.2 %) | 4691 of 4745 | 9510 of 9510 | 0 / 0 |
+
+Also with the owner's settings and the head at 150 deg/s: s02 soak, 300 s with the heavy room: 0 errors,
+0 of 38245 releases unfinished, stamps 38266 of 38266, 19083 of 19133 layers at their poses' display time,
+2-refresh holds 18916 of 19120, game 59.9 fps steady (minimum 56), no stall. `PRIMEFRAME_PACING=drain`
+(s01, 60 s): every layer at its poses' display time but 4403 of 4753 landing late, holds 2: 4061, 1: 337,
+3: 352; s02 drain held only 40 fps (the opening at IR 3). `PRIMEFRAME_NO_GPU_WAIT=1` still fails the
+release check (5894 of 5894 changed after release).
+
+`PRIMEFRAME_REPEATS=1` restores the first build's every-refresh frames for an A/B. On SteamVR, SteamVR's own
+timing will now count about half the refreshes as reused app frames: that is expected. XRSTATS `layers`
+reads about 60 and `late` should stay near 0; `late` near 60 a second would mean SteamVR's late
+`xrWaitFrame` does not return the running refresh as assumed (each set then goes out a refresh after its
+poses again).
 
 ## Default
 
