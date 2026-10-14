@@ -441,6 +441,8 @@ private:
   FrameClock m_clock;
   std::atomic<uint32_t> m_wait_count{0};
   uint64_t m_wait_seq = 0;  // under m_wait_seq_mutex
+  std::atomic<uint64_t> m_begun_frames{0};
+  std::atomic<uint64_t> m_ended_frames{0};
   std::mutex m_wait_seq_mutex;
   std::condition_variable m_wait_seq_cv;
   std::atomic<uint64_t> m_wait_total_us{0};

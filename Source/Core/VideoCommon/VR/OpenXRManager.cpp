@@ -1431,7 +1431,8 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   m_xr_offset_ns = m_xr_clock == 1 ? raw_offset : 0;
   const int64_t lead = m_clock.display_time - (m_clock.wake_ns + m_xr_offset_ns);
 
-  // A call that blocked (over 2 ms; returning at once still takes a fraction of a ms) returned at
+  // A call that blocked (over 2 ms; returning at once still takes a fraction of a ms; WaitFrame
+  // passes 0 for a call made while a frame was pending, which may return early) returned at
   // the runtime's wake-up or a little after it (the thread is woken late now and then): the
   // largest lead of such calls is the runtime's. A longer one is taken at once; a shorter one
   // (by over 1 ms) only when every blocked call of a 10 s window (at least three) was.
@@ -1546,6 +1547,9 @@ bool OpenXRManager::WaitFrame()
 {
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
   m_frame_state = {XR_TYPE_FRAME_STATE};
+  // A frame begun and not ended: SteamVR may hand out a refresh at once, before its wake-up.
+  const bool pending_at_call = m_begun_frames.load(std::memory_order_acquire) >
+                               m_ended_frames.load(std::memory_order_acquire);
   const auto wait_start = std::chrono::steady_clock::now();
   XR_CHECK(xrWaitFrame(m_session, &wait_info, &m_frame_state));
   const auto wait_end = std::chrono::steady_clock::now();
@@ -1567,7 +1571,7 @@ bool OpenXRManager::WaitFrame()
     m_clock.display_time = m_frame_state.predictedDisplayTime;
     m_clock.wake_ns = m_wait_return_ns;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
-    UpdateWakeGrid(waited_us);
+    UpdateWakeGrid(pending_at_call ? 0 : waited_us);
 
     const PredictConfig& predict = GetPredictConfig();
     const double slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
@@ -1678,6 +1682,9 @@ bool OpenXRManager::BeginFrame()
     ERROR_LOG_FMT(OPENXR, "OpenXR: xrBeginFrame failed: {}", buffer);
     return false;
   }
+  if (result == XR_FRAME_DISCARDED)  // the frame begun before was never ended: it is gone
+    m_ended_frames.fetch_add(1, std::memory_order_release);
+  m_begun_frames.fetch_add(1, std::memory_order_release);
   return true;
 }
 
@@ -1701,6 +1708,7 @@ bool OpenXRManager::EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& l
                                     std::unique_lock<std::mutex>{};
     XR_CHECK(xrEndFrame(m_session, &end_info));
   }
+  m_ended_frames.fetch_add(1, std::memory_order_release);
   NoteFrameEnd(end_info.displayTime, m_submitted_eye_views_valid ? m_submitted_locate_time : 0,
                end_info.layerCount > 0);
   return true;
@@ -1744,6 +1752,7 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                     std::unique_lock<std::mutex>{};
     XR_CHECK(xrEndFrame(m_session, &end_info));
   }
+  m_ended_frames.fetch_add(1, std::memory_order_release);
   NoteFrameEnd(display_time, pose_time, end_info.layerCount > 0);
   return true;
 }
