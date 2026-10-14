@@ -18,8 +18,8 @@
 #   PRIMEFRAME_PREDICT_ONTIME_MS  with auto, how long after SteamVR's wake-up a frame still lands on time (19.5)
 #   Game pacing switches (passed through; see frame/PACING.md): PRIMEFRAME_CYCLE_OVERLAP=0 (no overlap of the
 #   next frame's xrWaitFrame with the last frame's end), PRIMEFRAME_KICK_DRAWS (GPU hand-off every N draws, 100;
-#   0 off), PRIMEFRAME_EYE_CLEAR=1 (clear the eye image before the blit), PRIMEFRAME_CYCLE_END=auto|asap|late,
-#   PRIMEFRAME_CYCLE_EARLIEST_MS (16)
+#   0 off), PRIMEFRAME_EYE_CLEAR=1 (clear the eye image before the blit), PRIMEFRAME_CYCLE_END=plan|asap
+#   (plan, the default: one landing per room)
 #   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (default 1: SteamVR paces the app at half the
 #                           refresh, for PRIMEFRAME_PACING cycle and drain)
 #   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;

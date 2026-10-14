@@ -241,10 +241,11 @@ sessions). In short:
   `xrWaitFrame` with the last frame's end (SteamVR sees wait N, begin N, ..., wait N+1, end N, begin N+1;
   `PRIMEFRAME_CYCLE_OVERLAP=0` off), the video thread hands the GPU its work every 100 draws
   (`PRIMEFRAME_KICK_DRAWS`, 0 off), the eye blit no longer clears first (`PRIMEFRAME_EYE_CLEAR=1` back), and
-  the releaser ends frames in one of two modes (lane L, frame/PACING.md): asap for rooms that fit (the
-  next `xrWaitFrame` waits for the last end so SteamVR blocks it until its wake-up: the shortest prediction;
-  `PRIMEFRAME_CYCLE_ASAP_WAIT=0` off) and late for heavy rooms (each frame's landing refresh planned at its
-  `xrWaitFrame`, poses located for it); the switch uses the 95th percentile of finish times with a growing
-  dwell. SteamVR's wake-up comes from its exact lead on its own clock (`PRIMEFRAME_XR_CLOCK`).
-  `PRIMEFRAME_HUD_TEST=1` draws a white test ring in a head-locked (VIEW space) quad layer. mockrun `--frame`
-  sets the whole Frame-like mock (`MOCK_XR_EARLY=1|2` for SteamVR's hand-out). Per-frame timing: the `XRC` log line.
+  each frame lands on the refresh right after the last frame's, whatever SteamVR hands it (lane M, the landing
+  plan, `PRIMEFRAME_CYCLE_END=plan`, the default; frame/PACING.md "One landing"): a frame handed an earlier
+  refresh is held past the limit before its landing and its poses located for that refresh; it lands later only
+  when it cannot make it; a catch-up (one frame dropped) only within 40 s of the start or a load.
+  `PRIMEFRAME_CYCLE_END=asap` is lane L's asap mode for comparison. SteamVR's wake-up comes from its exact lead
+  on its own clock (`PRIMEFRAME_XR_CLOCK`). `PRIMEFRAME_HUD_TEST=1` draws a white test ring in a head-locked
+  (VIEW space) quad layer. mockrun `--frame` sets the whole Frame-like mock (`MOCK_XR_EARLY=3`, SteamVR's
+  hand-out as the sessions showed it; `--phase` sets where the game's call falls after a wake-up). Per-frame timing: the `XRC` log line.

@@ -53,5 +53,5 @@ Nothing below has a verdict yet.
 - The heavy-room changes in the headset: the overlap call order (xrWaitFrame of the next frame before the
   last frame's xrEndFrame, xrBeginFrame from the releaser thread), the end hold (16 ms, or 22 ms in late
   mode), the GPU hand-off every 100 draws, the eye blit without a clear.
-- Lane L in the headset: the asap wait (light rooms), the planned landing refresh in late mode (heavy rooms),
-  the mode switch dwell, and the HUD test ring (whether SteamVR keeps a head-locked layer still).
+- The landing plan in the headset (one landing per room, holds past the limit, catch-ups only after a load),
+  and the HUD test ring (the owner saw it almost still; very slight movement on aggressive head turns).
