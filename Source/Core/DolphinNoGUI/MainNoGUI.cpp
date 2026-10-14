@@ -15,11 +15,14 @@
 #include <Windows.h>
 #endif
 
+#include "Common/FileUtil.h"
+#include "Common/Logging/Log.h"
 #include "Common/ScopeGuard.h"
 #include "Core/Boot/Boot.h"
 #include "Core/BootManager.h"
 #include "Core/Core.h"
 #include "Core/DolphinAnalytics.h"
+#include "Core/PrimedGun/RuntimeSettingsFile.h"
 #include "Core/Host.h"
 #include "Core/System.h"
 
@@ -274,6 +277,26 @@ int main(const int argc, char* argv[])
   UICommon::Init();
   UICommon::InitControllers(wsi);
 
+  // PrimedGun's in-VR menu settings live in Config/PrimedGun.ini ([primedgun], the keys of the Qt
+  // frontend's QSettings): load them before the game boots, save them when the in-VR menu closes
+  // and at exit.
+  const std::string primedgun_settings_path = File::GetUserPath(D_CONFIG_IDX) + "PrimedGun.ini";
+  {
+    PrimedGun::RuntimeSettings runtime = PrimedGun::GetRuntimeSettings();
+    const bool existed = PrimedGun::LoadRuntimeSettingsFile(primedgun_settings_path, &runtime);
+    PrimedGun::SetRuntimeSettings(runtime);
+    runtime = PrimedGun::GetRuntimeSettings();
+    NOTICE_LOG_FMT(CORE,
+                   "PrimedGun settings: {} {} (hud distance {} size {} offsets up {} down {} "
+                   "left {} right {})",
+                   primedgun_settings_path, existed ? "loaded" : "not found, defaults",
+                   runtime.metroid_hud_distance, runtime.metroid_hud_size,
+                   runtime.metroid_hud_offset_up, runtime.metroid_hud_offset_down,
+                   runtime.metroid_hud_offset_left, runtime.metroid_hud_offset_right);
+    PrimedGun::EnableHostPersistence(primedgun_settings_path,
+                                     [] { s_platform->RequestShutdown(); });
+  }
+
   Common::ScopeGuard ui_common_guard([] {
     UICommon::ShutdownControllers();
     UICommon::Shutdown();
@@ -316,6 +339,7 @@ int main(const int argc, char* argv[])
 #endif
 
   s_platform->MainLoop();
+  PrimedGun::SaveHostPersistence("exit");
   Core::Stop(Core::System::GetInstance());
 
   Core::Shutdown(Core::System::GetInstance());

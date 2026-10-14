@@ -35,6 +35,7 @@
 #include "Core/Core.h"
 #include "Core/HW/CPU.h"
 #include "Core/PrimedGun/FrameCompletionWatchdog.h"
+#include "Core/PrimedGun/RuntimeSettingsFile.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/System.h"
@@ -6354,6 +6355,26 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
 
   UpdateVrMenu(snapshot, &settings, prompt_visible);
   SetRuntimeSettings(settings);
+
+  // NoGUI host: persist the settings here (the Qt frontend polls the same requests from a timer).
+  // Done after SetRuntimeSettings so the menu's edits are included; on the menu closing, on its
+  // Save button and on EXIT GAME, never every frame.
+  static bool s_menu_was_visible = false;
+  if (HostPersistenceEnabled())
+  {
+    const bool menu_closed = s_menu_was_visible && !s_vr_menu_visible;
+    const bool exit_game = ConsumeVrExitGameRequest();
+    const bool save_pressed = ConsumeVrSettingsSaveRequest();
+    if (menu_closed || save_pressed || exit_game)
+    {
+      SaveHostPersistence(exit_game ? "exit game" : (save_pressed ? "menu save" : "menu closed"));
+      if (save_pressed || exit_game)
+        MarkVrSettingsSaved();
+    }
+    if (exit_game)
+      RequestHostExit();
+  }
+  s_menu_was_visible = s_vr_menu_visible;
 
   float yaw_delta_deg = GetPlayerYawDeltaDegrees(guard);
   if (settings.builtin_patches_enabled)
