@@ -39,10 +39,10 @@ Nothing below has a verdict yet.
 
 ## Pacing (built, measured only under the mock)
 
-- Pipelined pacing on the real SteamVR compositor: the per-refresh xrEndFrame, the repeated layer on the
-  refreshes between game frames, and whether it looks smooth.
-- No ghosting in either eye with the fence-based release instead of the drain.
+- Pipelined pacing (PRIMEFRAME_PACING=pipelined): still doubled in the headset (frames alternately one and
+  three refreshes); kept as an option, not the default.
+- The cycle loop (the default) in heavy rooms and in long sessions; only the light room was seen.
 - Not presenting the desktop window while the game runs under Steam.
 - Controller input polled on the pacing thread.
 - The overlay, laser and cinematic screen quad layers with two eye sets.
-
+- The per-frame XRF log line (PRIMEFRAME_FRAME_LOG=0 turns it off) on long sessions (about 20 MB an hour).

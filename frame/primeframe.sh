@@ -13,7 +13,7 @@
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
 #   PRIMEFRAME_MOTION_SMOOTHING  SteamVR motionSmoothingOverride for the app: 0 global, 1 on, 2 off (default), 3 always on
-#   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (0 default; 1 = SteamVR paces the app at half the
+#   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (default 1: SteamVR paces the app at half the
 #                           refresh, for PRIMEFRAME_PACING cycle and drain)
 #   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;
 #                           1728 is SteamVR's 100 % here)
@@ -94,8 +94,8 @@ MS=${PRIMEFRAME_MOTION_SMOOTHING:-2}
 # SteamVR frames to throttle: refreshes the app skips (SteamVR's frame limit = refresh / (1 + this)).
 # frame/PACING.md: 1 suits the cycle and drain loops (the headset showed the drain clean with it),
 # pipelined needs 0 (it picks its refreshes on the full-rate grid).
-THROTTLE=${PRIMEFRAME_THROTTLE:-0}
-case "$THROTTLE" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_THROTTLE=$THROTTLE is not 0 to 3, using 0"; THROTTLE=0 ;; esac
+THROTTLE=${PRIMEFRAME_THROTTLE:-1}
+case "$THROTTLE" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_THROTTLE=$THROTTLE is not 0 to 3, using 1"; THROTTLE=1 ;; esac
 case "$MS" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_MOTION_SMOOTHING=$MS is not 0 to 3, using 2"; MS=2 ;; esac
 case "$EYE" in 1[0-9][0-9][0-9] | 2[0-9][0-9][0-9] | 3[0-9][0-9][0-9]) ;; *) log "PRIMEFRAME_EYE=$EYE is not a pixel size, using 2160"; EYE=2160 ;; esac
 case "$HZ" in 90 | 120) ;; *) log "PRIMEFRAME_REFRESH_HZ=$HZ is not 90 or 120, using 120"; HZ=120 ;; esac

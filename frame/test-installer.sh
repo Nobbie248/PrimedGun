@@ -200,7 +200,7 @@ check "session.env.next becomes the next launch's session.env" test ! -f "$PRIME
 sleep 1; run
 check "the second launch uses it, then nothing is left" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "PACING=drain" && test ! -f "$PRIMEFRAME_HOME/session.env"
 rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
-for k in preferredRefreshRate=120 framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
+for k in preferredRefreshRate=120 framesToThrottle=1 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
     check "vrcmd --set-settings-int steam.app.4242.${k%=*} ${k#*=}" has "$W/vrcmd.log" "^--set-settings-int steam.app.4242.${k%=*} ${k#*=}\$"
 done
 check "read-back logged as matching" has "$S/launch.log" "read-back: 5 of 5"
@@ -217,7 +217,7 @@ FAKE_STALL=1 FAKE_RC=3 run
 check "the game's exit status is passed on" test "$(cat "$W/rc")" = 3
 check "a stall file is copied into the session" has "$PRIMEFRAME_HOME/sessions/latest/PrimedGunFrameStall.txt" stalled
 sleep 1
-echo '{"steam.app.4242": {"preferredRefreshRate": 72, "framesToThrottle": 0}}' > "$PRIMEFRAME_VRSETTINGS"; run FAKE_VRCMD_NOWRITE=1
+echo '{"steam.app.4242": {"preferredRefreshRate": 72, "framesToThrottle": 1}}' > "$PRIMEFRAME_VRSETTINGS"; run FAKE_VRCMD_NOWRITE=1
 check "mismatch logged when SteamVR dropped the settings" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "MISMATCH steam.app.4242.preferredRefreshRate"
 check "missing settings counted as mismatches" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "read-back: 1 of 5"
 sleep 1
