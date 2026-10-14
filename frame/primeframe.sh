@@ -12,6 +12,7 @@
 # Environment (all optional; session.env below is the way to set them from the Steam library):
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
+#   PRIMEFRAME_MOTION_SMOOTHING  SteamVR motionSmoothingOverride for the app: 0 global, 1 on, 2 off (default), 3 always on
 #   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;
 #                           1728 is SteamVR's 100 % here)
 #   PRIMEFRAME_FDM_LAYER=0  sets DISABLE_VULKAN_FDM_INJECTION_LAYER=1 (A/B: Valve's FDM layer off)
@@ -69,7 +70,8 @@ EXE=${CMD[${#CMD[@]}-1]}
 
 # The disc image: the path in $PFHOME/rom, chosen at install.
 USERDIR=$PFHOME/user
-mkdir -p "$USERDIR"
+# Dolphin writes its file log only into an existing Logs/ (CreateDirectories does not make it).
+mkdir -p "$USERDIR/Logs"
 ROM=
 [ -f "$PFHOME/rom" ] && ROM=$(head -n 1 "$PFHOME/rom")
 if [ -z "$ROM" ]; then
@@ -85,12 +87,15 @@ log "disc image: $ROM"
 # SteamVR's per-app settings, every launch. SteamAppId is set by Steam for a library launch.
 HZ=${PRIMEFRAME_REFRESH_HZ:-120}
 EYE=${PRIMEFRAME_EYE:-2160}
+# SteamVR per-app motion smoothing: 0 global setting (on unless changed), 1 on, 2 off, 3 always on.
+MS=${PRIMEFRAME_MOTION_SMOOTHING:-2}
+case "$MS" in 0 | 1 | 2 | 3) ;; *) log "PRIMEFRAME_MOTION_SMOOTHING=$MS is not 0 to 3, using 2"; MS=2 ;; esac
 case "$EYE" in 1[0-9][0-9][0-9] | 2[0-9][0-9][0-9] | 3[0-9][0-9][0-9]) ;; *) log "PRIMEFRAME_EYE=$EYE is not a pixel size, using 2160"; EYE=2160 ;; esac
 case "$HZ" in 90 | 120) ;; *) log "PRIMEFRAME_REFRESH_HZ=$HZ is not 90 or 120, using 120"; HZ=120 ;; esac
 VRCMD=${PRIMEFRAME_VRCMD:-$(command -v vrcmd || echo /opt/steamvr/bin/linuxarm64/vrcmd)}
 VRSETTINGS=${PRIMEFRAME_VRSETTINGS:-$HOME/.config/openvr/config/steamvr.vrsettings}
 STEAMVR_DIR=${PRIMEFRAME_STEAMVR_DIR:-/opt/steamvr/bin/linuxarm64}
-SETTINGS="preferredRefreshRate=$HZ framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=$EYE"
+SETTINGS="preferredRefreshRate=$HZ framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=$MS resolutionOverride=$EYE"
 if [ -z "$SteamAppId" ]; then
     log "no SteamAppId: SteamVR per-app settings NOT applied (not a Steam library launch)"
 elif [ ! -x "$VRCMD" ]; then
