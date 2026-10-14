@@ -13,6 +13,9 @@
 #   PRIMEFRAME_HOME         data folder, default ~/.local/share/PrimeFrame (user/, rom, sessions/)
 #   PRIMEFRAME_REFRESH_HZ   refresh rate asked of SteamVR, 90 or 120 (default 120)
 #   PRIMEFRAME_MOTION_SMOOTHING  SteamVR motionSmoothingOverride for the app: 0 global, 1 on, 2 off (default), 3 always on
+#   PRIMEFRAME_PREDICT_EXTRA_MS  <ms>|auto: the game predicts head and controller poses that much past
+#                           SteamVR's display time (auto: one period per period the frame lands late); off by default
+#   PRIMEFRAME_PREDICT_ONTIME_MS  with auto, how long after SteamVR's wake-up a frame still lands on time (19.5)
 #   PRIMEFRAME_THROTTLE     SteamVR framesToThrottle for the app (default 1: SteamVR paces the app at half the
 #                           refresh, for PRIMEFRAME_PACING cycle and drain)
 #   PRIMEFRAME_EYE          eye image size asked of SteamVR (resolutionOverride), default 2160 (the panel;

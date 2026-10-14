@@ -46,3 +46,5 @@ Nothing below has a verdict yet.
 - Controller input polled on the pacing thread.
 - The overlay, laser and cinematic screen quad layers with two eye sets.
 - The per-frame XRF log line (PRIMEFRAME_FRAME_LOG=0 turns it off) on long sessions (about 20 MB an hour).
+- Prediction for the real display time (PRIMEFRAME_PREDICT_EXTRA_MS=auto): whether it reduces the lag on head turns
+  and the arm cannon, and how far it swings past on quick stops.
