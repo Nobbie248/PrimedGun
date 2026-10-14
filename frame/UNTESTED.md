@@ -50,3 +50,6 @@ Nothing below has a verdict yet.
   and the arm cannon, and how far it swings past on quick stops.
 - The game at exactly 60 Hz (VIOverclock 1.001001 in Dolphin.ini): no frames landing late in the headset, and
   no audible or visible change to the game.
+- The heavy-room changes in the headset: the overlap call order (xrWaitFrame of the next frame before the
+  last frame's xrEndFrame, xrBeginFrame from the releaser thread), the end hold (16 ms, or 22 ms in late
+  mode), the GPU hand-off every 100 draws, the eye blit without a clear.

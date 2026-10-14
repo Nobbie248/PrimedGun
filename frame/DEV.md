@@ -237,3 +237,10 @@ sessions). In short:
   and `MOCK_XR_LATCH_MS` model turns with dead stops and SteamVR's throttled landing; the summary's
   `prediction` lines give the head and controller shortfall and the yaw error at the landing refresh. The mock adds the `xrmock: cadence` and
   `xrmock: latency` summary lines.
+- Heavy rooms (lane K, frame/PACING.md "The heavy room"): the cycle loop overlaps the next frame's
+  `xrWaitFrame` with the last frame's end (SteamVR sees wait N, begin N, ..., wait N+1, end N, begin N+1;
+  `PRIMEFRAME_CYCLE_OVERLAP=0` off), the video thread hands the GPU its work every 100 draws
+  (`PRIMEFRAME_KICK_DRAWS`, 0 off), the eye blit no longer clears first (`PRIMEFRAME_EYE_CLEAR=1` back), and
+  the releaser holds each end to at least 16 ms after the wake-up (asap) or to 22 ms (late, one period later,
+  prediction aimed there) by percentiles of the finish times (`PRIMEFRAME_CYCLE_END=auto|asap|late`,
+  `PRIMEFRAME_CYCLE_EARLIEST_MS`). Per-frame timing: the `XRC` log line.
