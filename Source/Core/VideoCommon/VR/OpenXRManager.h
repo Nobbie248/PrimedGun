@@ -84,9 +84,9 @@ public:
   virtual bool UsesLazyFrameStart() const { return false; }
   // Cycle overlap (default, PRIMEFRAME_CYCLE_OVERLAP=0 off; frame/PACING.md): the next frame's
   // xrWaitFrame does not wait for the last frame's end; its xrBeginFrame follows that end (on
-  // the releaser thread when the end comes later). CycleBeforeWait blocks until the last waited frame was
-  // begun; CycleBeginNowAfterWait says whether the caller begins the frame it just waited for
-  // (nothing left to end) or the releaser thread does it after its end.
+  // the releaser thread when the end comes later). CycleBeforeWait blocks until the last waited
+  // frame was begun; CycleBeginNowAfterWait says whether the caller begins the frame it just
+  // waited for (nothing left to end) or the releaser thread does it after its end.
   virtual bool UsesCycleOverlap() const { return false; }
   virtual bool CycleBeforeWait() { return true; }
   virtual bool CycleBeginNowAfterWait() { return true; }

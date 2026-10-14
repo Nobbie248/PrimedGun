@@ -834,7 +834,9 @@ bool VulkanOpenXR::Initialize()
   m_repeat_layers = EnvIs("PRIMEFRAME_REPEATS", "1");
   m_lazy_start = !EnvIs("PRIMEFRAME_CYCLE_LAZY", "0");
   m_cycle_overlap = !EnvIs("PRIMEFRAME_CYCLE_OVERLAP", "0");
-  m_end_cfg = EnvIs("PRIMEFRAME_CYCLE_END", "asap") ? 0 : EnvIs("PRIMEFRAME_CYCLE_END", "late") ? 1 : 2;
+  m_end_cfg = EnvIs("PRIMEFRAME_CYCLE_END", "asap") ? 0 :
+              EnvIs("PRIMEFRAME_CYCLE_END", "late") ? 1 :
+                                                      2;
   m_end_mode = m_end_cfg == 1 ? 1 : 0;
   if (const char* ontime = std::getenv("PRIMEFRAME_PREDICT_ONTIME_MS"))
     m_end_ontime_ms = std::atof(ontime);
@@ -2947,8 +2949,9 @@ void VulkanOpenXR::CycleLoop()
 // near that limit would mix both (an image held 4 refreshes, the next never shown). asap: end at
 // once, but not before PRIMEFRAME_CYCLE_EARLIEST_MS (16) after the wake-up (0: no minimum): the
 // frames the headset showed clean ended 16 to 19.5 ms after it, the ones it doubled within 12 ms
-// (a light room draws a frame in a few ms once its xrWaitFrame returned). late: hold the release and the end until 2.5 ms past the limit, so every frame is shown a
-// period later (PRIMEFRAME_PREDICT_EXTRA_MS=auto locates the poses for that refresh). auto: asap
+// (a light room draws a frame in a few ms once its xrWaitFrame returned). late: hold the release
+// and the end until 2.5 ms past the limit, so every frame is shown a period later
+// (PRIMEFRAME_PREDICT_EXTRA_MS=auto locates the poses for that refresh). auto: asap
 // while 95 % of the last 120 frames finished 0.5 ms inside the limit, else late; back to asap when
 // 99 % of the last 600 finished 1.5 ms inside it, at the earliest 10 s after the switch (twice as
 // long after each return to asap that lasted under 30 s, up to 160 s). Returns the hold.
