@@ -1576,10 +1576,10 @@ void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t finish_ns, double
     avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
     m_cycle_finish_seen = true;
     m_finish_ring[m_finish_next] = static_cast<float>(sample);
-    m_slack_ring[m_finish_next] = static_cast<float>(slack_ms);
     m_finish_next = (m_finish_next + 1) % m_finish_ring.size();
     m_finish_count = std::min(m_finish_count + 1, m_finish_ring.size());
-    m_settle_frames++;
+    m_slack_ring[m_slack_next] = static_cast<float>(slack_ms);
+    m_slack_next = (m_slack_next + 1) % m_slack_ring.size();
     break;
   }
 }
@@ -1627,28 +1627,21 @@ bool OpenXRManager::WaitFrame()
                                                       m_finish_avg_ms[m_clock.early ? 0 : 1];
     const double ready_ms = after_wake_ms + finish_avg;
 
-    // A hitch (this call came more than one and a half refreshes after the last one; the game
-    // itself was late) or the start: a settle window begins, in which the plan may move the
-    // landing one refresh earlier once (below).
+    // A hitch (this call came more than one and a half refreshes after the last one: the game
+    // itself was late) moves the landing anyway; the landing plan counts its stable frames from it.
     const bool hitch = prev_call_ns == 0 ||
                        (slot_ns > 0 && m_wait_call_ns - prev_call_ns > slot_ns * 3 / 2);
-    if (hitch)
-    {
-      m_settle_start_ns = m_wait_return_ns;
-      m_settle_frames = 0;
-      m_settle_caught_up = false;
-    }
 
     // The landing plan (frame/PACING.md "One landing"; cycle with the overlap, on unless
     // PRIMEFRAME_CYCLE_END=asap). Whatever refresh SteamVR handed out (the next one early, the
     // running one, the same one again, one further), the frame lands on the refresh after the last
     // frame's landing: a frame handed a refresh before that is held past the on-time limit and its
-    // poses located for the landing refresh. Only a frame expected to miss that refresh (95th
-    // percentile of the last frames' return-to-finish time, 1 ms inside the limit) lands a refresh
-    // later (one image shown twice), and only in a settle window after a hitch, when every frame of
-    // it would have been ready 4 ms inside the earlier limit, may a frame land on the last frame's
-    // refresh (that frame is then not shown) to shorten the latency. No other change of landing:
-    // constant cadence, whatever the latency.
+    // poses are located for the landing refresh. Only a frame expected to miss that refresh (95th
+    // percentile of the last frames' return-to-finish time, later than 1 ms inside the limit) lands
+    // a refresh later (one image shown twice). Only when every frame of the last 5 s (more after a
+    // catch-up that did not hold) had 3 ms to spare a refresh before its landing, one frame lands
+    // on the last frame's refresh (that frame is not shown): the latency gets shorter once and the
+    // cadence stays. No other change of landing.
     int land = 0;
     if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0)
     {
@@ -1668,43 +1661,44 @@ bool OpenXRManager::WaitFrame()
           fin95 <= 0 ? 0 :
                        std::max(0, static_cast<int>(std::ceil((ready95 - (predict.ontime_ms - 1.0)) / slot_ms)));
       int k = k_min;
+      m_plan_stable_frames = hitch ? 0 : m_plan_stable_frames + 1;
       if (m_prev_land_time != 0)
       {
         const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
         const int k_cont = static_cast<int>(std::llround(static_cast<double>(cont_ns) / slot_ns));
         k = std::max(k_min, k_cont);
-        // Catch-up after a hitch: the last settle frames (at least 60) all had 4 ms to spare one
-        // refresh before their landing, and so would this one.
-        if (k == k_cont && k_cont >= 1 && !m_settle_caught_up && fin95 > 0 &&
-            m_settle_frames >= 60 && m_wait_return_ns - m_settle_start_ns < 8'000'000'000LL &&
-            ready95 - (k_cont - 1) * slot_ms <= predict.ontime_ms - 4.0)
+        if (k == k_cont && k_cont >= 1 && fin95 > 0 &&
+            m_plan_stable_frames >= m_catchup_need_frames &&
+            ready95 - (k_cont - 1) * slot_ms <= predict.ontime_ms - 3.0)
         {
-          const size_t sn = std::min<size_t>(m_settle_frames, std::min<size_t>(m_finish_count, 120));
           float min_slack = 1e9f;
-          for (size_t i = 0; i < sn; ++i)
+          for (size_t i = 0; i < m_catchup_need_frames && i < m_slack_ring.size(); ++i)
           {
             min_slack = std::min(
                 min_slack,
-                m_slack_ring[(m_finish_next + m_slack_ring.size() - 1 - i) % m_slack_ring.size()]);
+                m_slack_ring[(m_slack_next + m_slack_ring.size() - 1 - i) % m_slack_ring.size()]);
           }
-          if (min_slack >= slot_ms + 4.0)
+          if (min_slack >= slot_ms + 3.0)
           {
             k = k_cont - 1;
-            m_settle_caught_up = true;
+            m_plan_stable_frames = 0;
+            m_last_catchup_ns = m_wait_return_ns;
             m_plan_catchups_total++;
             m_frame_timing.plan_catchups++;
             INFO_LOG_FMT(OPENXR,
-                         "PrimeFrame cycle landing: one refresh earlier after the hitch ({}; frames "
-                         "of the last {:.1f} s had at least {:.1f} ms to spare a refresh earlier); "
+                         "PrimeFrame cycle landing: one refresh earlier ({}; every frame of the last "
+                         "{:.1f} s had at least {:.1f} ms to spare a refresh before its landing); "
                          "the last frame is not shown",
-                         m_plan_catchups_total, (m_wait_return_ns - m_settle_start_ns) / 1e9,
-                         min_slack - slot_ms);
+                         m_plan_catchups_total, m_catchup_need_frames / 60.0, min_slack - slot_ms);
           }
         }
         if (k > k_cont && !hitch)
         {
           m_plan_breaks_total++;
           m_frame_timing.plan_breaks++;
+          m_plan_stable_frames = 0;
+          if (m_last_catchup_ns != 0 && m_wait_return_ns - m_last_catchup_ns < 60'000'000'000LL)
+            m_catchup_need_frames = std::min<size_t>(m_catchup_need_frames * 2, m_slack_ring.size());
           if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)
           {
             m_plan_log_ns = m_wait_return_ns;

@@ -579,14 +579,15 @@ private:
   std::atomic<bool> m_cycle_end_late{false};
   // Cycle landing plan (under m_clock_mutex): the refresh the last waited frame is planned to land
   // on; the last frames' xrWaitFrame return to finish (ms) and slack before the on-time limit of
-  // their landing refresh (ms); the settle window after a hitch (a catch-up allowed once in it).
+  // their landing refresh (ms); frames since the landing last moved (a hitch, a refresh later or
+  // earlier) and how many a catch-up needs (doubled when a refresh later follows one within 60 s).
   XrTime m_prev_land_time = 0;
   std::array<float, 120> m_finish_ring{};
-  std::array<float, 120> m_slack_ring{};
-  size_t m_finish_next = 0, m_finish_count = 0;
-  int64_t m_settle_start_ns = 0;
-  size_t m_settle_frames = 0;
-  bool m_settle_caught_up = false;
+  std::array<float, 1200> m_slack_ring{};
+  size_t m_finish_next = 0, m_finish_count = 0, m_slack_next = 0;
+  size_t m_plan_stable_frames = 0;
+  size_t m_catchup_need_frames = 300;
+  int64_t m_last_catchup_ns = 0;
   uint32_t m_plan_breaks_total = 0, m_plan_catchups_total = 0;
   int64_t m_plan_log_ns = 0;
 
