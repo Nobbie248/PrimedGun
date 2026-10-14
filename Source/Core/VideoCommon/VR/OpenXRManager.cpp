@@ -1470,7 +1470,6 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   }
   m_clock.grid_offset_ns = m_wake_lead_ns + m_xr_offset_ns;
   m_clock.early = m_wake_lead_exact && lead > m_wake_lead_ns + 500'000;
-  m_clock.plan_late = m_cycle_end_late.load(std::memory_order_relaxed) && !m_clock.early;
 
   // The refresh spacing: the smallest step between consecutive display times seen at least four
   // times in the last 64 (a step of 0, the same refresh handed out twice, or two refreshes do
@@ -1569,13 +1568,56 @@ bool OpenXRManager::WaitFrame()
     const double finish_avg =
         m_finish_avg_ms[m_clock.early ? 1 : 0] > 0 ? m_finish_avg_ms[m_clock.early ? 1 : 0] :
                                                       m_finish_avg_ms[m_clock.early ? 0 : 1];
-    double ready_ms = after_wake_ms + finish_avg;
-    if (m_clock.plan_late)
-      ready_ms = std::max(ready_ms, predict.ontime_ms + 2.5);
+    const double ready_ms = after_wake_ms + finish_avg;
+
+    // Cycle end late (frame/PACING.md "The wake-up"): a frame that will not make SteamVR's
+    // on-time limit (with a 2 ms margin, so that no frame straddles it) is planned to land whole
+    // refreshes after its display time: the releaser holds it past the limit and its poses are
+    // located for the refresh it lands on. No two frames may land on one refresh (the second
+    // replaces the first, which is then never shown): a frame handed a display time at or before
+    // the last frame's landing is planned late too, except that a frame handed out at least
+    // 3 ms early that makes the limit may end the late run (once every 5 s; the last late frame
+    // is then not shown).
+    int land = 0;
+    const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
+    if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0 && finish_avg > 0)
+    {
+      if (ready_ms > predict.ontime_ms - 2.0)
+        land = std::max(1, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)));
+      land = std::min(land, 2);
+      if (m_prev_land_time != 0 &&
+          m_clock.display_time + land * slot_ns <= m_prev_land_time + slot_ns / 2)
+      {
+        const bool can_end_run = land == 0 && m_clock.early && after_wake_ms <= -3.0 &&
+                                 m_wait_return_ns - m_late_run_end_ns > 5'000'000'000LL;
+        if (can_end_run)
+        {
+          m_late_run_end_ns = m_wait_return_ns;
+          m_late_run_ends++;
+          INFO_LOG_FMT(OPENXR,
+                       "PrimeFrame cycle: a frame handed out {:.2f} ms early ends a late run ({}); "
+                       "the late frame before it is replaced",
+                       -after_wake_ms, m_late_run_ends);
+        }
+        else
+        {
+          const int needed = static_cast<int>(
+              std::llround(static_cast<double>(m_prev_land_time - m_clock.display_time) / slot_ns)) + 1;
+          land = std::clamp(needed, land, 2);
+        }
+      }
+    }
+    m_clock.plan_slots = land;
+    m_prev_land_time = m_clock.display_time + land * slot_ns;
+
     m_frame_extra_ns = 0;
     if (m_predict_allowed && predict.mode == 1)
     {
       m_frame_extra_ns = predict.fixed_ns;
+    }
+    else if (m_predict_allowed && predict.mode == 2 && land > 0)
+    {
+      m_frame_extra_ns = land * slot_ns;
     }
     else if (m_predict_allowed && predict.mode == 2 && finish_avg > 0 && slot_ms > 0 &&
              ready_ms > predict.ontime_ms)
@@ -1585,7 +1627,7 @@ bool OpenXRManager::WaitFrame()
       m_frame_extra_ns = static_cast<int64_t>(periods * slot_ms * 1e6);
     }
     m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
-                                      m_clock.early, m_clock.plan_late};
+                                      m_clock.early, m_clock.plan_slots};
     m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
   }
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
@@ -1718,7 +1760,8 @@ static double OnTimeMs()
 // ends with the display time its poses were located for); dd refreshes since the last ended
 // display time (in refresh steps); per the predictedDisplayPeriod; ex how far past the display time
 // the poses were located; w the xrWaitFrame return minus the runtime's wake-up for the display
-// time (negative: handed out early); pl 1 when the frame was planned a period late.
+// time (negative: handed out early); pl the refreshes the frame was planned to land after its
+// display time (cycle end late).
 void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers)
 {
   const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1727,7 +1770,8 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0, w = 0;
   int64_t dd = 0;
   uint64_t n = 0;
-  bool early = false, plan_late = false;
+  bool early = false;
+  int plan_slots = 0;
   {
     std::lock_guard<std::mutex> lock(m_clock_mutex);
     const int64_t period = m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns;
@@ -1740,7 +1784,7 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
         lead = (display_time - note.return_ns) / 1e6;
         r = (end_ns - note.return_ns) / 1e6;
         early = note.early;
-        plan_late = note.plan_late;
+        plan_slots = note.plan_slots;
         if (m_clock.grid_offset_ns != 0)
           w = (note.return_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
       }
@@ -1809,7 +1853,7 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
     INFO_LOG_FMT(OPENXR,
                  "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
                  "per={:.3f} ex={:.2f} w={:.2f} pl={}{}",
-                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, w, plan_late ? 1 : 0,
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, w, plan_slots,
                  has_layers ? "" : " empty");
   }
 }
@@ -1884,6 +1928,20 @@ bool OpenXRManager::StartCycleFrame(bool locate_views)
   }
   else if (m_swapchain && m_swapchain->UsesCycleOverlap())
   {
+    // Cycle end asap (frame/PACING.md "The wake-up"): wait for the last frame's end first, so
+    // that SteamVR blocks this call until its wake-up. Called while a frame is pending, SteamVR
+    // hands out the next refresh at once, up to a period before its wake-up: the frame is
+    // located that much earlier for the same refresh (a longer prediction). A room whose frames
+    // finish in time does not need the overlap; the late mode (heavy rooms) keeps it.
+    static const bool s_asap_wait = [] {
+      const char* env = std::getenv("PRIMEFRAME_CYCLE_ASAP_WAIT");
+      return !(env && std::string_view(env) == "0");
+    }();
+    if (s_asap_wait && !m_cycle_end_late.load(std::memory_order_relaxed) &&
+        !m_swapchain->WaitForPendingFrameFinalization("cycle asap"))
+    {
+      return false;
+    }
     // The last frame may still be ending on the releaser thread: wait only until it was begun.
     if (!m_swapchain->CycleBeforeWait() || !WaitFrame())
       return false;

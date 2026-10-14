@@ -211,7 +211,7 @@ private:
     int64_t submit_ns = 0;
     XrTime pose_time = 0;       // the display time its poses were located for
     bool should_render = true;  // cycle: the frame's xrWaitFrame said so
-    bool plan_late = false;     // cycle: planned a period late (held past the on-time limit)
+    int plan_slots = 0;  // cycle: refreshes it is planned to land late (held past the on-time limit)
     // Cycle timing (XRC line): the frame's xrWaitFrame return, how long the video thread waited
     // for the last frame's end at this frame's start, its CPU and wall time since the last submit.
     int64_t wake_ns = 0;
@@ -299,12 +299,15 @@ private:
   // that every frame of a room whose frames end near SteamVR's on-time limit is shown a period
   // later (see CycleEndHold).
   int m_end_cfg = 2;   // 0 asap, 1 late, 2 auto
-  int m_end_mode = 0;  // 0 asap, 1 hold
+  int m_end_mode = 0;  // 0 asap (no overlap: each xrWaitFrame blocks for the wake-up), 1 late
   double m_end_ontime_ms = 19.5;
   double m_end_earliest_ms = 0.0;
   int64_t m_end_since_ns = 0;
-  int64_t m_end_dwell_ns = 10'000'000'000LL;
+  int64_t m_end_dwell_ns = 4'000'000'000LL;
   std::array<float, 600> m_end_ready{};  // the last frames' finish after their wake-up (ms)
+  // The last frames' video thread CPU time plus a GPU tail allowance (ms): how long after
+  // SteamVR's wake-up a frame would finish if its xrWaitFrame blocked for it (late -> asap).
+  std::array<float, 600> m_end_est{};
   size_t m_end_ready_next = 0;
   size_t m_end_ready_count = 0;
   int64_t CycleEndHold(const XRFrameItem& item, int64_t fence_ns);

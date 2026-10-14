@@ -43,7 +43,8 @@
 //                             against CLOCK_MONOTONIC
 //   MOCK_XR_EARLY=1           while a frame is begun and not ended, xrWaitFrame does not block: it
 //                             returns at once with the next refresh even before its wake-up (SteamVR
-//                             on the Frame); summary line "waits"
+//                             on the Frame); summary line "waits". 2: also a call after that
+//                             refresh's wake-up gets the one after it
 //   MOCK_XR_FOCUS_BLIP=<ms>[@<s>]  every <s> seconds (7) the session loses
 //                             focus for <ms> ms (VISIBLE, then FOCUSED again),
 //                             as SteamVR does now and then
@@ -766,6 +767,12 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
         gWaits = (int)((now - gT0) / gPeriod / (1 + gThrottle) * (1 + gThrottle));
     }
     int64_t wake = gT0 + (int64_t)gWaits * gPeriod;
+    // MOCK_XR_EARLY=2: as 1, and a call made while a frame is pending after the next refresh's
+    // wake-up gets the refresh after it (SteamVR's "refresh after the running one"; whether it
+    // does that always is not known).
+    if (gEarly == 2 && gPendingFrame && gT0 && wake <= now) {
+        while (wake <= now) { gWaits += 1 + gThrottle; wake = gT0 + (int64_t)gWaits * gPeriod; }
+    }
     // MOCK_XR_EARLY=1 (SteamVR on the Frame): while a frame is begun and not yet ended, a call
     // does not block: it returns at once with the next refresh, even when that refresh's wake-up
     // is still ahead (the app then has its poses earlier than the wake-up).
@@ -1234,7 +1241,7 @@ static void init(void) {
     }
     gStampOn = getenv("MOCK_XR_STAMP") != NULL;
     if (getenv("MOCK_XR_LEAD")) gLead = atoi(getenv("MOCK_XR_LEAD"));
-    gEarly = getenv("MOCK_XR_EARLY") && atoi(getenv("MOCK_XR_EARLY")) > 0;
+    gEarly = getenv("MOCK_XR_EARLY") ? atoi(getenv("MOCK_XR_EARLY")) : 0;
     gClockRaw = getenv("MOCK_XR_CLOCK") && !strcmp(getenv("MOCK_XR_CLOCK"), "raw");
     if (getenv("MOCK_XR_THROTTLE")) gThrottle = atoi(getenv("MOCK_XR_THROTTLE"));
     if (getenv("MOCK_XR_ONTIME_MS")) gOnTimeMs = atof(getenv("MOCK_XR_ONTIME_MS"));

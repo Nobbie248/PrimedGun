@@ -244,10 +244,10 @@ public:
     int64_t grid_offset_ns = 0;
     // The frame begun by the last xrWaitFrame: returned before the runtime's wake-up for its
     // display time (SteamVR hands out the next refresh early while a frame is still being
-    // ended); planned to be shown a period late (cycle end late and not early, see
-    // SetCycleEndLate), with the poses located for that.
+    // ended); the refreshes it is planned to land after its display time (cycle end late, see
+    // SetCycleEndLate: held past the on-time limit, its poses located for the landing refresh).
     bool early = false;
-    bool plan_late = false;
+    int plan_slots = 0;
   };
   FrameClock GetFrameClock() const
   {
@@ -260,9 +260,11 @@ public:
   // the refreshes it hands out (ms; framesToThrottle 1 at 120 Hz: 16.67, whatever
   // predictedDisplayPeriod says).
   void GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_ms) const;
-  // Cycle pacing (frame/PACING.md "The wake-up"): the releaser's end mode. Late: frames that
-  // are not handed out early are held past the on-time limit and their poses located a period
-  // later. NoteCycleFinish: the frame's GPU work finished (its xrWaitFrame return to its fence,
+  // Cycle pacing (frame/PACING.md "The wake-up"): the releaser's end mode. Asap: the next
+  // frame's xrWaitFrame waits for the last frame's end (it blocks for SteamVR's wake-up). Late:
+  // the overlap; frames that will not make the on-time limit, or would land on the refresh of
+  // the frame before, are planned whole refreshes late (WaitFrame), held past the limit and
+  // their poses located for the landing refresh. NoteCycleFinish: the frame's GPU work finished (its xrWaitFrame return to its fence,
   // per kind of frame, for the expected finish of the next frames).
   void SetCycleEndLate(bool late) { m_cycle_end_late.store(late, std::memory_order_relaxed); }
   void NoteCycleFinish(XrTime display_time, int64_t finish_ns);
@@ -522,7 +524,7 @@ private:
     int64_t call_ns = 0;
     int64_t return_ns = 0;
     bool early = false;
-    bool plan_late = false;
+    int plan_slots = 0;
   };
   std::array<WaitNote, 4> m_wait_notes{};
   size_t m_wait_note_next = 0;
@@ -550,6 +552,11 @@ private:
   std::array<double, 2> m_finish_avg_ms{};
   bool m_cycle_finish_seen = false;
   std::atomic<bool> m_cycle_end_late{false};
+  // The refresh the last waited frame is planned to land on (cycle end late; under
+  // m_clock_mutex), when a frame last ended a late run, and how many runs were ended.
+  XrTime m_prev_land_time = 0;
+  int64_t m_late_run_end_ns = 0;
+  uint32_t m_late_run_ends = 0;
 
   // The runtime's wake-up grid (frame/PACING.md "The wake-up"), under m_clock_mutex. XrTime
   // clock: 0 not chosen, 1 CLOCK_MONOTONIC_RAW, 2 the steady clock (CLOCK_MONOTONIC); its offset

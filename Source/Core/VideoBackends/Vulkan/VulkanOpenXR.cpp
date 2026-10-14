@@ -2757,7 +2757,7 @@ bool VulkanOpenXR::SubmitFrameCycle()
   item.submit_ns = SteadyNs();
   item.target = VR::g_openxr->GetPredictedDisplayTime();
   item.should_render = VR::g_openxr->ShouldRender();
-  item.plan_late = VR::g_openxr->GetFrameClock().plan_late;
+  item.plan_slots = VR::g_openxr->GetFrameClock().plan_slots;
   {
     const int64_t cpu = ThreadCpuNs();
     item.wake_ns = VR::g_openxr->GetFrameClock().wake_ns;
@@ -2977,55 +2977,76 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
   const int64_t wake_ns = item.target - clock.grid_offset_ns;
   const float ready_ms = static_cast<float>((fence_ns - wake_ns) / 1e6);
   m_end_ready[m_end_ready_next] = ready_ms;
+  m_end_est[m_end_ready_next] = static_cast<float>(item.video_cpu_ns / 1e6 + 2.5);
   m_end_ready_next = (m_end_ready_next + 1) % m_end_ready.size();
   m_end_ready_count++;
 
   if (m_end_cfg == 2)
   {
-    // A percentile of the last n finish times (a few hitches, as at a load, do not count).
-    const auto percentile = [&](size_t n, double p) {
+    // A percentile of the last n values (a few hitches, as at a load, do not count).
+    const auto percentile = [&](const std::array<float, 600>& ring, size_t n, double p) {
       std::vector<float> last(n);
       for (size_t i = 0; i < n; ++i)
-        last[i] = m_end_ready[(m_end_ready_next + m_end_ready.size() - 1 - i) % m_end_ready.size()];
+        last[i] = ring[(m_end_ready_next + ring.size() - 1 - i) % ring.size()];
       const size_t k = std::min(n - 1, static_cast<size_t>(p * n));
       std::nth_element(last.begin(), last.begin() + k, last.end());
       return last[k];
     };
+    double lead_ms = 0, slot_ms = 0;
+    bool lead_exact = false;
+    VR::g_openxr->GetWakeGrid(&lead_ms, &lead_exact, &slot_ms);
+    if (slot_ms <= 0)
+      slot_ms = 16.667;
     const int64_t dwell = fence_ns - m_end_since_ns;
     int mode = m_end_mode;
     float level = 0;
     if (mode == 0 && m_end_ready_count >= 120)
     {
-      level = percentile(120, 0.95);
-      if (level > m_end_ontime_ms - 0.5)
+      // asap: every xrWaitFrame waits for the last frame's end and blocks for SteamVR's
+      // wake-up. A frame finishing within a ms or so of the next wake-up makes the next frame
+      // start late (and the video thread wait), one past the on-time limit is shown late.
+      level = percentile(m_end_ready, 120, 0.95);
+      if (level > std::min(m_end_ontime_ms - 0.5, slot_ms - 1.2))
       {
         mode = 1;
         m_end_dwell_ns = dwell < 30'000'000'000LL ?
                              std::min<int64_t>(m_end_dwell_ns * 2, 160'000'000'000LL) :
-                             10'000'000'000LL;
+                             4'000'000'000LL;
       }
     }
     else if (mode == 1 && m_end_ready_count >= m_end_ready.size() && dwell > m_end_dwell_ns)
     {
-      level = percentile(m_end_ready.size(), 0.99);
-      if (level <= m_end_ontime_ms - 1.5)
+      // late: the frames start early (SteamVR hands the next refresh out while the last frame
+      // is pending), so their finish says nothing about a blocked start; the video thread's CPU
+      // time per frame (plus a GPU tail) does.
+      level = percentile(m_end_est, m_end_est.size(), 0.95);
+      if (level <= slot_ms - 3.5)
         mode = 0;
     }
     if (mode != m_end_mode)
     {
       INFO_LOG_FMT(OPENXR,
-                   "PrimeFrame cycle end: {} (frames finished {:.2f} ms after the wake-up, "
-                   "{}; next return to asap after {} s at the earliest)",
-                   mode == 1 ? "late (held)" : "asap", level,
-                   mode == 1 ? "95th percentile of 2 s" : "99th percentile of 10 s",
-                   m_end_dwell_ns / 1'000'000'000LL);
+                   "PrimeFrame cycle end: {} ({} {:.2f} ms; next return to asap after {} s at "
+                   "the earliest)",
+                   mode == 1 ? "late (overlap, held when not handed out early)" :
+                               "asap (each frame waits for SteamVR's wake-up)",
+                   mode == 1 ? "frames finished after the wake-up, 95th percentile of 2 s:" :
+                               "video thread CPU per frame + 2.5, 95th percentile of 10 s:",
+                   level, m_end_dwell_ns / 1'000'000'000LL);
       m_end_mode = mode;
       m_end_since_ns = fence_ns;
       m_end_ready_count = 0;
       VR::g_openxr->SetCycleEndLate(mode == 1);
     }
   }
-  const double end_ms = item.plan_late ? m_end_ontime_ms + 2.5 : m_end_earliest_ms;
+  double end_ms = m_end_earliest_ms;
+  if (item.plan_slots > 0)
+  {
+    double lead_ms = 0, slot_ms = 0;
+    bool lead_exact = false;
+    VR::g_openxr->GetWakeGrid(&lead_ms, &lead_exact, &slot_ms);
+    end_ms = m_end_ontime_ms + 2.5 + (item.plan_slots - 1) * slot_ms;
+  }
   if (end_ms <= 0)
     return 0;
   const int64_t target = wake_ns + static_cast<int64_t>(end_ms * 1e6);
