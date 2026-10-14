@@ -91,7 +91,8 @@ another display time than the one they were ended with (must be 0).
 
 ### Frame log
 
-One `XRF` line per `xrEndFrame` (all modes; `PRIMEFRAME_FRAME_LOG=0` turns it off), times in ms:
+One `XRF` line per `xrEndFrame` (all modes; `PRIMEFRAME_FRAME_LOG=0` turns it off: at 60 lines a second the
+log grows by about 20 MB an hour, so it is for test sessions), times in ms:
 
 ```
 XRF n=3000 blk=0.18 lead=24.48 r=0.02 rg=0.51 age=28.32 pdt=0.00 dd=2 per=8.333
