@@ -934,15 +934,42 @@ locate to the landing in the mock, about 54 on the Frame).
 
 ## Default
 
-`cycle` with the GPU kicks every 100 draws, no eye clear, `PRIMEFRAME_CYCLE_END=auto` (asap: each
-`xrWaitFrame` after the last end; late: the overlap with each frame's landing planned),
+`cycle` with the GPU kicks every 100 draws, no eye clear, the overlap and the landing plan
+(`PRIMEFRAME_CYCLE_END=plan`: every frame lands on the refresh after the last one's, section "One landing"),
 `PRIMEFRAME_PREDICT_EXTRA_MS=auto` (the wrapper's default), framesToThrottle 1. A/B switches:
-`PRIMEFRAME_CYCLE_ASAP_WAIT=0` (asap keeps the overlap, as before), `PRIMEFRAME_CYCLE_OVERLAP=0`,
-`PRIMEFRAME_CYCLE_END=asap|late`, `PRIMEFRAME_XR_CLOCK=raw|steady`, `PRIMEFRAME_HUD_TEST=1` (section
-"The HUD"). The headset settled `cycle` against `pipelined` on 2026-10-14 (cycle clean, every pipelined
-variant doubled).
+`PRIMEFRAME_CYCLE_END=asap` (each `xrWaitFrame` after the last end, section "The wake-up";
+`PRIMEFRAME_CYCLE_ASAP_WAIT=0` keeps the overlap there), `PRIMEFRAME_CYCLE_OVERLAP=0`,
+`PRIMEFRAME_XR_CLOCK=raw|steady`, `PRIMEFRAME_HUD_TEST=1` (section "The HUD"). The headset settled `cycle`
+against `pipelined` on 2026-10-14 (cycle clean, every pipelined variant doubled).
 
-## Next headset session: HUD and lag spikes (two launches, about a minute of play each)
+## Next headset session: one landing (two launches, about a minute of play each)
+
+Install this build (`install.sh --dev`), same SteamVR settings as the last sessions (120 Hz, framesToThrottle
+1 by the wrapper, motion smoothing off, eye 2160). `session.env`: `PRIMEFRAME_STATE=2`; `session.env.next`:
+`PRIMEFRAME_STATE=1`. Nothing else: the landing plan is the default.
+
+1. Heavy room (s02). Wait the 95 s of flight until Samus stands next to the ship. Turn the head steadily
+   left and right for ten seconds, then quick turns and stops. Any lag spike (a jump, a hitch)? Smooth all
+   the time? The HUD as steady as last time?
+2. Light room (s01). The same turns. Any spike, in the first seconds after the load or later? Smooth? HUD?
+   Lag compared with launch 1 (it should feel shorter: the light room lands a refresh earlier)?
+
+The logs must show, launch 1 in the player view: XRSTATS `end_mode=plan`, `slot_ms` 16.67 every second,
+`plan_catchups` 0 after the first 30 s, `plan_drops` 0, `hold_cuts` 0, `plan_breaks` only in seconds whose
+`game_fps` is under 60 (the game's own late frames), `pose_off` 0; vrtiming: 60 frames, 60 reused, vsyncs
+to photons the same value every second after the flight (4.00, about two mispresents per frame; an on-time
+frame among them may make a second read 3.9), no second at 30 reused and 90 mispresented. Launch 2: at most
+two `PrimeFrame cycle landing: one refresh earlier` lines, within 30 s of the load, then no landing line;
+XRSTATS `plan` about 30/30/0 (one frame on time, the next handed the same refresh again) or 60/0/0;
+vrtiming vsyncs 2.00 every second after that, 60 reused, about 60 mispresented, no 1-3 second.
+
+How it decides: no spikes, smooth, HUD steady -> done. Spikes in launch 1 in seconds with `plan_breaks` and
+`game_fps` under 60 -> the game's frames (XRC `vcpu` over 16 or `fw` over 2 ms), not the pacing. Spikes with
+vrtiming's vsyncs changing while `plan_breaks`, `plan_catchups` and `plan_drops` are 0 -> SteamVR lands
+frames elsewhere than planned (its on-time limit in that room is not 19.5 ms): XRF `rg` and `pl` against
+vrtiming's vsyncs per second. A 1-3 second in launch 2 -> `slot_ms` (must be 16.67) and `plan` that second.
+
+## Earlier session plan: HUD and lag spikes (two launches, done 2026-10-14)
 
 Install this build (`install.sh --dev`), same SteamVR settings as the last session (120 Hz,
 framesToThrottle 1 by the wrapper, motion smoothing off, eye 2160). `session.env`: `PRIMEFRAME_STATE=2`;
