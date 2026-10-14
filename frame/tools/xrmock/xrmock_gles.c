@@ -74,4 +74,4 @@ static XrResult fillImages(void* images, int count, XrSwapchainImageBaseHeader* 
     return XR_SUCCESS;
 }
 
-const MockGfx kMockGfxGles = {"gles", ownsBinding, describeBinding, getProc, formats, formatOf, createImages, fillImages, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+const MockGfx kMockGfxGles = {"gles", ownsBinding, describeBinding, getProc, formats, formatOf, createImages, fillImages, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};

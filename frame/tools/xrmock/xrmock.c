@@ -44,7 +44,19 @@
 //   MOCK_XR_EARLY=1           while a frame is begun and not ended, xrWaitFrame does not block: it
 //                             returns at once with the next refresh even before its wake-up (SteamVR
 //                             on the Frame); summary line "waits". 2: also a call after that
-//                             refresh's wake-up gets the one after it
+//                             refresh's wake-up gets the one after it. 3: SteamVR's hand-out as the
+//                             headset sessions of 2026-10-14 showed it (see handOut3 below): with a
+//                             frame pending, the refresh after the one it was handed (that same one
+//                             again when it is still ahead, or when it is the running one and the
+//                             pending frame's GPU work already wrote its eye image; the running one
+//                             when the pending frame was for an earlier refresh and was handed out
+//                             on time); with none pending, the refresh after the one the last frame
+//                             landed on, early and at once after a frame that landed late, else
+//                             blocking until its wake-up. Summary line "hand-out"
+//   MOCK_XR_PHASE_MS=<ms>[@<s>,<s>...]  at the first xrWaitFrame call after each of the given
+//                             session seconds (default 5), move the refresh grid so that this call
+//                             comes <ms> after a wake-up (the game's frame phase against SteamVR's
+//                             refreshes; the sessions showed calls about 14.5 ms after one)
 //   MOCK_XR_FOCUS_BLIP=<ms>[@<s>]  every <s> seconds (7) the session loses
 //                             focus for <ms> ms (VISIBLE, then FOCUSED again),
 //                             as SteamVR does now and then
@@ -137,6 +149,20 @@ static int64_t gTimeOffset = 0;
 static int gClockRaw = 0;
 // MOCK_XR_EARLY and the summary's "waits" line.
 static int gEarly = 0, gPendingFrame = 0, gEarlyHandouts = 0, gBlockedWaits = 0, gWaitCalls = 0;
+// MOCK_XR_EARLY=3: refreshes as wake-up indices (refresh periods from gT0); the refresh handed out by
+// the last xrWaitFrame and whether it was handed out late (over 4 ms after its wake-up), the same for
+// the frame begun, the refresh the last ended frame landed on and whether that was after its display
+// time; hand-outs by kind.
+static int64_t gHandWake = -1, gPendWake = -1, gLastLandWake = -1;
+static int gHandLate = 0, gPendLate = 0, gLastLandedLate = 0;
+static int gHandNext = 0, gHandAgain = 0, gHandRunning = 0, gHandSkip = 0, gHandBlocked = 0, gHandAtOnce = 0;
+// MOCK_XR_PHASE_MS
+static double gPhaseMs = -1.0, gPhaseAt[16];
+static int gPhaseCount = 0, gPhaseNext = 0, gPhaseShifts = 0;
+static int64_t gSessionStart = 0;
+// Per 10 s window: holds of new eye sets, never shown, landed on time / later, hand-outs.
+static int gWinHeld[6], gWinUnseen = 0, gWinOnTime = 0, gWinLater = 0, gWinIdx = -1;
+static int gWinHand[6];
 static int64_t xrOff(void) {
     if (!gClockRaw) return gTimeOffset;
     struct timespec m, r;
@@ -162,6 +188,7 @@ typedef struct {
     int attach;            // colour attachment usage (eye images; quads are sampled)
     int stampSlot;         // MOCK_XR_STAMP: the last released image's stamp read-back slot, -1 none
     unsigned stampGen;
+    uint64_t waitSig;      // MOCK_XR_EARLY=3: the waited image's signature at its wait
 } Chain;
 static Chain gChains[MAXSC];
 static int gErrors = 0;  // ERROR lines in the trace
@@ -472,6 +499,10 @@ static XrResult XRAPI_CALL mWaitImage(XrSwapchain sc, const XrSwapchainImageWait
         return XR_ERROR_CALL_ORDER_INVALID;
     }
     c->waited++;
+    if (gEarly == 3 && c->attach && gGfx && gGfx->image_sig) {
+        int idx = ((c->next - c->acquired) % c->count + c->count) % c->count;
+        c->waitSig = gGfx->image_sig(c->images, idx);
+    }
     return XR_SUCCESS;
 }
 // MOCK_XR_DUMP (see the top): the image being released, written at the dump times.
@@ -621,6 +652,7 @@ static XrResult XRAPI_CALL mBeginSession(XrSession s, const XrSessionBeginInfo* 
     (void)s;
     (void)bi;
     gT0 = nowNs();
+    gSessionStart = gT0;
     const char* secs = getenv("MOCK_XR_SECONDS");
     gEndAt = gT0 + (int64_t)((secs ? atof(secs) : 20.0) * 1e9);
     pushState(XR_SESSION_STATE_SYNCHRONIZED);
@@ -662,6 +694,9 @@ static XrResult XRAPI_CALL mEndSession(XrSession s) {
     }
     fprintf(stderr, "xrmock: waits: %d xrWaitFrame calls, %d blocked more than 2 ms, %d handed out the next refresh early (a frame was pending)%s\n",
             gWaitCalls, gBlockedWaits, gEarlyHandouts, gClockRaw ? "; XrTime is CLOCK_MONOTONIC_RAW" : "");
+    if (gEarly == 3)
+        fprintf(stderr, "xrmock: hand-out: next %d, again %d, running %d, skip %d; blocked %d, at once %d; grid moved %d times\n", gHandNext,
+                gHandAgain, gHandRunning, gHandSkip, gHandBlocked, gHandAtOnce, gPhaseShifts);
     fprintf(stderr, "xrmock: end times: %d xrEndFrame with the predicted display time of their frame, %d with another (worst %.2f ms)\n", gEndTimeMatch,
             gEndTimeOff, gEndTimeOffWorstMs);
     fprintf(stderr,
@@ -748,10 +783,89 @@ static XrResult XRAPI_CALL mPollEvent(XrInstance i, XrEventDataBuffer* ev) {
 }
 
 static int gWaits = 0;
+// MOCK_XR_EARLY=3: whether the pending frame's GPU work has written its first eye image (the
+// image's signature changed since the app waited for it; the app blits the eye images last).
+static int pendingGpuDone(void) {
+    if (!gGfx || !gGfx->image_sig) return 0;
+    for (int k = 0; k < gChainCount; k++) {
+        Chain* c = &gChains[k];
+        if (!c->attach || c->waited <= 0 || !c->waitSig) continue;
+        int idx = ((c->next - c->acquired) % c->count + c->count) % c->count;
+        return gGfx->image_sig(c->images, idx) != c->waitSig;
+    }
+    return 0;
+}
+// MOCK_XR_EARLY=3, SteamVR's hand-out (sessions of 2026-10-14, framesToThrottle 1): the wake-up index of
+// the refresh a call made now gets; *block: sleep until its wake-up. Kinds (summary, windows): 0 the
+// refresh after the last one, 1 the pending frame's refresh again, 2 the running one, 3 one past the
+// refresh after the last frame's display time (that frame landed late).
+static int64_t handOut3(int64_t now, int* block, int* kind) {
+    const int64_t step = 1 + gThrottle;
+    const int64_t run = (now - gT0) / gPeriod / step * step;
+    int64_t target;
+    *block = 0;
+    if (gPendingFrame && gPendWake >= 0) {
+        if (gPendWake > run) {
+            target = gPendWake;
+            *kind = 1;
+        } else if (gPendWake == run) {
+            const int done = pendingGpuDone();
+            target = done ? run : run + step;
+            *kind = done ? 1 : 0;
+        } else {
+            target = gPendLate ? run + step : run;
+            *kind = gPendLate ? 0 : 2;
+        }
+    } else if (gLastLandWake >= 0) {
+        target = gLastLandWake + step;
+        *kind = gLastLandedLate ? 3 : 0;
+        if (target <= run) {
+            target = run;
+            *kind = 2;
+        } else if (!gLastLandedLate) {
+            *block = 1;
+        }
+    } else {
+        target = run + step;
+        *kind = 0;
+        *block = 1;
+    }
+    return target;
+}
+static void windowLine(int64_t now) {
+    if (!gSessionStart) return;
+    int idx = (int)((now - gSessionStart) / 10000000000ll);
+    if (idx == gWinIdx) return;
+    if (gWinIdx >= 0) {
+        fprintf(stderr,
+                "xrmock: window %4d-%4d s: new eye sets held 1: %d, 2: %d, 3: %d, 4: %d, 5+: %d, never shown %d; landed on their display "
+                "time %d, later %d; hand-out next %d, again %d, running %d, skip %d, blocked %d\n",
+                gWinIdx * 10, gWinIdx * 10 + 10, gWinHeld[1], gWinHeld[2], gWinHeld[3], gWinHeld[4], gWinHeld[5], gWinUnseen, gWinOnTime,
+                gWinLater, gWinHand[0], gWinHand[1], gWinHand[2], gWinHand[3], gWinHand[4]);
+    }
+    memset(gWinHeld, 0, sizeof(gWinHeld));
+    memset(gWinHand, 0, sizeof(gWinHand));
+    gWinUnseen = gWinOnTime = gWinLater = 0;
+    gWinIdx = idx;
+}
 static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, XrFrameState* fs) {
     (void)s;
     (void)wi;
     int64_t now = nowNs();
+    windowLine(now);
+    // MOCK_XR_PHASE_MS: move the grid (gT0 forward by less than a slot) so that this call comes the
+    // given time after a wake-up.
+    if (gPhaseMs >= 0.0 && gT0 && gPhaseNext < gPhaseCount && now - gSessionStart >= (int64_t)(gPhaseAt[gPhaseNext] * 1e9)) {
+        const int64_t step = (1 + gThrottle) * gPeriod;
+        const int64_t cur = (now - gT0) % step;
+        const int64_t want = (int64_t)(gPhaseMs * 1e6) % step;
+        const int64_t delta = ((cur - want) % step + step) % step;
+        gT0 += delta;
+        gPhaseNext++;
+        gPhaseShifts++;
+        fprintf(stderr, "xrmock: phase: grid moved %.2f ms at %.1f s, calls now %.2f ms after a wake-up\n", (double)delta / 1e6,
+                (double)(now - gSessionStart) / 1e9, gPhaseMs);
+    }
     // MOCK_XR_SKIP=1: a frame loop that falls behind loses refreshes, as on a
     // headset (the next frame waits for the next refresh to come).
     // MOCK_XR_SKIP=late: a late call returns at once with the refresh that is running (SteamVR on
@@ -767,6 +881,29 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
         gWaits = (int)((now - gT0) / gPeriod / (1 + gThrottle) * (1 + gThrottle));
     }
     int64_t wake = gT0 + (int64_t)gWaits * gPeriod;
+    if (gEarly == 3 && gT0) {
+        int block = 0, kind = 0;
+        const int64_t idx = handOut3(now, &block, &kind);
+        wake = gT0 + idx * gPeriod;
+        gWinHand[kind]++;
+        if (kind == 0) gHandNext++;
+        else if (kind == 1) gHandAgain++;
+        else if (kind == 2) gHandRunning++;
+        else gHandSkip++;
+        if (block && wake > now) {
+            gHandBlocked++;
+            gWinHand[4]++;
+            if (wake - now > 2000000) gBlockedWaits++;
+            struct timespec ts = {(time_t)((wake - now) / 1000000000ll), (long)((wake - now) % 1000000000ll)};
+            nanosleep(&ts, NULL);
+        } else {
+            gHandAtOnce++;
+            if (wake > now) gEarlyHandouts++;
+        }
+        gWaits = (int)idx;
+        gHandWake = idx;
+        gHandLate = nowNs() - wake > 4000000;
+    } else {
     // MOCK_XR_EARLY=2: as 1, and a call made while a frame is pending after the next refresh's
     // wake-up gets the refresh after it (SteamVR's "refresh after the running one"; whether it
     // does that always is not known).
@@ -782,6 +919,7 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
         if (wake - now > 2000000) gBlockedWaits++;
         struct timespec ts = {(time_t)((wake - now) / 1000000000ll), (long)((wake - now) % 1000000000ll)};
         nanosleep(&ts, NULL);
+    }
     }
     gWaitCalls++;
     fs->predictedDisplayTime = wake + gLead * gPeriod + xrOff();
@@ -813,6 +951,8 @@ static XrResult XRAPI_CALL mBeginFrame(XrSession s, const XrFrameBeginInfo* bi) 
     (void)bi;
     gBegunPredicted = gWaitPredicted;
     gPendingFrame = 1;
+    gPendWake = gHandWake;
+    gPendLate = gHandLate;
     gBegunCtlTime = gCtlTime;
     gBegunCtlCallNs = gCtlCallNs;
     trace("beginFrame");
@@ -904,11 +1044,16 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
         int fresh = ei->layers[0]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION && ((const XrCompositionLayerProjection*)ei->layers[0])->viewCount == 2 &&
                     chainOf(((const XrCompositionLayerProjection*)ei->layers[0])->views[0].subImage.swapchain)->released;
         if (fresh) {
+            if (landSlot > wantSlot) gWinLater++;
+            else gWinOnTime++;
             if (gLastFreshSlot >= 0) {
                 int64_t held = landSlot - gLastFreshSlot;
-                if (held <= 0) gUnseen++;
-                else {
+                if (held <= 0) {
+                    gUnseen++;
+                    gWinUnseen++;
+                } else {
                     gHeld[held > 5 ? 5 : held]++;
+                    gWinHeld[held > 5 ? 5 : held]++;
                     // A run: consecutive fresh sets each held 2 refreshes.
                     if (held == 2) {
                         if (++gRun2 > gRun2Max) gRun2Max = gRun2;
@@ -970,6 +1115,13 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
     else if (ei->layers[0]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) gQuadEnds++;
     for (int k = 0; k < gChainCount; k++) gChains[k].released = 0;
     gPendingFrame = 0;
+    if (gT0) {
+        // MOCK_XR_EARLY=3: where this frame lands (an empty one: on its display time).
+        const int64_t want = ((int64_t)ei->displayTime - xrOff() - gT0 + gPeriod / 2) / gPeriod;
+        const int64_t land = landSlot >= 0 ? landSlot : want;
+        gLastLandWake = land - gLead;
+        gLastLandedLate = land > want;
+    }
     return XR_SUCCESS;
 }
 // The head turns slowly from side to side, so views located for different
@@ -1242,6 +1394,17 @@ static void init(void) {
     gStampOn = getenv("MOCK_XR_STAMP") != NULL;
     if (getenv("MOCK_XR_LEAD")) gLead = atoi(getenv("MOCK_XR_LEAD"));
     gEarly = getenv("MOCK_XR_EARLY") ? atoi(getenv("MOCK_XR_EARLY")) : 0;
+    const char* phase = getenv("MOCK_XR_PHASE_MS");
+    if (phase && *phase) {
+        gPhaseMs = atof(phase);
+        const char* at = strchr(phase, '@');
+        for (const char* q = at ? at + 1 : NULL; q && *q && gPhaseCount < 16;) {
+            gPhaseAt[gPhaseCount++] = atof(q);
+            q = strchr(q, ',');
+            if (q) q++;
+        }
+        if (!gPhaseCount) gPhaseAt[gPhaseCount++] = 5.0;
+    }
     gClockRaw = getenv("MOCK_XR_CLOCK") && !strcmp(getenv("MOCK_XR_CLOCK"), "raw");
     if (getenv("MOCK_XR_THROTTLE")) gThrottle = atoi(getenv("MOCK_XR_THROTTLE"));
     if (getenv("MOCK_XR_ONTIME_MS")) gOnTimeMs = atof(getenv("MOCK_XR_ONTIME_MS"));

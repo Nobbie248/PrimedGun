@@ -31,7 +31,10 @@
 #                 its draws used, the mock compares them with the poses submitted with it (a mismatch fails)
 #   --head DPS    MOCK_XR_HEAD_DPS=DPS: the mock's head turns (yaw) at up to DPS degrees a second
 #   --frame       the Frame-like mock: MOCK_XR_THROTTLE=1 MOCK_XR_LEAD=4 MOCK_XR_LATCH_MS=13.8
-#                 MOCK_XR_LAND=throttled MOCK_XR_CLOCK=raw MOCK_XR_EARLY=1 (any of them already set wins)
+#                 MOCK_XR_LAND=throttled MOCK_XR_CLOCK=raw MOCK_XR_EARLY=3 (SteamVR's hand-out as the
+#                 sessions showed it) (any of them already set wins)
+#   --phase X[@S] MOCK_XR_PHASE_MS=X[@S,...]: at S session seconds (default 5) the mock moves its refresh
+#                 grid so that the game's xrWaitFrame comes X ms after a wake-up (the sessions: about 14.5)
 #   --cool C      before the game starts, wait (up to 10 min) until every GPU thermal zone is below C
 #                 degrees Celsius, so runs start from the same temperature
 #
@@ -84,13 +87,14 @@ while [ $# -gt 0 ]; do
     --cool) COOL=$2; shift ;;
     --stamp) STAMP=1 ;;
     --head) HEAD=$2; shift ;;
+    --phase) export MOCK_XR_PHASE_MS=$2; shift ;;
     --frame)
       # SteamVR on the Frame as measured (frame/PACING.md): throttled to every second refresh, its
       # lead, its on-time limit, late frames a whole period later, XrTime on CLOCK_MONOTONIC_RAW,
-      # the next refresh handed out early while a frame is pending. Set ones win.
+      # SteamVR's hand-out (xrmock MOCK_XR_EARLY=3). Set ones win.
       export MOCK_XR_THROTTLE=${MOCK_XR_THROTTLE:-1} MOCK_XR_LEAD=${MOCK_XR_LEAD:-4} \
         MOCK_XR_LATCH_MS=${MOCK_XR_LATCH_MS:-13.8} MOCK_XR_LAND=${MOCK_XR_LAND:-throttled} \
-        MOCK_XR_CLOCK=${MOCK_XR_CLOCK:-raw} MOCK_XR_EARLY=${MOCK_XR_EARLY:-1} ;;
+        MOCK_XR_CLOCK=${MOCK_XR_CLOCK:-raw} MOCK_XR_EARLY=${MOCK_XR_EARLY:-3} ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift

@@ -773,5 +773,21 @@ static void shutdownVk(void) {
     }
 }
 
+// MOCK_XR_EARLY=3: 64 chunks of 16 bytes spread over the image's host mapping, hashed (FNV-1a).
+static uint64_t imageSig(void* images, int index) {
+    VkImage image = ((VkImage*)images)[index];
+    for (int k = 0; k < gImageCount; k++) {
+        if (gImages[k].image != image || !gImages[k].map || gImages[k].size < 64 * 16) continue;
+        uint64_t h = 1469598103934665603ull;
+        VkDeviceSize step = gImages[k].size / 64;
+        for (int i = 0; i < 64; i++) {
+            const unsigned char* q = gImages[k].map + (VkDeviceSize)i * step;
+            for (int b = 0; b < 16; b++) h = (h ^ q[b]) * 1099511628211ull;
+        }
+        return h ? h : 1;
+    }
+    return 0;
+}
+
 const MockGfx kMockGfxVk = {"vk", ownsBinding, describeBinding, getProc, formats, formatOf, createImages, fillImages, releaseWaitMs,
-                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage, destroyImages, shutdownVk, stampCapture, stampRead};
+                            releaseSnapshot, pollSnapshots, snapshotsChecked, dumpImage, destroyImages, shutdownVk, stampCapture, stampRead, imageSig};

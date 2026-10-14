@@ -58,6 +58,9 @@ typedef struct MockGfx {
     // The slot's stamp: 1 decoded (oldest and newest locate, eye), 0 not read back yet (wait != 0:
     // waits), -1 no valid stamp in the image, -2 the slot was reused since (gen differs).
     int (*stamp_read)(int slot, unsigned gen, int wait, uint64_t* oldest, uint64_t* newest, int* eye);
+    // MOCK_XR_EARLY=3: a signature of image `index`'s memory (a few bytes sampled through the host
+    // mapping); it changes once the app's GPU work writes the image. 0: not available.
+    uint64_t (*image_sig)(void* images, int index);
 } MockGfx;
 
 extern const MockGfx kMockGfxGles;
