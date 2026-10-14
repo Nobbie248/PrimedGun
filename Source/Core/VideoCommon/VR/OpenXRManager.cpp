@@ -1492,10 +1492,16 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
 
   // The refresh spacing: the smallest step between consecutive display times seen at least four
   // times in the last 64 (a step of 0, the same refresh handed out twice, or two refreshes do
-  // not count).
+  // not count). A larger one replaces it only after 30 s without a step of about the old one:
+  // SteamVR can hand out the same refresh twice and then skip one for seconds on end (session
+  // of 2026-10-14, light room: steps of 0 and 33.3 ms only, which made the slot 33.3 ms and the
+  // landing plan wrong by a refresh: the 1-3 cadence).
   if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
   {
-    m_display_steps[m_display_step_next] = m_clock.display_time - m_prev_wait_display_time;
+    const int64_t step_now = m_clock.display_time - m_prev_wait_display_time;
+    if (m_slot_ns > 0 && std::abs(step_now - m_slot_ns) < 500'000)
+      m_slot_seen_ns = m_clock.wake_ns;
+    m_display_steps[m_display_step_next] = step_now;
     m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
     m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
     int64_t best = 0;
@@ -1510,8 +1516,16 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
       if (near >= 4)
         best = step;
     }
-    if (best != 0)
+    if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns ||
+                      m_clock.wake_ns - m_slot_seen_ns > 30'000'000'000LL))
+    {
+      if (m_slot_ns != 0 && std::abs(best - m_slot_ns) > 500'000)
+        INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms (was {:.2f} ms)", best / 1e6,
+                     m_slot_ns / 1e6);
+      if (std::abs(best - m_slot_ns) > 500'000)
+        m_slot_seen_ns = m_clock.wake_ns;
       m_slot_ns = best;
+    }
   }
   m_prev_wait_display_time = m_clock.display_time;
 }
@@ -1548,18 +1562,25 @@ bool OpenXRManager::WantsLeadCalibration() const
 }
 
 // The frame's xrWaitFrame return to its GPU work finished (the releaser's fence), for the
-// expected finish of later frames of the same kind (handed out early or not).
-void OpenXRManager::NoteCycleFinish(XrTime display_time, int64_t finish_ns)
+// expected finish of later frames (the landing plan, WaitFrame), and its slack before the on-time
+// limit of the refresh it was planned to land on.
+void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t finish_ns, double slack_ms)
 {
   std::lock_guard<std::mutex> lock(m_clock_mutex);
   for (const WaitNote& note : m_wait_notes)
   {
-    if (note.display_time != display_time || note.return_ns == 0)
+    if (note.seq != wait_seq || note.return_ns == 0)
       continue;
     const double sample = std::min((finish_ns - note.return_ns) / 1e6, 60.0);
     double& avg = m_finish_avg_ms[note.early ? 1 : 0];
     avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
     m_cycle_finish_seen = true;
+    m_finish_ring[m_finish_next] = static_cast<float>(sample);
+    m_slack_ring[m_finish_next] = static_cast<float>(slack_ms);
+    m_finish_next = (m_finish_next + 1) % m_finish_ring.size();
+    m_finish_count = std::min(m_finish_count + 1, m_finish_ring.size());
+    m_settle_frames++;
+    break;
   }
 }
 
@@ -1581,6 +1602,7 @@ bool OpenXRManager::WaitFrame()
     m_wait_max_us.store(waited_us, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> lock(m_clock_mutex);
+    const int64_t prev_call_ns = m_wait_call_ns;
     m_wait_call_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                          wait_start.time_since_epoch())
                          .count();
@@ -1595,6 +1617,7 @@ bool OpenXRManager::WaitFrame()
 
     const PredictConfig& predict = GetPredictConfig();
     const double slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
+    const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
     // How late after the runtime's wake-up for its display time this call returned (negative:
     // handed out early) plus the usual return-to-finish time of such frames: when the frame is
     // expected to be ready, against SteamVR's on-time limit.
@@ -1604,43 +1627,98 @@ bool OpenXRManager::WaitFrame()
                                                       m_finish_avg_ms[m_clock.early ? 0 : 1];
     const double ready_ms = after_wake_ms + finish_avg;
 
-    // Cycle end late (frame/PACING.md "The wake-up"): a frame that will not make SteamVR's
-    // on-time limit is planned to land whole refreshes after its display time: the releaser
-    // holds it past the limit and its poses are located for the refresh it lands on. No two
-    // frames should land on one refresh (the second replaces the first, which is then never
-    // shown): a frame handed the refresh the last frame lands on is planned late too (a late
-    // run), until frames handed out early end the run.
-    int land = 0;
-    const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
-    m_early_streak = m_clock.early && after_wake_ms <= -2.0 ? m_early_streak + 1 : 0;
-    if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0 && finish_avg > 0)
+    // A hitch (this call came more than one and a half refreshes after the last one; the game
+    // itself was late) or the start: a settle window begins, in which the plan may move the
+    // landing one refresh earlier once (below).
+    const bool hitch = prev_call_ns == 0 ||
+                       (slot_ns > 0 && m_wait_call_ns - prev_call_ns > slot_ns * 3 / 2);
+    if (hitch)
     {
-      // A frame handed out early that misses the limit anyway lands on the refresh the next
-      // (early) frame gets and is replaced by it: one frame lost, no late run. One that came after
-      // the wake-up is planned late with the margin, so that such frames do not straddle it.
-      const double margin_ms = m_clock.early ? 0.0 : 2.0;
-      if (ready_ms > predict.ontime_ms - margin_ms)
-        land = std::clamp(static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)), 1, 2);
-      if (land == 0 && m_prev_land_time != 0 &&
-          m_clock.display_time <= m_prev_land_time + slot_ns / 2)
+      m_settle_start_ns = m_wait_return_ns;
+      m_settle_frames = 0;
+      m_settle_caught_up = false;
+    }
+
+    // The landing plan (frame/PACING.md "One landing"; cycle with the overlap, on unless
+    // PRIMEFRAME_CYCLE_END=asap). Whatever refresh SteamVR handed out (the next one early, the
+    // running one, the same one again, one further), the frame lands on the refresh after the last
+    // frame's landing: a frame handed a refresh before that is held past the on-time limit and its
+    // poses located for the landing refresh. Only a frame expected to miss that refresh (95th
+    // percentile of the last frames' return-to-finish time, 1 ms inside the limit) lands a refresh
+    // later (one image shown twice), and only in a settle window after a hitch, when every frame of
+    // it would have been ready 4 ms inside the earlier limit, may a frame land on the last frame's
+    // refresh (that frame is then not shown) to shorten the latency. No other change of landing:
+    // constant cadence, whatever the latency.
+    int land = 0;
+    if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0)
+    {
+      double fin95 = finish_avg;
+      const size_t n = std::min<size_t>(m_finish_count, 120);
+      if (n >= 10)
       {
-        // Handed the refresh the last frame lands on. A late run ends (that frame is then not
-        // shown) once 15 frames in a row were handed out at least 2 ms early, at most once a
-        // second; else this frame lands a refresh late too.
-        if (m_early_streak >= 15 && m_wait_return_ns - m_late_run_end_ns > 1'000'000'000LL)
+        std::array<float, 120> last{};
+        for (size_t i = 0; i < n; ++i)
+          last[i] = m_finish_ring[(m_finish_next + m_finish_ring.size() - 1 - i) % m_finish_ring.size()];
+        const size_t k = std::min(n - 1, static_cast<size_t>(0.95 * n));
+        std::nth_element(last.begin(), last.begin() + k, last.begin() + n);
+        fin95 = last[k];
+      }
+      const double ready95 = after_wake_ms + fin95;
+      const int k_min =
+          fin95 <= 0 ? 0 :
+                       std::max(0, static_cast<int>(std::ceil((ready95 - (predict.ontime_ms - 1.0)) / slot_ms)));
+      int k = k_min;
+      if (m_prev_land_time != 0)
+      {
+        const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
+        const int k_cont = static_cast<int>(std::llround(static_cast<double>(cont_ns) / slot_ns));
+        k = std::max(k_min, k_cont);
+        // Catch-up after a hitch: the last settle frames (at least 60) all had 4 ms to spare one
+        // refresh before their landing, and so would this one.
+        if (k == k_cont && k_cont >= 1 && !m_settle_caught_up && fin95 > 0 &&
+            m_settle_frames >= 60 && m_wait_return_ns - m_settle_start_ns < 8'000'000'000LL &&
+            ready95 - (k_cont - 1) * slot_ms <= predict.ontime_ms - 4.0)
         {
-          m_late_run_end_ns = m_wait_return_ns;
-          m_late_run_ends++;
-          INFO_LOG_FMT(OPENXR,
-                       "PrimeFrame cycle: frames handed out early end a late run ({}); the late "
-                       "frame before this one is replaced",
-                       m_late_run_ends);
+          const size_t sn = std::min<size_t>(m_settle_frames, std::min<size_t>(m_finish_count, 120));
+          float min_slack = 1e9f;
+          for (size_t i = 0; i < sn; ++i)
+          {
+            min_slack = std::min(
+                min_slack,
+                m_slack_ring[(m_finish_next + m_slack_ring.size() - 1 - i) % m_slack_ring.size()]);
+          }
+          if (min_slack >= slot_ms + 4.0)
+          {
+            k = k_cont - 1;
+            m_settle_caught_up = true;
+            m_plan_catchups_total++;
+            m_frame_timing.plan_catchups++;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimeFrame cycle landing: one refresh earlier after the hitch ({}; frames "
+                         "of the last {:.1f} s had at least {:.1f} ms to spare a refresh earlier); "
+                         "the last frame is not shown",
+                         m_plan_catchups_total, (m_wait_return_ns - m_settle_start_ns) / 1e9,
+                         min_slack - slot_ms);
+          }
         }
-        else
+        if (k > k_cont && !hitch)
         {
-          land = 1;
+          m_plan_breaks_total++;
+          m_frame_timing.plan_breaks++;
+          if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)
+          {
+            m_plan_log_ns = m_wait_return_ns;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimeFrame cycle landing: {} refresh later ({}; expected ready {:.2f} ms "
+                         "after the wake-up of the refresh after the last frame's, limit {:.1f}); the "
+                         "last image is shown twice",
+                         k - k_cont, m_plan_breaks_total, ready95 - k_cont * slot_ms,
+                         predict.ontime_ms);
+          }
         }
       }
+      land = std::clamp(k, 0, 3);
+      m_frame_timing.plan_slots[std::min(land, 2)]++;
     }
     m_clock.plan_slots = land;
     m_prev_land_time = m_clock.display_time + land * slot_ns;
@@ -1654,20 +1732,21 @@ bool OpenXRManager::WaitFrame()
     {
       m_frame_extra_ns = land * slot_ns;
     }
-    else if (m_predict_allowed && predict.mode == 2 && finish_avg > 0 && slot_ms > 0 &&
+    else if (m_predict_allowed && predict.mode == 2 &&
+             !m_cycle_end_late.load(std::memory_order_relaxed) && finish_avg > 0 && slot_ms > 0 &&
              ready_ms > predict.ontime_ms)
     {
       const int periods =
           std::min(3, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)));
       m_frame_extra_ns = static_cast<int64_t>(periods * slot_ms * 1e6);
     }
-    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
-                                      m_clock.early, m_clock.plan_slots};
-    m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
     {
       std::lock_guard<std::mutex> seq_lock(m_wait_seq_mutex);
       m_clock.wait_seq = ++m_wait_seq;
     }
+    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
+                                      m_clock.early, m_clock.plan_slots, m_clock.wait_seq};
+    m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
   }
   m_wait_seq_cv.notify_all();
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
@@ -1963,7 +2042,14 @@ bool OpenXRManager::StartCycleFrame(bool locate_views)
       return false;
     if (!m_last_wait_blocked)
     {
-      if (!BeginFrame() || !EndFrame({}) || !WaitFrame())
+      if (!BeginFrame() || !EndFrame({}))
+        return false;
+      {
+        // The empty frame does not count for the landing plan.
+        std::lock_guard<std::mutex> lock(m_clock_mutex);
+        m_prev_land_time = 0;
+      }
+      if (!WaitFrame())
         return false;
     }
     INFO_LOG_FMT(OPENXR, "PrimeFrame lead calibration {}: the frame's xrWaitFrame {}",
