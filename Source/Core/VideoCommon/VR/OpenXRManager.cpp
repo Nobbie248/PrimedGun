@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1388,6 +1389,150 @@ const PredictConfig& GetPredictConfig()
 }
 }  // namespace
 
+// The runtime's wake-up grid (frame/PACING.md "The wake-up"), under m_clock_mutex, right after
+// xrWaitFrame returned (m_clock.display_time, m_clock.wake_ns set). SteamVR's XrTime is
+// CLOCK_MONOTONIC_RAW, which runs about 33 us a second slower than the steady clock: the lead
+// is kept in XrTime and converted with the offset of the moment, so it does not drift.
+void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
+{
+  timespec raw_ts{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &raw_ts);
+  const int64_t raw_now = static_cast<int64_t>(raw_ts.tv_sec) * 1'000'000'000LL + raw_ts.tv_nsec;
+  const int64_t steady_now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::steady_clock::now().time_since_epoch())
+                                 .count();
+  const int64_t raw_offset = raw_now - steady_now;
+  if (m_xr_clock == 0 && m_clock.display_time > 0)
+  {
+    // The clock whose lead is plausible (0 to 500 ms); raw when both are (shortly after a boot
+    // they differ by little). PRIMEFRAME_XR_CLOCK=raw|steady forces one.
+    const auto plausible = [](int64_t lead) { return lead > 0 && lead < 500'000'000LL; };
+    const int64_t lead_raw = m_clock.display_time - (m_clock.wake_ns + raw_offset);
+    const int64_t lead_steady = m_clock.display_time - m_clock.wake_ns;
+    const char* force = std::getenv("PRIMEFRAME_XR_CLOCK");
+    if (force && std::string_view(force) == "raw")
+      m_xr_clock = 1;
+    else if (force && std::string_view(force) == "steady")
+      m_xr_clock = 2;
+    else if (plausible(lead_raw))
+      m_xr_clock = 1;
+    else if (plausible(lead_steady))
+      m_xr_clock = 2;
+    if (m_xr_clock != 0)
+    {
+      INFO_LOG_FMT(OPENXR,
+                   "PrimeFrame XrTime clock: {} (first lead {:.2f} ms; with the other clock it "
+                   "would read {:.2f} ms)",
+                   m_xr_clock == 1 ? "CLOCK_MONOTONIC_RAW" : "steady (CLOCK_MONOTONIC)",
+                   (m_xr_clock == 1 ? lead_raw : lead_steady) / 1e6,
+                   (m_xr_clock == 1 ? lead_steady : lead_raw) / 1e6);
+    }
+  }
+  m_xr_offset_ns = m_xr_clock == 1 ? raw_offset : 0;
+  const int64_t lead = m_clock.display_time - (m_clock.wake_ns + m_xr_offset_ns);
+
+  // A call that blocked (over 2 ms; returning at once still takes a fraction of a ms) returned at
+  // the runtime's wake-up: its lead is exact. A different exact lead is taken at once while the
+  // known one is only the largest seen, else after three blocking calls that agree.
+  m_last_wait_blocked = waited_us > 2000;
+  if (m_last_wait_blocked)
+  {
+    if (!m_wake_lead_exact || std::abs(lead - m_wake_lead_ns) < 3'000'000)
+    {
+      if (!m_wake_lead_exact)
+      {
+        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms)",
+                     lead / 1e6, waited_us / 1e3);
+      }
+      m_wake_lead_ns = lead;
+      m_wake_lead_exact = true;
+      m_lead_disagree = 0;
+    }
+    else
+    {
+      if (m_lead_disagree > 0 && std::abs(lead - m_lead_candidate_ns) < 1'000'000)
+        m_lead_disagree++;
+      else
+        m_lead_disagree = 1;
+      m_lead_candidate_ns = lead;
+      if (m_lead_disagree >= 3)
+      {
+        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (was {:.2f} ms)", lead / 1e6,
+                     m_wake_lead_ns / 1e6);
+        m_wake_lead_ns = lead;
+        m_lead_disagree = 0;
+      }
+    }
+  }
+  else if (!m_wake_lead_exact && lead > m_wake_lead_ns && lead < 500'000'000LL)
+  {
+    m_wake_lead_ns = lead;
+  }
+  m_clock.grid_offset_ns = m_wake_lead_ns + m_xr_offset_ns;
+  m_clock.early = m_wake_lead_exact && lead > m_wake_lead_ns + 500'000;
+  m_clock.plan_late = m_cycle_end_late.load(std::memory_order_relaxed) && !m_clock.early;
+
+  // The refresh spacing: the smallest step between consecutive display times seen at least four
+  // times in the last 64 (a step of 0, the same refresh handed out twice, or two refreshes do
+  // not count).
+  if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
+  {
+    m_display_steps[m_display_step_next] = m_clock.display_time - m_prev_wait_display_time;
+    m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
+    m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
+    int64_t best = 0;
+    for (size_t i = 0; i < m_display_step_count; ++i)
+    {
+      const int64_t step = m_display_steps[i];
+      if (best != 0 && step >= best)
+        continue;
+      int near = 0;
+      for (size_t j = 0; j < m_display_step_count; ++j)
+        near += std::abs(m_display_steps[j] - step) < 500'000;
+      if (near >= 4)
+        best = step;
+    }
+    if (best != 0)
+      m_slot_ns = best;
+  }
+  m_prev_wait_display_time = m_clock.display_time;
+}
+
+void OpenXRManager::GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_ms) const
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  *lead_ms = m_wake_lead_ns / 1e6;
+  *lead_exact = m_wake_lead_exact;
+  *slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
+}
+
+bool OpenXRManager::WantsLeadCalibration() const
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  if (m_wake_lead_exact || m_calib_attempts >= 5 || m_clock.display_time == 0)
+    return false;
+  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  return m_calib_last_ns == 0 || now - m_calib_last_ns > 2'000'000'000LL;
+}
+
+// The frame's xrWaitFrame return to its GPU work finished (the releaser's fence), for the
+// expected finish of later frames of the same kind (handed out early or not).
+void OpenXRManager::NoteCycleFinish(XrTime display_time, int64_t finish_ns)
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  for (const WaitNote& note : m_wait_notes)
+  {
+    if (note.display_time != display_time || note.return_ns == 0)
+      continue;
+    const double sample = std::min((finish_ns - note.return_ns) / 1e6, 60.0);
+    double& avg = m_finish_avg_ms[note.early ? 1 : 0];
+    avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
+    m_cycle_finish_seen = true;
+  }
+}
+
 bool OpenXRManager::WaitFrame()
 {
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
@@ -1410,58 +1555,38 @@ bool OpenXRManager::WaitFrame()
                            wait_end.time_since_epoch())
                            .count();
     m_wait_display_time = m_frame_state.predictedDisplayTime;
-    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns};
-    m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
     m_clock.display_time = m_frame_state.predictedDisplayTime;
-    m_clock.wake_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                          wait_end.time_since_epoch())
-                          .count();
-    // A call made before the (estimated) wake-up that blocked (over 2 ms; returning at once still
-    // takes a fraction of a ms) returned at the runtime's wake-up: its lead is exact (the runtime
-    // may change it). One that returned at once was late: its lead is a lower bound.
-    const int64_t grid_offset = m_clock.display_time - m_clock.wake_ns;
-    const bool blocked_for_wake =
-        waited_us > 2000 &&
-        (m_clock.grid_offset_ns == 0 || m_wait_call_ns < m_clock.display_time - m_clock.grid_offset_ns);
-    const bool period_changed = m_clock.period_ns != m_frame_state.predictedDisplayPeriod;
-    if (period_changed || blocked_for_wake || grid_offset > m_clock.grid_offset_ns)
-      m_clock.grid_offset_ns = grid_offset;
+    m_clock.wake_ns = m_wait_return_ns;
     m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
-
-    // The runtime's lead for the prediction: the largest of the last two 10 s windows (a late
-    // call returns at once with a shorter lead; the windows let a changed lead or a drifting
-    // XrTime clock through).
-    if (period_changed || m_lead_window_start_ns == 0 ||
-        m_clock.wake_ns - m_lead_window_start_ns > 10'000'000'000LL)
-    {
-      m_lead_window_max = {period_changed ? 0 : m_lead_window_max[1], 0};
-      m_lead_window_start_ns = m_clock.wake_ns;
-    }
-    m_lead_window_max[1] = std::max(m_lead_window_max[1], grid_offset);
-    // The grid offset keeps the lead of the last call that blocked for the wake-up: with every
-    // call late (a game whose frames start at a fixed phase after the wake-up) the windows alone
-    // would forget the real lead.
-    const int64_t full_lead =
-        std::max({m_lead_window_max[0], m_lead_window_max[1], m_clock.grid_offset_ns});
+    UpdateWakeGrid(waited_us);
 
     const PredictConfig& predict = GetPredictConfig();
+    const double slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
+    // How late after the runtime's wake-up for its display time this call returned (negative:
+    // handed out early) plus the usual return-to-finish time of such frames: when the frame is
+    // expected to be ready, against SteamVR's on-time limit.
+    const double after_wake_ms = (m_wait_return_ns - (m_clock.display_time - m_clock.grid_offset_ns)) / 1e6;
+    const double finish_avg =
+        m_finish_avg_ms[m_clock.early ? 1 : 0] > 0 ? m_finish_avg_ms[m_clock.early ? 1 : 0] :
+                                                      m_finish_avg_ms[m_clock.early ? 0 : 1];
+    double ready_ms = after_wake_ms + finish_avg;
+    if (m_clock.plan_late)
+      ready_ms = std::max(ready_ms, predict.ontime_ms + 2.5);
     m_frame_extra_ns = 0;
     if (m_predict_allowed && predict.mode == 1)
     {
       m_frame_extra_ns = predict.fixed_ns;
     }
-    else if (m_predict_allowed && predict.mode == 2 && m_end_after_wait_avg_ms > 0 &&
-             m_clock.period_ns > 0)
+    else if (m_predict_allowed && predict.mode == 2 && finish_avg > 0 && slot_ms > 0 &&
+             ready_ms > predict.ontime_ms)
     {
-      const double period_ms = m_clock.period_ns / 1e6;
-      const double ready_ms = (full_lead - grid_offset) / 1e6 + m_end_after_wait_avg_ms;
-      if (ready_ms > predict.ontime_ms)
-      {
-        const int periods =
-            std::min(3, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / period_ms)));
-        m_frame_extra_ns = periods * m_clock.period_ns;
-      }
+      const int periods =
+          std::min(3, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)));
+      m_frame_extra_ns = static_cast<int64_t>(periods * slot_ms * 1e6);
     }
+    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
+                                      m_clock.early, m_clock.plan_late};
+    m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
   }
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
                                           std::memory_order_release);
@@ -1587,24 +1712,26 @@ static double OnTimeMs()
 
 // One line per ended frame (XRF), the per-second sums for XRSTATS. Times in ms: blk how long its
 // xrWaitFrame blocked; lead its predicted display time minus the xrWaitFrame return; r the
-// xrWaitFrame return to the xrEndFrame; rg the wake-up the runtime's grid gives for the display
-// time (the earliest xrWaitFrame return seen for it, display time minus the largest lead seen)
-// to the xrEndFrame (a late xrWaitFrame call returns after it); age the poses' xrLocateViews call
+// xrWaitFrame return to the xrEndFrame; rg the runtime's wake-up for the display time (display
+// time minus the runtime's lead, UpdateWakeGrid) to the xrEndFrame; age the poses' xrLocateViews call
 // to the xrEndFrame (-1: unknown); pdt the poses' display time minus the end's (0: the frame
 // ends with the display time its poses were located for); dd refreshes since the last ended
-// display time; per the display period.
+// display time (in refresh steps); per the predictedDisplayPeriod; ex how far past the display time
+// the poses were located; w the xrWaitFrame return minus the runtime's wake-up for the display
+// time (negative: handed out early); pl 1 when the frame was planned a period late.
 void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers)
 {
   const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now().time_since_epoch())
                              .count();
-  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0;
+  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0, w = 0;
   int64_t dd = 0;
   uint64_t n = 0;
+  bool early = false, plan_late = false;
   {
     std::lock_guard<std::mutex> lock(m_clock_mutex);
-    const int64_t period = m_clock.period_ns;
-    period_ms = period / 1e6;
+    const int64_t period = m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns;
+    period_ms = m_clock.period_ns / 1e6;
     for (const WaitNote& note : m_wait_notes)
     {
       if (note.display_time == display_time && note.return_ns != 0)
@@ -1612,6 +1739,10 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
         blk = (note.return_ns - note.call_ns) / 1e6;
         lead = (display_time - note.return_ns) / 1e6;
         r = (end_ns - note.return_ns) / 1e6;
+        early = note.early;
+        plan_late = note.plan_late;
+        if (m_clock.grid_offset_ns != 0)
+          w = (note.return_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
       }
     }
     if (m_clock.grid_offset_ns != 0)
@@ -1662,11 +1793,13 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
         t.extra_sum_ms += ex;
         t.extra_frames++;
       }
-      if (r >= 0)
+      if (early)
+        t.early_frames++;
+      if (r >= 0 && !m_cycle_finish_seen)
       {
         const double sample = std::min(r, 50.0);
-        m_end_after_wait_avg_ms =
-            m_end_after_wait_avg_ms <= 0 ? sample : m_end_after_wait_avg_ms * 0.9 + sample * 0.1;
+        double& avg = m_finish_avg_ms[early ? 1 : 0];
+        avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
       }
     }
     n = ++m_frame_log_count;
@@ -1675,8 +1808,9 @@ void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has
   {
     INFO_LOG_FMT(OPENXR,
                  "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
-                 "per={:.3f} ex={:.2f}{}",
-                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, has_layers ? "" : " empty");
+                 "per={:.3f} ex={:.2f} w={:.2f} pl={}{}",
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, w, plan_late ? 1 : 0,
+                 has_layers ? "" : " empty");
   }
 }
 
@@ -1722,7 +1856,33 @@ void OpenXRManager::StartLazyFrameIfArmed() const
 
 bool OpenXRManager::StartCycleFrame(bool locate_views)
 {
-  if (m_swapchain && m_swapchain->UsesCycleOverlap())
+  if (WantsLeadCalibration())
+  {
+    // No exact lead yet (no xrWaitFrame has blocked): end whatever is pending, so that SteamVR
+    // blocks the next call until its wake-up; if this one returns at once, spend it on an empty
+    // frame and wait for the next refresh.
+    if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("lead calibration"))
+      return false;
+    {
+      std::lock_guard<std::mutex> lock(m_clock_mutex);
+      m_calib_attempts++;
+      m_calib_last_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    }
+    if (!WaitFrame())
+      return false;
+    if (!m_last_wait_blocked)
+    {
+      if (!BeginFrame() || !EndFrame({}) || !WaitFrame())
+        return false;
+    }
+    INFO_LOG_FMT(OPENXR, "PrimeFrame lead calibration {}: the frame's xrWaitFrame {}",
+                 m_calib_attempts, m_last_wait_blocked ? "blocked" : "did not block");
+    if (!BeginFrame())
+      return false;
+  }
+  else if (m_swapchain && m_swapchain->UsesCycleOverlap())
   {
     // The last frame may still be ending on the releaser thread: wait only until it was begun.
     if (!m_swapchain->CycleBeforeWait() || !WaitFrame())

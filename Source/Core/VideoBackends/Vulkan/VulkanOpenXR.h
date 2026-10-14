@@ -211,6 +211,7 @@ private:
     int64_t submit_ns = 0;
     XrTime pose_time = 0;       // the display time its poses were located for
     bool should_render = true;  // cycle: the frame's xrWaitFrame said so
+    bool plan_late = false;     // cycle: planned a period late (held past the on-time limit)
     // Cycle timing (XRC line): the frame's xrWaitFrame return, how long the video thread waited
     // for the last frame's end at this frame's start, its CPU and wall time since the last submit.
     int64_t wake_ns = 0;
@@ -300,7 +301,7 @@ private:
   int m_end_cfg = 2;   // 0 asap, 1 late, 2 auto
   int m_end_mode = 0;  // 0 asap, 1 hold
   double m_end_ontime_ms = 19.5;
-  double m_end_earliest_ms = 16.0;
+  double m_end_earliest_ms = 0.0;
   int64_t m_end_since_ns = 0;
   int64_t m_end_dwell_ns = 10'000'000'000LL;
   std::array<float, 600> m_end_ready{};  // the last frames' finish after their wake-up (ms)

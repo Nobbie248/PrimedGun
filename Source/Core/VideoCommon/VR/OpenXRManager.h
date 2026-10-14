@@ -227,6 +227,7 @@ public:
     uint32_t age_count = 0;
     double extra_sum_ms = 0;  // how far past their display time the poses were located
     uint32_t extra_frames = 0;  // frames located past their display time
+    uint32_t early_frames = 0;  // frames whose xrWaitFrame returned before the runtime's wake-up
   };
   void TakeFrameTimingStats(FrameTimingStats* out);
 
@@ -237,10 +238,16 @@ public:
     XrTime display_time = 0;
     int64_t wake_ns = 0;
     int64_t period_ns = 0;
-    // display_time minus the steady clock at which xrWaitFrame returns on time for it: that of
-    // the last call that blocked, else the largest seen (a call made late returns at once, later
-    // than the runtime's wake-up point).
+    // display_time minus the steady clock at the runtime's wake-up for it: the runtime's lead
+    // (XrTime, from the last call that blocked; before one did, the largest seen) plus the
+    // XrTime clock's offset to the steady clock now (SteamVR's XrTime is CLOCK_MONOTONIC_RAW).
     int64_t grid_offset_ns = 0;
+    // The frame begun by the last xrWaitFrame: returned before the runtime's wake-up for its
+    // display time (SteamVR hands out the next refresh early while a frame is still being
+    // ended); planned to be shown a period late (cycle end late and not early, see
+    // SetCycleEndLate), with the poses located for that.
+    bool early = false;
+    bool plan_late = false;
   };
   FrameClock GetFrameClock() const
   {
@@ -249,6 +256,20 @@ public:
   }
   // xrWaitFrame calls since the last call: count, total and longest blocking time (us).
   void TakeWaitFrameStats(uint32_t* count, uint64_t* total_us, uint64_t* max_us);
+  // The runtime's lead (wake-up to display time, ms; exact once a call blocked) and the spacing of
+  // the refreshes it hands out (ms; framesToThrottle 1 at 120 Hz: 16.67, whatever
+  // predictedDisplayPeriod says).
+  void GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_ms) const;
+  // Cycle pacing (frame/PACING.md "The wake-up"): the releaser's end mode. Late: frames that
+  // are not handed out early are held past the on-time limit and their poses located a period
+  // later. NoteCycleFinish: the frame's GPU work finished (its xrWaitFrame return to its fence,
+  // per kind of frame, for the expected finish of the next frames).
+  void SetCycleEndLate(bool late) { m_cycle_end_late.store(late, std::memory_order_relaxed); }
+  void NoteCycleFinish(XrTime display_time, int64_t finish_ns);
+  // No exact lead yet: the next cycle frame start ends whatever is pending and, unless its
+  // xrWaitFrame blocks, spends one empty frame so that the next one does (once every 2 s, at
+  // most five times).
+  bool WantsLeadCalibration() const;
 
   // ---- Accessors ----
 
@@ -372,6 +393,7 @@ private:
   // Cycle pacing: called by every pose read; starts the armed frame on the arming thread.
   void StartLazyFrameIfArmed() const;
   void NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers);
+  void UpdateWakeGrid(uint64_t waited_us);
 
   struct PublishedXRLayer
   {
@@ -499,6 +521,8 @@ private:
     XrTime display_time = 0;
     int64_t call_ns = 0;
     int64_t return_ns = 0;
+    bool early = false;
+    bool plan_late = false;
   };
   std::array<WaitNote, 4> m_wait_notes{};
   size_t m_wait_note_next = 0;
@@ -518,14 +542,35 @@ private:
   bool m_submitted_eye_views_valid = false;
 
   // Prediction for the real display time (SetPredictExtraAllowed). The extra of the frame begun
-  // by the last xrWaitFrame; the runtime's lead (display time minus the steady clock at its
-  // wake-up) as the largest of two 10 s windows; the xrWaitFrame return to xrEndFrame time
-  // (average). Under m_clock_mutex, except m_frame_extra_ns (the thread calling xrWaitFrame).
+  // by the last xrWaitFrame; the xrWaitFrame return to finish time (average) of frames handed out
+  // on time [0] and early [1]. Under m_clock_mutex, except m_frame_extra_ns (the thread calling
+  // xrWaitFrame).
   bool m_predict_allowed = false;
   int64_t m_frame_extra_ns = 0;
-  std::array<int64_t, 2> m_lead_window_max{};
-  int64_t m_lead_window_start_ns = 0;
-  double m_end_after_wait_avg_ms = 0;
+  std::array<double, 2> m_finish_avg_ms{};
+  bool m_cycle_finish_seen = false;
+  std::atomic<bool> m_cycle_end_late{false};
+
+  // The runtime's wake-up grid (frame/PACING.md "The wake-up"), under m_clock_mutex. XrTime
+  // clock: 0 not chosen, 1 CLOCK_MONOTONIC_RAW, 2 the steady clock (CLOCK_MONOTONIC); its offset
+  // to the steady clock at the last xrWaitFrame return. The lead in XrTime: exact from calls
+  // that blocked for the wake-up (a call made later returns at once with a shorter lead, one
+  // SteamVR hands out early with a longer one), else the largest seen. The refresh spacing:
+  // the smallest step between consecutive display times that recurs.
+  int m_xr_clock = 0;
+  int64_t m_xr_offset_ns = 0;
+  int64_t m_wake_lead_ns = 0;
+  bool m_wake_lead_exact = false;
+  int64_t m_lead_candidate_ns = 0;
+  int m_lead_disagree = 0;
+  bool m_last_wait_blocked = false;
+  XrTime m_prev_wait_display_time = 0;
+  std::array<int64_t, 64> m_display_steps{};
+  size_t m_display_step_next = 0;
+  size_t m_display_step_count = 0;
+  int64_t m_slot_ns = 0;
+  int m_calib_attempts = 0;
+  int64_t m_calib_last_ns = 0;
 
   // "Home" head-center position. With stage space this remains the runtime's play-space origin;
   // local-space fallback records the first usable head-center position.

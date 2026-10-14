@@ -838,6 +838,7 @@ bool VulkanOpenXR::Initialize()
               EnvIs("PRIMEFRAME_CYCLE_END", "late") ? 1 :
                                                       2;
   m_end_mode = m_end_cfg == 1 ? 1 : 0;
+  VR::g_openxr->SetCycleEndLate(m_end_mode == 1);
   if (const char* ontime = std::getenv("PRIMEFRAME_PREDICT_ONTIME_MS"))
     m_end_ontime_ms = std::atof(ontime);
   if (const char* earliest = std::getenv("PRIMEFRAME_CYCLE_EARLIEST_MS"))
@@ -2581,10 +2582,13 @@ void VulkanOpenXR::EmitStats()
   uint32_t waits = 0;
   uint64_t wait_total_us = 0, wait_max_us = 0;
   VR::OpenXRManager::FrameTimingStats timing{};
+  double wake_lead_ms = 0, slot_ms = 0;
+  bool lead_exact = false;
   if (VR::g_openxr)
   {
     VR::g_openxr->TakeWaitFrameStats(&waits, &wait_total_us, &wait_max_us);
     VR::g_openxr->TakeFrameTimingStats(&timing);
+    VR::g_openxr->GetWakeGrid(&wake_lead_ms, &lead_exact, &slot_ms);
   }
   const double ended = std::max<uint32_t>(timing.frames, 1);
   INFO_LOG_FMT(OPENXR,
@@ -2593,6 +2597,7 @@ void VulkanOpenXR::EmitStats()
                "xrwait_avg_ms={:.2f} xrwait_max_ms={:.2f} set_waits={} discards={} "
                "end_avg_ms={:.2f} end_max_ms={:.2f} end_late={} age_avg_ms={:.2f} "
                "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} extra_avg_ms={:.2f} extra_frames={} "
+               "early={} wake_lead_ms={:.2f}{} slot_ms={:.2f} end_mode={} "
                "eye={}x{} game_fps={:.1f} game_vps={:.1f}",
                m_pacing == Pacing::Pipelined ? (m_no_gpu_wait ? "pipelined-nowait" : "pipelined") :
                m_pacing == Pacing::Inline    ? (m_no_gpu_wait ? "inline-nowait" : "inline") :
@@ -2607,7 +2612,8 @@ void VulkanOpenXR::EmitStats()
                timing.ended_late,
                timing.age_count ? timing.age_sum_ms / timing.age_count : 0.0, timing.age_max_ms,
                timing.lead_sum_ms / ended, timing.pose_mismatch, timing.extra_sum_ms / ended,
-               timing.extra_frames, m_eye_swapchains[0].width,
+               timing.extra_frames, timing.early_frames, wake_lead_ms, lead_exact ? "" : "?",
+               slot_ms, m_end_mode == 1 ? "late" : "asap", m_eye_swapchains[0].width,
                m_eye_swapchains[0].height,
                g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
   m_stats = {};
@@ -2751,6 +2757,7 @@ bool VulkanOpenXR::SubmitFrameCycle()
   item.submit_ns = SteadyNs();
   item.target = VR::g_openxr->GetPredictedDisplayTime();
   item.should_render = VR::g_openxr->ShouldRender();
+  item.plan_late = VR::g_openxr->GetFrameClock().plan_late;
   {
     const int64_t cpu = ThreadCpuNs();
     item.wake_ns = VR::g_openxr->GetFrameClock().wake_ns;
@@ -2943,18 +2950,21 @@ void VulkanOpenXR::CycleLoop()
 
 // Cycle end (with the overlap), releaser thread, after the frame's fence. SteamVR on the Frame
 // (framesToThrottle 1) shows a frame on its display time when it is ready up to about 19.5 ms
-// (PRIMEFRAME_PREDICT_ONTIME_MS) after the wake-up of its xrWaitFrame, a whole period later when
-// it is ready later. The game runs at exactly 60 Hz against SteamVR's 60 Hz slots, so its frames
-// start at a fixed phase after the wake-up, which a launch cannot choose; a room whose frames end
-// near that limit would mix both (an image held 4 refreshes, the next never shown). asap: end at
-// once, but not before PRIMEFRAME_CYCLE_EARLIEST_MS (16) after the wake-up (0: no minimum): the
-// frames the headset showed clean ended 16 to 19.5 ms after it, the ones it doubled within 12 ms
-// (a light room draws a frame in a few ms once its xrWaitFrame returned). late: hold the release
-// and the end until 2.5 ms past the limit, so every frame is shown a period later
-// (PRIMEFRAME_PREDICT_EXTRA_MS=auto locates the poses for that refresh). auto: asap
-// while 95 % of the last 120 frames finished 0.5 ms inside the limit, else late; back to asap when
-// 99 % of the last 600 finished 1.5 ms inside it, at the earliest 10 s after the switch (twice as
-// long after each return to asap that lasted under 30 s, up to 160 s). Returns the hold.
+// (PRIMEFRAME_PREDICT_ONTIME_MS) after the runtime's wake-up for that display time (display time
+// minus its lead, OpenXRManager::UpdateWakeGrid), a whole period later when it is ready later.
+// The game runs at exactly 60 Hz against SteamVR's 60 Hz slots, so its frames start at a fixed
+// phase, which a launch cannot choose; a room whose frames finish near that limit would mix both
+// (an image held 4 refreshes, the next never shown). asap: end each frame as soon as its GPU work
+// is done (PRIMEFRAME_CYCLE_EARLIEST_MS: not before that long after the wake-up; 0 by default:
+// the headset showed frames ended 7 ms after it cleanly). late: a frame planned late (one that
+// SteamVR did not hand out early; OpenXRManager decides it at the frame's xrWaitFrame from the
+// mode set here and locates its poses a period later) is held until 2.5 ms past the limit, so
+// that all of them are shown a period later. A frame SteamVR handed out early (its xrWaitFrame
+// returned before the wake-up: SteamVR already gave it the later refresh) is on time and never
+// held. auto: late when the 95th percentile of the last 120 finish times comes within 0.5 ms of
+// the limit; back to asap when 99 % of the last 600 finished 1.5 ms inside it, at the earliest
+// 10 s after the switch (twice as long after each return to asap that lasted under 30 s, up to
+// 160 s). Returns the hold.
 int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
 {
   if (!m_cycle_overlap || !item.views_valid || item.target == 0)
@@ -2962,8 +2972,8 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
   const auto clock = VR::g_openxr->GetFrameClock();
   if (clock.grid_offset_ns == 0)
     return 0;
-  // The runtime's wake-up for the frame's display time (its lead from the last call that blocked
-  // for it), on the steady clock.
+  VR::g_openxr->NoteCycleFinish(item.target, fence_ns);
+  // The runtime's wake-up for the frame's display time, on the steady clock.
   const int64_t wake_ns = item.target - clock.grid_offset_ns;
   const float ready_ms = static_cast<float>((fence_ns - wake_ns) / 1e6);
   m_end_ready[m_end_ready_next] = ready_ms;
@@ -3012,9 +3022,10 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
       m_end_mode = mode;
       m_end_since_ns = fence_ns;
       m_end_ready_count = 0;
+      VR::g_openxr->SetCycleEndLate(mode == 1);
     }
   }
-  const double end_ms = m_end_mode == 1 ? m_end_ontime_ms + 2.5 : m_end_earliest_ms;
+  const double end_ms = item.plan_late ? m_end_ontime_ms + 2.5 : m_end_earliest_ms;
   if (end_ms <= 0)
     return 0;
   const int64_t target = wake_ns + static_cast<int64_t>(end_ms * 1e6);

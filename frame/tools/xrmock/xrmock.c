@@ -39,6 +39,11 @@
 //                             the Frame)
 //   MOCK_XR_TIME_OFFSET_S=<s> XrTime runs this far ahead of CLOCK_MONOTONIC
 //                             (0); XR_KHR_convert_timespec_time converts
+//   MOCK_XR_CLOCK=raw         XrTime is CLOCK_MONOTONIC_RAW (SteamVR on the Frame), which drifts
+//                             against CLOCK_MONOTONIC
+//   MOCK_XR_EARLY=1           while a frame is begun and not ended, xrWaitFrame does not block: it
+//                             returns at once with the next refresh even before its wake-up (SteamVR
+//                             on the Frame); summary line "waits"
 //   MOCK_XR_FOCUS_BLIP=<ms>[@<s>]  every <s> seconds (7) the session loses
 //                             focus for <ms> ms (VISIBLE, then FOCUSED again),
 //                             as SteamVR does now and then
@@ -124,8 +129,20 @@ static int64_t nowNs(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
 }
-// XrTime = CLOCK_MONOTONIC + gTimeOffset (MOCK_XR_TIME_OFFSET_S).
+// XrTime = CLOCK_MONOTONIC + gTimeOffset (MOCK_XR_TIME_OFFSET_S); with MOCK_XR_CLOCK=raw it is
+// CLOCK_MONOTONIC_RAW (+ the offset), as SteamVR on the Frame: it drifts against CLOCK_MONOTONIC
+// by NTP's rate correction (tens of us a second), and the app must convert, not subtract a constant.
 static int64_t gTimeOffset = 0;
+static int gClockRaw = 0;
+// MOCK_XR_EARLY and the summary's "waits" line.
+static int gEarly = 0, gPendingFrame = 0, gEarlyHandouts = 0, gBlockedWaits = 0, gWaitCalls = 0;
+static int64_t xrOff(void) {
+    if (!gClockRaw) return gTimeOffset;
+    struct timespec m, r;
+    clock_gettime(CLOCK_MONOTONIC, &m);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &r);
+    return gTimeOffset + ((int64_t)r.tv_sec - (int64_t)m.tv_sec) * 1000000000ll + (r.tv_nsec - m.tv_nsec);
+}
 
 // The graphics tables, tried in order for the session's binding.  Lane D2
 // adds the Vulkan one here.
@@ -642,6 +659,8 @@ static XrResult XRAPI_CALL mEndSession(XrSession s) {
                 gStampChecked, gStampMatch, gStampMixed, gStampMixedFresh, gStampOther, gStampOtherFresh, gStampOff[0], gStampOff[1], gStampOff[2],
                 gStampOff[3], gStampOff[4], gStampSpreadMaxMs, gStampOtherEye, gStampZero, gStampNone, gStampLost, gStampUnknownPose);
     }
+    fprintf(stderr, "xrmock: waits: %d xrWaitFrame calls, %d blocked more than 2 ms, %d handed out the next refresh early (a frame was pending)%s\n",
+            gWaitCalls, gBlockedWaits, gEarlyHandouts, gClockRaw ? "; XrTime is CLOCK_MONOTONIC_RAW" : "");
     fprintf(stderr, "xrmock: end times: %d xrEndFrame with the predicted display time of their frame, %d with another (worst %.2f ms)\n", gEndTimeMatch,
             gEndTimeOff, gEndTimeOffWorstMs);
     fprintf(stderr,
@@ -747,11 +766,18 @@ static XrResult XRAPI_CALL mWaitFrame(XrSession s, const XrFrameWaitInfo* wi, Xr
         gWaits = (int)((now - gT0) / gPeriod / (1 + gThrottle) * (1 + gThrottle));
     }
     int64_t wake = gT0 + (int64_t)gWaits * gPeriod;
-    if (wake > now) {
+    // MOCK_XR_EARLY=1 (SteamVR on the Frame): while a frame is begun and not yet ended, a call
+    // does not block: it returns at once with the next refresh, even when that refresh's wake-up
+    // is still ahead (the app then has its poses earlier than the wake-up).
+    if (wake > now && gEarly && gPendingFrame) {
+        gEarlyHandouts++;
+    } else if (wake > now) {
+        if (wake - now > 2000000) gBlockedWaits++;
         struct timespec ts = {(time_t)((wake - now) / 1000000000ll), (long)((wake - now) % 1000000000ll)};
         nanosleep(&ts, NULL);
     }
-    fs->predictedDisplayTime = wake + gLead * gPeriod + gTimeOffset;
+    gWaitCalls++;
+    fs->predictedDisplayTime = wake + gLead * gPeriod + xrOff();
     gWaitPredicted = fs->predictedDisplayTime;
     gCtlTime = 0;
     gCtlCallNs = 0;
@@ -779,6 +805,7 @@ static XrResult XRAPI_CALL mBeginFrame(XrSession s, const XrFrameBeginInfo* bi) 
     (void)s;
     (void)bi;
     gBegunPredicted = gWaitPredicted;
+    gPendingFrame = 1;
     gBegunCtlTime = gCtlTime;
     gBegunCtlCallNs = gCtlCallNs;
     trace("beginFrame");
@@ -853,7 +880,7 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
     if (gT0 && ei->layerCount > 0) {
         static int64_t latch = -1;
         if (latch < 0) latch = getenv("MOCK_XR_LATCH_MS") ? (int64_t)(atof(getenv("MOCK_XR_LATCH_MS")) * 1e6) : gPeriod;
-        int64_t want = (int64_t)ei->displayTime - gTimeOffset - gT0;
+        int64_t want = (int64_t)ei->displayTime - xrOff() - gT0;
         wantSlot = (want + gPeriod / 2) / gPeriod;
         int64_t earliest = nowNs() + latch - gT0;
         landSlot = (earliest + gPeriod - 1) / gPeriod;
@@ -893,14 +920,14 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                 int b = lat < 20 ? 0 : lat < 30 ? 1 : lat < 40 ? 2 : lat < 50 ? 3 : lat < 60 ? 4 : 5;
                 gLatHist[b]++;
                 const int64_t landNs = gT0 + landSlot * gPeriod;
-                double shortMs = (double)(landNs - ((int64_t)locateTime(freshLocated) - gTimeOffset)) / 1e6;
+                double shortMs = (double)(landNs - ((int64_t)locateTime(freshLocated) - xrOff())) / 1e6;
                 gShortSumMs += shortMs;
                 if (shortMs < gShortMinMs) gShortMinMs = shortMs;
                 if (shortMs > gShortMaxMs) gShortMaxMs = shortMs;
                 gShortHist[shortMs < -1 ? 0 : shortMs < 1 ? 1 : shortMs < 9.3 ? 2 : shortMs < 17.7 ? 3 : 4]++;
                 gShortN++;
                 if (gBegunCtlTime) {
-                    gCtlShortSumMs += (double)(landNs - ((int64_t)gBegunCtlTime - gTimeOffset)) / 1e6;
+                    gCtlShortSumMs += (double)(landNs - ((int64_t)gBegunCtlTime - xrOff())) / 1e6;
                     gCtlAgeSumMs += (double)(landNs - gBegunCtlCallNs) / 1e6;
                     gCtlN++;
                 }
@@ -923,7 +950,7 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
                     if (dir != 0.0 && err * dir > 0.5) gYawOverN++;
                     if (dir != 0.0 && -err * dir > gYawTrailMax) gYawTrailMax = -err * dir;
                 }
-                double wakeEnd = (double)(nowNs() - ((int64_t)ei->displayTime - gTimeOffset - gLead * gPeriod)) / 1e6;
+                double wakeEnd = (double)(nowNs() - ((int64_t)ei->displayTime - xrOff() - gLead * gPeriod)) / 1e6;
                 gWakeEndSumMs += wakeEnd;
                 if (wakeEnd > gWakeEndMaxMs) gWakeEndMaxMs = wakeEnd;
                 if (wakeEnd > gOnTimeMs) gOffWindow++;
@@ -935,6 +962,7 @@ static XrResult XRAPI_CALL mEndFrame(XrSession s, const XrFrameEndInfo* ei) {
     if (ei->layerCount == 0) gEmptyEnds++;
     else if (ei->layers[0]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) gQuadEnds++;
     for (int k = 0; k < gChainCount; k++) gChains[k].released = 0;
+    gPendingFrame = 0;
     return XR_SUCCESS;
 }
 // The head turns slowly from side to side, so views located for different
@@ -951,7 +979,7 @@ static XrResult XRAPI_CALL mLocateViews(XrSession s, const XrViewLocateInfo* li,
     vs->viewStateFlags = XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_TRACKED_BIT |
                          XR_VIEW_STATE_POSITION_TRACKED_BIT;
     *count = 2;
-    double t = (double)(li->displayTime - gTimeOffset - gT0) / 1e9;
+    double t = (double)(li->displayTime - xrOff() - gT0) / 1e9;
     float yaw = (float)(gHeadAmp * sin(t * 2.0 * 3.14159265 * gHeadHz));
     if (gHeadStops) {
         // Predicted as a runtime does: from the pose and speed at the call, at constant speed.
@@ -1146,12 +1174,12 @@ static XrResult XRAPI_CALL mGetRefresh(XrSession s, float* hz) {
 struct timespec;
 static XrResult XRAPI_CALL mTimespecToTime(XrInstance i, const struct timespec* ts, XrTime* t) {
     (void)i;
-    *t = (XrTime)ts->tv_sec * 1000000000ll + ts->tv_nsec + gTimeOffset;
+    *t = (XrTime)ts->tv_sec * 1000000000ll + ts->tv_nsec + xrOff();
     return XR_SUCCESS;
 }
 static XrResult XRAPI_CALL mTimeToTimespec(XrInstance i, XrTime t, struct timespec* ts) {
     (void)i;
-    int64_t ns = (int64_t)t - gTimeOffset;
+    int64_t ns = (int64_t)t - xrOff();
     ts->tv_sec = (time_t)(ns / 1000000000ll);
     ts->tv_nsec = (long)(ns % 1000000000ll);
     return XR_SUCCESS;
@@ -1206,6 +1234,8 @@ static void init(void) {
     }
     gStampOn = getenv("MOCK_XR_STAMP") != NULL;
     if (getenv("MOCK_XR_LEAD")) gLead = atoi(getenv("MOCK_XR_LEAD"));
+    gEarly = getenv("MOCK_XR_EARLY") && atoi(getenv("MOCK_XR_EARLY")) > 0;
+    gClockRaw = getenv("MOCK_XR_CLOCK") && !strcmp(getenv("MOCK_XR_CLOCK"), "raw");
     if (getenv("MOCK_XR_THROTTLE")) gThrottle = atoi(getenv("MOCK_XR_THROTTLE"));
     if (getenv("MOCK_XR_ONTIME_MS")) gOnTimeMs = atof(getenv("MOCK_XR_ONTIME_MS"));
     if (getenv("MOCK_XR_HEAD_DEG")) gHeadAmp = atof(getenv("MOCK_XR_HEAD_DEG")) * 3.14159265 / 180.0;
