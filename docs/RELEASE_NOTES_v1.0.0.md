@@ -47,7 +47,6 @@ Unpack the tarball on the Frame and run its `install.sh --rom <your disc image>`
 - A very light jitter is left on the helmet HUD on fast head turns.
 - The first launch stutters while the shaders compile.
 - A 75 ms hitch at the step from the ship flight intro into play. It is the game's own.
-- Not yet confirmed in the headset: starting from the title screen, loading and saving the memory card save, the controls under SteamVR's automatic binding, the in-VR menu, and the sharpness against the container setup. [to confirm in the headset]
 - Played on one Steam Frame with the US disc.
 
 ## Reporting problems

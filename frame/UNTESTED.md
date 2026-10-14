@@ -1,16 +1,8 @@
 # Built but not confirmed in the headset
 
-One line per claim. The documents carry `[to confirm in the headset]` at the first group. When I have tested one, I delete its line here and complete the text in README.md, docs/RELEASE_NOTES_v1.0.0.md and docs/TECHNICAL_NOTES.md.
+One line per claim. When I have tested one in the headset, I delete its line here.
 
-## Marked in the documents
-
-- Starting from the title screen.
-- Loading and saving the memory card save, and the card kept between launches.
-- The controls under SteamVR's automatic binding to the Frame controllers: aiming, the visor, the arm cannon, jump, scan, missiles, map.
-- Setting the height with the right stick, and opening the in-VR menu with the left thumbstick; Exit Game leaving cleanly and writing the shader caches.
-- Sharpness against the container setup.
-
-## Other things not tested
+## Not tested
 
 - Other discs and regions than the US disc (GM8E01, revision 0).
 - Sessions longer than 15 minutes.

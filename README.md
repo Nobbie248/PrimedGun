@@ -50,9 +50,7 @@ The major changes:
 
 Version 1.0.0 is the first release. It has been played on one Steam Frame (SteamOS 0.4.5, build 20261007.6125817) with the US disc.
 
-Seen working in the headset: starting from the Steam library, 120 Hz with the game at 60, 3x internal resolution with 2160 pixel eye images, heavy rooms at 60 frames a second, no doubled images, a steady helmet HUD.
-
-Not yet confirmed in the headset, and marked below: starting from the title screen [to confirm in the headset], loading and saving the memory card save [to confirm in the headset], the controls under SteamVR's automatic binding [to confirm in the headset], the in-VR menu [to confirm in the headset], and how sharp it looks against the container setup [to confirm in the headset]. [frame/UNTESTED.md](frame/UNTESTED.md) lists everything built but not tested.
+Seen working in the headset: starting from the Steam library into the title screen, loading and saving the memory card save, PrimedGun's controls under SteamVR's automatic binding, the in-VR menu, 120 Hz with the game at 60, 3x internal resolution with 2160 pixel eye images, heavy rooms at 60 frames a second, no doubled images, a steady helmet HUD. [frame/UNTESTED.md](frame/UNTESTED.md) lists what is built but not tested.
 
 Known:
 
@@ -98,19 +96,19 @@ To bring over an existing save, copy your memory card and save states into `~/.l
 
 ## First run
 
-There is no desktop window. The game starts straight into the headset, on the title screen [to confirm in the headset]. If it does not start, open `~/.local/share/PrimeFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimeFrame/rom` does not exist.
+There is no desktop window. The game starts straight into the headset, on the title screen. If it does not start, open `~/.local/share/PrimeFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimeFrame/rom` does not exist.
 
-PrimedGun's own notes say: click the right stick to set your height, click the left thumbstick to open or close the in-headset settings menu, stay in the centre of your play space and face forward, and use Exit Game at the top right of the menu (press it twice) to leave the game cleanly, which also writes the shader caches. [to confirm in the headset]
+PrimedGun's own notes say: click the right stick to set your height, click the left thumbstick to open or close the in-headset settings menu, stay in the centre of your play space and face forward, and use Exit Game at the top right of the menu (press it twice) to leave the game cleanly, which also writes the shader caches.
 
-Save in the game as usual. The save goes to the memory card in `~/.local/share/PrimeFrame/user/GC` [to confirm in the headset].
+Save in the game as usual. The save goes to the memory card in `~/.local/share/PrimeFrame/user/GC`.
 
 ## Controls
 
-The controls are PrimedGun's, unchanged. It reads the controllers through OpenXR and SteamVR binds its actions to the Frame controllers automatically; I have not added a binding of my own. How the buttons land on the Frame controllers [to confirm in the headset]. PrimedGun's layout picture is `assets/controller layout.png`, drawn for Touch controllers.
+The controls are PrimedGun's, unchanged. It reads the controllers through OpenXR and SteamVR binds its actions to the Frame controllers automatically; I have not added a binding of my own. The buttons land on the Frame controllers as PrimedGun's layout picture shows: it is `assets/controller layout.png`, drawn for Touch controllers.
 
 ## Settings
 
-Settings are the ini files in `~/.local/share/PrimeFrame/user`, and PrimedGun's in-VR menu [to confirm in the headset]:
+Settings are the ini files in `~/.local/share/PrimeFrame/user`, and PrimedGun's in-VR menu (click the left thumbstick):
 
 - `Config/GFX.ini`: graphics, and the `[VR]` section with the PrimedGun options.
 - `GameSettings/GM8E01.ini`: overrides for this game: `InternalResolution = 3`, background shader compilation, and `EnableGPUTextureDecoding = False`. Leave that last one off: with it on, the Frame's GPU reads bad memory and takes SteamVR down.
@@ -136,7 +134,7 @@ Everything the pacing does is in the list above; the account of how I got there 
 | Logs | `~/.local/share/PrimeFrame/sessions/latest/` (`launch.log`, `dolphin.log`, `vrtiming.log`, `report.txt`, `stdout.log`) |
 | One launch of test settings | `~/.local/share/PrimeFrame/session.env`, `NAME=value` lines, used for the next launch only |
 
-Your memory card is `user/GC/MemoryCardA.USA.raw`. Save normally in the game [to confirm in the headset].
+Your memory card is `user/GC/MemoryCardA.USA.raw`. Save normally in the game.
 
 ## Troubleshooting
 

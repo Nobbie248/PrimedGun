@@ -12,7 +12,7 @@ I did not write this code by hand. The build, the wrapper, the scripts and these
 
 ## Status
 
-I played this on one Steam Frame in the headset. Smoothness, the frame rate in heavy rooms and the absence of doubled images are confirmed. Starting from the title screen, the memory card save, the controls under SteamVR's automatic binding, the in-VR menu and the sharpness against the container setup are not yet [to confirm in the headset]; [frame/UNTESTED.md](../frame/UNTESTED.md) lists what is built but not tested.
+I played this on one Steam Frame in the headset. Smoothness, the frame rate in heavy rooms, the absence of doubled images, starting from the title screen, the memory card save, the controls under SteamVR's automatic binding and the in-VR menu are confirmed; [frame/UNTESTED.md](../frame/UNTESTED.md) lists what is built but not tested.
 
 ## How it works
 
