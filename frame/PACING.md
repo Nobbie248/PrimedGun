@@ -42,7 +42,13 @@ and advances Dolphin's frame resources instead.
   present begins it itself when no draw did; `PRIMEFRAME_CYCLE_LAZY=0` begins it at the end of the last
   present, as the drain). At the present the video thread submits, puts a fence behind the work and hands
   the frame to a releaser thread, which waits for the fence, releases the images and ends the frame; the
-  video thread goes on emulating, and the next frame begins only once the last one ended. No CPU drain.
+  video thread goes on emulating. No CPU drain. Since the heavy room work (section "The heavy room"):
+  the next frame's `xrWaitFrame` does not wait for the last frame's end, its `xrBeginFrame` follows that
+  end on the releaser thread (`PRIMEFRAME_CYCLE_OVERLAP=0`: the next frame begins only once the last one
+  ended, as before); the GPU gets the frame's draws every 100 draws (`PRIMEFRAME_KICK_DRAWS`, 0 off); the
+  eye images are not cleared before the blit (`PRIMEFRAME_EYE_CLEAR=1` clears); and the releaser ends a
+  finished frame no earlier than 16 ms after its wake-up, or, in a room whose frames finish near SteamVR's
+  on-time limit, 22 ms after it so that every frame is shown a period later (`PRIMEFRAME_CYCLE_END`).
 - `pipelined`: two eye swapchain sets. A pacing thread owns `xrWaitFrame`/`xrBeginFrame`/`xrEndFrame`. The
   video thread renders frame N into the next free set, submits, puts a fence behind it and hands the set
   over (poses, swapchains, overlay quads, the display time its poses were located for); then it locates
@@ -420,14 +426,177 @@ pose into the game in `OnFrameEnd` on the CPU thread from the last `xrWaitFrame`
 drawn in the next game frame, about one more game frame (16.7 ms) after the pose's display time; the
 switch does not cover that frame (it predicts for the frame begun with the pose).
 
+## The heavy room: overlap, GPU kicks and the end time
+
+Mock set to the Frame (`MOCK_XR_THROTTLE=1 MOCK_XR_LEAD=4 MOCK_XR_LATCH_MS=13.8 MOCK_XR_LAND=throttled`:
+a frame finished up to 19.5 ms after SteamVR's wake-up for it is shown on its display time, a later one a
+whole period later), owner's settings (IR 3, eye 2160, sysmem, VI at exactly 60 Hz, `--stamp --head 150`,
+`PRIMEFRAME_PREDICT_EXTRA_MS=auto`), s02 in the player view next to the ship (`--state 02 --warmup 100`).
+
+### Where the time went (cycle as it was)
+
+Per frame, from the `XRC` line (below), 25 s of the player view: 45.7 frames a second.
+
+| From the frame's `xrWaitFrame` return | ms |
+| --- | --- |
+| to the submit at the present (the video thread draws the frame) | 13.1 (p90 16.1) |
+| the video thread's CPU time per frame | 13.3: it is busy the whole time, not waiting for the game |
+| to the fence (GPU done) | 21.4: 8.3 ms after the submit, all of the frame's GPU work (Dolphin hands the GPU the whole frame at the present when nothing reads the EFB back) |
+| to `xrEndFrame` | 21.5, ended late every frame |
+| the video thread waiting at the next frame's first draw for this frame's end | 5.8 per frame |
+| frame to frame | 21.9 |
+
+So the frame rate went to the GPU tail: the next frame could not begin before this one ended, and it ended
+8.3 ms after the video thread was done with it. The emulation (game CPU thread) ran at full speed
+(game_vps 59.8); the game dropped frames because its GPU (the video thread) was late.
+
+### What changed
+
+| s02 player view, 20 s | Game fps | submit after the wake | GPU tail after the submit | wait for the last end | frame to frame |
+| --- | --- | --- | --- | --- | --- |
+| cycle as it was | 45.7 | 13.1 | 8.3 | 5.8 | 21.9 |
+| no eye clear, GPU kicks every 200 draws | 58.2 | 13.0 | 3.3 | 1.6 | 17.2 |
+| kicks every 100 | 58.6 | 13.0 | 3.0 | 1.2 | 17.1 |
+| kicks every 50 | 58.6 | 13.3 | 2.8 | 1.2 | 17.1 |
+| kicks every 100, overlap | 60.0 | 14.2 | 2.4 | 0 | 16.67 |
+
+1. **No eye clear.** The blit covers the whole eye image (both eyes; the cinema screen blits one full image
+   too), so the clear before it only cost GPU time: gpu_ms 9.1 to 9.3 with it, 8.4 to 8.7 without.
+   `PRIMEFRAME_EYE_CLEAR=1` brings it back.
+2. **GPU kicks** (`PRIMEFRAME_KICK_DRAWS`, default 100, in OpenXR only; `VertexManagerBase::OnDraw`): every
+   100 draws the video thread hands the command buffer to the GPU (Dolphin's own background submit), so
+   the GPU works while the game still draws and the tail after the present shrinks from 8.3 to about
+   2.5 ms (the last draws, the XFB copy, the eye blits). 50, 100 and 200 draws differ by tenths of a ms.
+   With 13 kicks a frame Dolphin's ring of 8 command buffers wraps within a frame; the video thread's
+   waits for its own command buffers (`XRC fw`) stayed at 0.1 ms a frame even with the GPU at 12 ms
+   (IR 4).
+3. **Overlap** (`PRIMEFRAME_CYCLE_OVERLAP`, default on): the next frame's `xrWaitFrame` (at its first draw,
+   on the video thread) no longer waits for the last frame's end; only its `xrBeginFrame` does: the releaser
+   thread calls it right after the last frame's `xrEndFrame`, or the video thread right after the
+   `xrWaitFrame` when nothing is left to end. The order SteamVR sees: wait N, begin N, ..., wait N+1,
+   end N, begin N+1, ..., end N+1. Every frame still ends in its own `xrWaitFrame` cycle with that
+   cycle's display time, the poses it was drawn with, released after its fence; the eye images of frame
+   N+1 are still acquired only after frame N released them (one eye set).
+
+That holds 60 in the heavy room. What it does not fix is the phase:
+
+### The phase, and the end time
+
+The game runs at exactly 60 Hz against SteamVR's 60 Hz slots, so every frame starts at the same phase `x`
+after the wake-up of the slot that is running (the game decides when its first draw comes; a late
+`xrWaitFrame` returns at once with that slot) and finishes `x` + about 16.5 ms after it (the frame's
+draws take most of a period). `x` is whatever the launch gives (0 to 16.7 ms). Two s02 runs of the same
+build: `x` 11.3 ms, every frame finished about 27.5 ms after its wake-up, shown a period late, all of
+them (steady); `x` 1.3 ms, the frames finished 17.4 ms after the wake-up (p90 19.9), 12 % past the 19.5 ms
+limit: on time and a period late mixed, an image held 4 refreshes and the next never shown (the headset
+showed frames ended near that limit as doubled images, H2). A light room finishes early: s01 frames finished 8 ms after their wake-up (the
+video thread waits in `xrWaitFrame`, then draws the queued frame in 3 to 4 ms).
+
+Tried and dropped: moving the game's phase by holding the video thread back before its `xrWaitFrame`
+(skip to the next wake-up, or hold to a later phase). The game snaps back to its own phase, so the
+holds repeat and cost frames (54 to 59 fps, the mode flipping every few seconds).
+
+What does it instead (`PRIMEFRAME_CYCLE_END=auto|asap|late`, with the overlap, releaser thread,
+`CycleEndHold`): the releaser holds a finished frame (release and end, after its fence) until a fixed time
+after SteamVR's wake-up for its display time (display time minus the lead of the last `xrWaitFrame` that
+blocked):
+
+- `asap`: no earlier than `PRIMEFRAME_CYCLE_EARLIEST_MS` (16) after the wake-up. The frames the headset
+  showed clean ended 16 to 19.5 ms after it; the pipelined frames it doubled ended within 12 ms. The light
+  room's frames now end at 16 ms instead of 8: the same display time, no added lag.
+- `late`: 2.5 ms past the limit (22 ms). Every frame is shown a period after its display time, all of them;
+  `PRIMEFRAME_PREDICT_EXTRA_MS=auto` sees the end come later than the limit and locates the poses for that
+  refresh (mock: the landing refresh minus the time the poses were located for, 0.08 ms on average).
+- `auto` (default): asap while 95 % of the last 120 frames finished 0.5 ms inside the limit, else late; back
+  to asap when 99 % of the last 600 finished 1.5 ms inside it, at the earliest 10 s after the switch (twice
+  that after each return to asap that lasted under 30 s, up to 160 s). One log line per switch
+  (`PrimeFrame cycle end:`).
+
+### Results
+
+Frame-like mock, owner's settings, `--stamp --head 150`, the default build (cycle, overlap, kicks every 100,
+no eye clear, end auto, prediction auto). Holds: refreshes each new eye set stayed on screen, whole session
+(the s02 sessions include the 95 s opening and the load). Late: layer stacks the mock landed after their
+display time; in the late mode every frame lands a period after it on purpose. Finished: XRF `rg`, the
+`xrEndFrame` after SteamVR's wake-up for the frame (the hold included), player view.
+
+| Run | Game fps | Late (mock) | Holds 2 / 4 / 5+ | End mode | Finished p50 / p90 ms | Poses' locate to landing avg ms | Landing minus pose time avg ms | Stamps exact | End times right | Errors, unfinished |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| s02 90 s, cycle as it was | 41.1 | 7979 of 7988 | 4621 / 3363 / 3 | (none) | 31.7 avg | 45.5 | -0.04 | 15976 of 15976 | 7990 of 7990 | 0, 0 |
+| s02 90 s | 60.0 (steady min 59.2) | 11357 of 11357 | 11341 / 11 / 2 | late | 24.2 / 26.1 | 44.0 | 0.04 | 22714 of 22714 | 11359 of 11359 | 0, 0 |
+| s01 90 s | 60.0 (steady min 59.3) | 8 of 6561 | 6553 / 3 / 1 | asap | 16.2 / 16.3 | 33.2 | -0.03 | 13122 of 13122 | 6563 of 6563 | 0, 0 |
+| s02 soak 300 s | 60.0 (every second 59.4 or more) | 23952 of 23952 | 23926 / 16 / 3 | late | 22.3 / 24.8 | 45.8 | 0.05 | 47904 of 47904 | 23954 of 23954 | 0, 0 |
+| s02 IR 4, 25 s (GPU 12 ms) | 60.0 | 7749 of 7750 | 7733 / 13 / 2 | late | 22.3 / 24.2 | | | | | 0, 0 |
+| s02 30 s, `--nowait` | | | | | | | | | | 5909 of 5910 releases changed after release: FAIL, as it must |
+
+- s02 holds 60 with the GPU at 8.6 to 9.4 ms a frame (IR 3) and at 12 ms (IR 4). The two s02 runs had
+  different phases (the frames finished 24 and 21 ms after the wake-up before any hold); in both every
+  frame landed a period after its display time, with the poses located for that refresh (prediction auto).
+- s01 is as before (lane J's run: late 716 of 5362, holds 2 5355): every frame on its display time, now
+  ended 16.2 ms after the wake-up (held 7.8 ms) instead of 8 to 11; the poses' locate to the landing is
+  the same 33.2 ms as without the hold.
+- Soak: no stall, no fatal line; GPU at most 72.8 C, CPU 89.2 C.
+- Compared with the start of this work, the heavy room's latency stays where it was (44 to 46 ms from the
+  locate to the landing; its frames landed a period late before too), the light room's too (33 ms).
+
+### The `XRC` line
+
+One per cycle frame, from the releaser thread (with `PRIMEFRAME_FRAME_LOG`, as `XRF`), ms from the
+frame's `xrWaitFrame` return:
+
+```
+XRC n=7062 sub=14.15 gpu=17.26 end=17.42 vw=0.00 vcpu=13.79 vwall=16.55 q=0.02 hold=0.00 fw=0.08
+```
+
+`sub` the submit at the present, `gpu` the fence seen signalled, `end` the `xrEndFrame`; `vw` the video
+thread's wait in this frame for the last frame's end (or, with the overlap, for its begin), `vcpu` and
+`vwall` the video thread's CPU and wall time since the last submit, `q` the releaser picking the frame up
+after the submit, `hold` how long the end was held (`CycleEndHold`), `fw` Dolphin's waits for its own
+command buffers since the last submit.
+
+### Not known until the headset
+
+Whether SteamVR minds the new order (the next `xrWaitFrame` before the last `xrEndFrame`, the
+`xrBeginFrame` from the releaser thread); whether the late mode looks as steady as the drain's late frames
+did (it ends frames 22 ms after the wake-up, the drain 17 to 29); whether the 16 ms minimum matters (the
+light room's frames ended 8 ms after the wake-up in the mock); the heavy room's CPU and GPU times with
+SteamVR's compositor on the same GPU and CPUs; and the real phase between the game and SteamVR's slots,
+which may also drift if SteamVR's refresh is not exactly 120 Hz (auto then switches as the finish times
+move).
+
 ## Default
 
-`cycle`: the drain's frame order (the only one the headset has shown clean with a 60 fps game, at
-framesToThrottle 1) without the CPU drain. The next headset session decides whether `pipelined`, which shows
-each frame on the refresh its poses were predicted for, can replace it (lower latency: the world does not
-trail the head by the 2 to 4 refreshes the drain's frames came late).
+`cycle` with the overlap, the GPU kicks every 100 draws, no eye clear and `PRIMEFRAME_CYCLE_END=auto`,
+`PRIMEFRAME_PREDICT_EXTRA_MS=auto` (the wrapper's default), framesToThrottle 1. The headset settled `cycle`
+against `pipelined` on 2026-10-14 (cycle clean, every pipelined variant doubled).
 
-## Next headset session: prediction (two launches, s01, under a minute each)
+## Next headset session: the heavy room (two launches, under a minute of play each)
+
+Install this build (`install.sh --dev`), same SteamVR settings as the last session (120 Hz,
+framesToThrottle 1 by the wrapper, motion smoothing off, eye 2160). `session.env`:
+`PRIMEFRAME_STATE=2`; `session.env.next`: `PRIMEFRAME_STATE=1`.
+
+1. Heavy room (s02). The state starts in the ship's flight to the frigate; after about 95 s Samus stands
+   next to the ship with the HUD up: wait for that (no way to skip it without a new save state; once
+   there, a save state in a free slot would make the next test start there). Then turn the head steadily
+   left and right looking at an edge for ten seconds, then quick turns and stops: smooth at 60, or doubled
+   edges, or a stutter now and then? Does it lag more than the light room?
+2. Light room (s01): the same turns. Clean as in the last session, no new doubling, no more lag?
+
+The logs must show, launch 1 in the player view: XRSTATS `game_fps` 59 to 60, `gpu_ms` about 9; one line
+`PrimeFrame cycle end: late (held)` (or none if the frames fit: then `asap`); XRF `rg` steady at 22 to 25
+(late) or 16 to 19.5 (asap), `ex` 16.67 in late; XRC `vw` 0, `fw` under 0.5, `gpu` minus `sub` 2 to 4;
+vrtiming: 60 frames a second, presents >1 equal to frames, about one mispresent per frame, vsyncs to
+photons the same every second (4 in late, 2 in asap). Launch 2: no `late` line after the load, XRF `rg`
+about 16.2, vrtiming vsyncs 2 every second.
+
+How it decides: both clean -> done. Launch 1 doubled or stuttering with vrtiming showing frames landing
+on two different vsync counts -> the end mode against the real limit (`PRIMEFRAME_PREDICT_ONTIME_MS`, the
+19.5 ms window, may differ in this room); launch 1 doubled with a steady vsync count -> the overlap's call
+order (`PRIMEFRAME_CYCLE_OVERLAP=0`, which brings the heavy room back to about 46 fps). Launch 2 doubled ->
+`PRIMEFRAME_CYCLE_EARLIEST_MS=0` (frames ended as soon as they are done), then `PRIMEFRAME_CYCLE_OVERLAP=0`.
+
+## Earlier session plan: prediction (two launches, s01, done 2026-10-14)
 
 1. `PRIMEFRAME_PREDICT_EXTRA_MS=auto`, 2. `PRIMEFRAME_PREDICT_EXTRA_MS=0` (today's default), both cycle
 with `PRIMEFRAME_THROTTLE=1`, same SteamVR settings. In each: quick head turns and stops looking at a door
