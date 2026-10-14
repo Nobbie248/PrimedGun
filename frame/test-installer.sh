@@ -55,6 +55,7 @@ echo card > "$POD/GC/MemoryCardA.USA.raw"; echo sram > "$POD/GC/SRAM.raw"; echo 
 printf '[Settings]\nInternalResolution = 4\n[VR]\nUnitsPerMeter = 2.5\nEnableOpenXR = True\n' > "$POD/Config/GFX.ini"
 printf '[Video_Settings]\nInternalResolution = 3\n' > "$POD/GameSettings/GM8E01.ini"
 printf '[Analytics]\nID = 0123456789abcdef0123456789abcdef\n' > "$POD/Config/Dolphin.ini"
+printf '[General]\nx = 1\n[primedgun]\nmetroid_hud_distance=2.5\nrumble_enabled=false\n[Other]\ny = 2\n' > "$POD/Config/Qt.ini"
 PODSUM=$(cd "$POD" && find . -type f -exec sha256sum {} + | sort | sha256sum)
 mkdir -p "$HOME/Documents/Roms/gc"
 
@@ -73,10 +74,16 @@ check "shortcut count grew by one" test "$(count)" = $((BEFORE + 1))
 check "launch options run the wrapper" test "$(field 'PrimeFrame (dev)' LaunchOptions)" = "\"$A/primeframe.sh\" %command%"
 check "exe is the installed binary" test "$(field 'PrimeFrame (dev)' Exe)" = "\"$A/primeframe\""
 NEWID=$(( $(field 'PrimeFrame (dev)' appid) & 0xffffffff ))
-check "art of the old shortcut copied to the new appid" test -f "$G/${NEWID}p.png" -a -f "$G/${NEWID}_hero.png" -a -f "$G/${NEWID}_logo.png" -a -f "$G/$NEWID.png" -a -f "$G/${NEWID}_icon.ico"
+check "the five library images land under the new appid, bytes as shipped" test "$(cmp "$G/$NEWID.png" "$HERE/art/grid.png" && cmp "$G/${NEWID}p.png" "$HERE/art/grid_p.png" && cmp "$G/${NEWID}_hero.png" "$HERE/art/hero.png" && cmp "$G/${NEWID}_logo.png" "$HERE/art/logo.png" && cmp "$G/${NEWID}_icon.ico" "$HERE/art/icon.ico" && echo same)" = same
+check "the shortcut's icon field points at the icon" test "$(field 'PrimeFrame (dev)' icon)" = "$G/${NEWID}_icon.ico"
+check "seed has the HUD placement in Config/PrimedGun.ini" has "$P/user/Config/PrimedGun.ini" "^metroid_hud_distance = 1.15"
+echo stale > "$G/$NEWID.png"
 check "old shortcut and its art untouched" test "$(count "$OLD")" = 1 -a -f "$G/${OLDID}p.png"
-echo mine >> "$P/user/Config/GFX.ini"; echo m > "$P/user/GC.keep"
+echo mine >> "$P/user/Config/GFX.ini"; echo m > "$P/user/GC.keep"; echo mine >> "$P/user/Config/PrimedGun.ini"
 "$HERE/install.sh" --dev "$BUILD" > "$T/install2.log" 2>&1
+check "second install: art written again over an earlier copy" cmp -s "$G/$NEWID.png" "$HERE/art/grid.png"
+check "second install: PrimedGun.ini edits kept" has "$P/user/Config/PrimedGun.ini" "^mine"
+cp "$HERE/seed/user/Config/PrimedGun.ini" "$P/user/Config/PrimedGun.ini"   # back to the seed for the import test
 check "second install: no duplicate, user edits kept" test "$(count 'PrimeFrame (dev)')" = 1 && has "$P/user/Config/GFX.ini" "^mine"
 
 # disc image: one candidate, then several (no terminal: not chosen), then --rom
@@ -97,22 +104,31 @@ check "an existing rom file is kept" test "$(cat "$P/rom")" = "$T/disc/mp.rvz"
 check "import copies card, SRAM and states" test -f "$P/user/GC/MemoryCardA.USA.raw" -a -f "$P/user/GC/SRAM.raw" -a -f "$P/user/StateSaves/GM8E01.s01"
 check "import leaves the source unchanged" test "$(cd "$POD" && find . -type f -exec sha256sum {} + | sort | sha256sum)" = "$PODSUM"
 check "ini section import skipped for a user-edited GFX.ini" has "$T/import1.log" "GFX.ini was changed here"
+check "[primedgun] of Qt.ini copied into Config/PrimedGun.ini (the unedited seed was replaced)" has "$P/user/Config/PrimedGun.ini" "^metroid_hud_distance=2.5"
+check "  with its second key" has "$P/user/Config/PrimedGun.ini" "^rumble_enabled=false"
+check "  and no other section of Qt.ini" not grep -q "General\|Other\|y = 2" "$P/user/Config/PrimedGun.ini"
 check "unedited GM8E01.ini gets the old [Video_Settings]" has "$P/user/GameSettings/GM8E01.ini" "^InternalResolution = 3"
 check "no analytics id imported" not grep -q "0123456789abcdef" -r "$P"
 echo newcard > "$P/user/GC/MemoryCardA.USA.raw"
+echo mine >> "$P/user/Config/PrimedGun.ini"
 "$HERE/install.sh" --dev --import-podman "$POD" "$BUILD" > "$T/import2.log" 2>&1
+check "an edited PrimedGun.ini is kept on the second import" has "$T/import2.log" "PrimedGun.ini was changed here"
 check "second import keeps the existing card" test "$(cat "$P/user/GC/MemoryCardA.USA.raw")" = newcard && has "$T/import2.log" "already exists here, kept"
 "$HERE/install.sh" --dev --import-podman "$POD" --force "$BUILD" > "$T/import3.log" 2>&1
 check "--force replaces it after a backup" test "$(cat "$P/user/GC/MemoryCardA.USA.raw")" = card -a "$(cat "$P"/backup-*/GC/MemoryCardA.USA.raw)" = newcard
+check "--force replaced the edited PrimedGun.ini" not has "$P/user/Config/PrimedGun.ini" "^mine"
+check "  after a backup of it" grep -q "^mine" "$P"/backup-*/Config/PrimedGun.ini
 check "--force merged [VR] into GFX.ini, kept the rest" has "$P/user/Config/GFX.ini" "^UnitsPerMeter = 2.5"
 check "the source still unchanged" test "$(cd "$POD" && find . -type f -exec sha256sum {} + | sort | sha256sum)" = "$PODSUM"
 
 # release layout: a flat tarball with the binary, Sys/, assets/ and the scripts
 R=$T/rel; mkdir -p "$R/tools"; cp "$BUILD/Binaries/dolphin-nogui" "$R/primeframe"; cp -rL "$T/src-sys" "$R/Sys"; cp -rL "$T/src-assets" "$R/assets"
-cp "$HERE"/{primeframe.sh,install.sh,uninstall.sh,collect-logs.sh,steam-cef.py} "$R/"; cp "$HERE"/tools/{vrtiming.py,session-report.py} "$R/tools/"; cp -r "$HERE/seed" "$R/seed"
+cp "$HERE"/{primeframe.sh,install.sh,uninstall.sh,collect-logs.sh,steam-cef.py} "$R/"; cp "$HERE"/tools/{vrtiming.py,session-report.py} "$R/tools/"; cp -r "$HERE/seed" "$R/seed"; cp -r "$HERE/art" "$R/art"
 tar -czf "$T/rel.tar.gz" -C "$R" .
 PRIMEFRAME_APP=$T/app "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install5.log" 2>&1
 check "tarball install into the app folder" test -x "$T/app/primeframe" -a -f "$T/app/Sys/Shaders/a" -a "$(count PrimeFrame)" = 1 -a "$(field PrimeFrame Exe)" = "\"$T/app/primeframe\""
+RELID=$(( $(field PrimeFrame appid) & 0xffffffff ))
+check "tarball install: the art lands under its appid" test -f "$G/$RELID.png" -a -f "$G/${RELID}p.png" -a -f "$G/${RELID}_hero.png" -a -f "$G/${RELID}_logo.png" -a -f "$G/${RELID}_icon.ico"
 PRIMEFRAME_APP=$T/app "$R/install.sh" > "$T/install6.log" 2>&1
 check "install.sh run from an unpacked release" test $? -eq 0 -a "$(count PrimeFrame)" = 1
 PRIMEFRAME_APP=$T/app PRIMEFRAME_STEAM_DIR= PRIMEFRAME_SKIP_STEAM=1 "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install7.log" 2>&1
@@ -121,10 +137,12 @@ echo "mine" > "$P/user/StateSaves/keepme"; mkdir -p "$HOME/.local/share/other"; 
 
 # ---- uninstall ----
 PRIMEFRAME_APP=$T/app "$HERE/uninstall.sh" > "$T/un1.log" 2>&1
+check "uninstall removes the art of that shortcut, not the dev one's" test ! -e "$G/$RELID.png" -a ! -e "$G/${RELID}_icon.ico" -a ! -e "$G/${RELID}_hero.png" -a -f "$G/$NEWID.png"
 check "uninstall removes the shortcut and app, keeps the dev one" test "$(count PrimeFrame)" = 0 -a ! -d "$T/app" -a "$(count 'PrimeFrame (dev)')" = 1
 "$HERE/uninstall.sh" --dev > "$T/un2.log" 2>&1
 check "uninstall --dev removes it; the user folder stays" test "$(count 'PrimeFrame (dev)')" = 0 -a ! -d "$A" -a -f "$P/user/StateSaves/keepme" -a "$(count)" = "$BEFORE"
-check "the old shortcut is still there" test "$(count "$OLD")" = 1
+check "uninstall --dev removes its art" test ! -e "$G/$NEWID.png" -a ! -e "$G/${NEWID}_logo.png" -a ! -e "$G/${NEWID}_icon.ico"
+check "the old shortcut is still there, with its art" test "$(count "$OLD")" = 1 -a -f "$G/${OLDID}p.png"
 
 # ---- primeframe.sh with a fake vrcmd, fake vrtiming and a fake game ----
 unset PRIMEFRAME_STEAM_DIR

@@ -34,6 +34,15 @@ if [ -n "$PRIMEFRAME_SKIP_STEAM" ]; then
 elif [ -n "$PRIMEFRAME_STEAM_DIR" ]; then
     for CFG in "$STEAM"/userdata/*/config; do
         [ -d "$CFG" ] || continue
+        ID=$(python3 -I -B - "$HERE/steam-cef.py" "$CFG/shortcuts.vdf" "$NAME" << 'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+for v in m.vdf_load(sys.argv[2])["shortcuts"].values():
+    if v.get("AppName") == sys.argv[3]:
+        print(v["appid"] & 0xffffffff); break
+PY
+) || ID=
+        [ -z "$ID" ] || rm -f "$CFG/grid/$ID".png "$CFG/grid/$ID"{p,_hero,_logo}.png "$CFG/grid/${ID}_icon.ico"
         N=$(python3 "$HERE/steam-cef.py" --vdf "$CFG/shortcuts.vdf" --name "$NAME" --remove)
         echo "shortcut '$NAME' in $CFG/shortcuts.vdf: removed=$N"
     done
@@ -44,7 +53,7 @@ else
     if [ "$ID" != 0 ] && [ -n "$ID" ]; then
         $CEF "(() => { SteamClient.Apps.RemoveShortcut($ID); return 1; })()" > /dev/null
         echo "removed the '$NAME' shortcut (appid $ID)"
-        rm -f "$HOME"/.local/share/Steam/userdata/*/config/grid/"$ID"{,p,_hero,_logo,_icon}.png
+        rm -f "$STEAM"/userdata/*/config/grid/"$ID".png "$STEAM"/userdata/*/config/grid/"$ID"{p,_hero,_logo}.png "$STEAM"/userdata/*/config/grid/"${ID}_icon.ico"
     else
         echo "Steam has no '$NAME' shortcut"
     fi

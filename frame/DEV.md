@@ -181,7 +181,13 @@ set from the kernel's DRM fdinfo. `frame/tools/session-report.py` reads the fiel
   "PrimeFrame (dev)". Without `--dev` it takes a release tarball or an unpacked release.
   `PRIMEFRAME_STEAM_DIR=<copy of a Steam folder>` edits the copy's `shortcuts.vdf` instead of the live
   Steam; `PRIMEFRAME_SKIP_STEAM=1` skips Steam. The user folder is seeded from `frame/seed/user`
-  only where files are missing.
+  only where files are missing. The library art in `frame/art/` (grid, portrait, hero, logo, icon) is
+  always written for the shortcut's appid into Steam's `grid` folder (uninstall removes it).
+- `Config/PrimedGun.ini` holds the in-VR menu settings: section `[primedgun]`, the key names of the Qt
+  build's `primedgun/<key>` QSettings entries (`Source/Core/Core/PrimedGun/RuntimeSettingsFile.cpp`). The
+  NoGUI binary loads it before the game boots and saves it when the in-VR menu closes, on the menu's Save
+  and EXIT GAME, and at exit. The seed holds only the HUD placement keys; a Save rewrites the file (comments
+  are dropped, unknown keys and sections kept).
 - `frame/test-installer.sh` runs all of it in a scratch HOME (`~/.cache/pf-laneD/test-installer`)
   with a fake `vrcmd`, fake game and fake build tree; it must print "all passed".
 - `frame/release.sh` makes `primeframe-1.0.0-linux-arm64.tar.gz` (flat layout; `install.sh`,
@@ -199,7 +205,7 @@ frame/install.sh --dev build-linux --import-podman      # source: ~/PrimedGun-po
 ```
 
 Copies (never moves, never writes into the source) `GC/MemoryCardA.USA.raw`, `GC/SRAM.raw`,
-`StateSaves/`, and only the `[VR]` section of `Config/GFX.ini`, `[Video_Settings]` of
+`StateSaves/`, the `[primedgun]` section of `Config/Qt.ini` (into `Config/PrimedGun.ini`), and only the `[VR]` section of `Config/GFX.ini`, `[Video_Settings]` of
 `GameSettings/GM8E01.ini` and `[VR]` of `Config/Dolphin.ini` into
 `~/.local/share/PrimeFrame/user`. An existing destination file is kept (with a message) unless
 `--force`, which first copies it to `~/.local/share/PrimeFrame/backup-<date-time>/`. An ini file you have
