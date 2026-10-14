@@ -3054,14 +3054,23 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
   const int64_t now = SteadyNs();
   if (target <= now)
     return 0;
-  // Cut short when the video thread already waits for the eye images (the plan keeps holds
-  // before the next frame's present; this is for the frames around a hitch or a load).
+  // When the video thread already waits for the eye images, end at the earliest time that still
+  // lands right (0.5 ms past the limit before the landing refresh) if that is at most 4 ms away
+  // (a short stall of the next frame), else at once (around a hitch or a load: the frame then
+  // lands earlier than planned).
   std::unique_lock<std::mutex> lock(m_pacer_mutex);
-  const bool cut = m_pacer_cv.wait_for(lock, std::chrono::nanoseconds(target - now), [&] {
-    return m_cycle_hurry || m_pacer_exit.load();
-  });
-  if (cut)
-    m_cycle_hold_cuts++;
+  if (m_pacer_cv.wait_for(lock, std::chrono::nanoseconds(target - now),
+                          [&] { return m_cycle_hurry || m_pacer_exit.load(); }))
+  {
+    const int64_t min_end =
+        wake_ns + static_cast<int64_t>((end_ms - 2.0) * 1e6);
+    const int64_t left = min_end - SteadyNs();
+    if (left > 4'000'000)
+      m_cycle_hold_cuts++;
+    else if (left > 0)
+      m_pacer_cv.wait_for(lock, std::chrono::nanoseconds(left),
+                          [&] { return m_pacer_exit.load(); });
+  }
   return SteadyNs() - now;
 }
 

@@ -1670,7 +1670,7 @@ bool OpenXRManager::WaitFrame()
       const double fin95 = n >= 10 ? pct(m_finish_ring, 0.95) : finish_avg;
       // The next frame's present (where it acquires the eye images this frame still holds):
       // about a refresh after this call plus the earliest usual call-to-submit time. A frame held
-      // past it would stall the video thread: the hold may not reach it.
+      // past it stalls the video thread: the hold may reach it by 3 ms at most.
       const double next_present_ms =
           after_wake_ms + slot_ms + (n >= 10 ? pct(m_submit_ring, 0.1) : 0.0) - 1.0;
       // The releaser holds such a frame to 2.5 ms past the limit of the refresh before its landing
@@ -1692,7 +1692,7 @@ bool OpenXRManager::WaitFrame()
         const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
         const int k_cont = static_cast<int>(std::llround(static_cast<double>(cont_ns) / slot_ns));
         k = std::max(k_min, k_cont);
-        if (k == k_cont && k_cont > k_min && n >= 10 && hold_end_ms(k_cont) > next_present_ms)
+        if (k == k_cont && k_cont > k_min && n >= 10 && hold_end_ms(k_cont) > next_present_ms + 3.0)
         {
           // Continuity would hold this frame into the next one's present: land on the last
           // frame's refresh instead (that frame is not shown).

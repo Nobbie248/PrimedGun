@@ -902,12 +902,13 @@ whether SteamVR counts it as on time, is bookkeeping. So the cycle loop keeps on
   before its landing, one frame lands on the last frame's refresh (it is not shown; log `one refresh
   earlier`, `plan_catchups`). A catch-up followed by a break within 60 s doubles the 5 s. No change of
   landing in steady play.
-- **No hold into the next frame.** With one eye set the next frame's present waits for this frame's
-  release, so a hold reaching it stalls the game (in the mock a room fell to 32 fps that way). The plan does
-  not hold past the next frame's expected present (a refresh after this call plus the 10th percentile of the
-  call-to-submit time) when the limit before the landing is not past by then: it lands the frame on the
-  last frame's refresh instead (`plan_drops`); and the releaser ends a hold at once when the video thread
-  already waits for the eye images (`hold_cuts`; only seen around loads).
+- **No long hold into the next frame.** With one eye set the next frame's present waits for this frame's
+  release, so a hold reaching it stalls the game (in the mock a room fell to 32 fps that way). The plan
+  lets a hold reach the next frame's expected present (a refresh after this call plus the 10th percentile of
+  the call-to-submit time) by 3 ms at most; beyond that it lands the frame on the last frame's refresh
+  instead (that frame is not shown; `plan_drops`). When the video thread already waits for the eye images,
+  the releaser ends the hold at the earliest time that still lands right (0.5 ms past the limit) if that is
+  at most 4 ms away, else at once (`hold_cuts`; around loads).
 - **The refresh step** (`UpdateWakeGrid`): the smallest value recurring among the steps between display
   times and SteamVR's `predictedDisplayPeriod` values (mostly 22.2 ms, but 16.67 recurs: 2311 of 4400 frames
   in the light launch, 847 of 8000 in the heavy one), never replaced by a larger one: dup and skip hand-outs
