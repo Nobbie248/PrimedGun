@@ -2755,6 +2755,11 @@ bool VulkanOpenXR::SubmitFrameCycle()
     item.video_wait_ns = m_cycle_video_wait_ns;
     item.video_cpu_ns = m_cycle_last_cpu_ns ? cpu - m_cycle_last_cpu_ns : 0;
     item.video_wall_ns = m_last_submit_ns ? item.submit_ns - m_last_submit_ns : 0;
+    const uint64_t fence_wait_us =
+        g_vulkan_context->GetPerfCounters().fence_wait_us.load(std::memory_order_relaxed);
+    item.video_fence_wait_ns =
+        static_cast<int64_t>(fence_wait_us - m_cycle_last_fence_wait_us) * 1000;
+    m_cycle_last_fence_wait_us = fence_wait_us;
     m_cycle_video_wait_ns = 0;
     m_cycle_last_cpu_ns = cpu;
     m_last_submit_ns = item.submit_ns;
@@ -2906,14 +2911,16 @@ void VulkanOpenXR::CycleLoop()
       // Times in ms from the frame's xrWaitFrame return: sub its submit, gpu its fence seen
       // signalled, end its xrEndFrame; vw the video thread's wait for the last frame's end in
       // this frame, vcpu / vwall the video thread's CPU / wall time since the last submit, q the
-      // releaser picking the frame up after its submit.
+      // releaser picking the frame up after its submit, hold the end held back (CycleEndHold),
+      // fw Dolphin's waits for its own command buffers (a full ring) since the last submit.
       INFO_LOG_FMT(OPENXR,
                    "XRC n={} sub={:.2f} gpu={:.2f} end={:.2f} vw={:.2f} vcpu={:.2f} vwall={:.2f} "
-                   "q={:.2f} hold={:.2f}",
+                   "q={:.2f} hold={:.2f} fw={:.2f}",
                    item.id, (item.submit_ns - item.wake_ns) / 1e6,
                    (fence_ns - item.wake_ns) / 1e6, (end_ns - item.wake_ns) / 1e6,
                    item.video_wait_ns / 1e6, item.video_cpu_ns / 1e6, item.video_wall_ns / 1e6,
-                   (picked_ns - item.submit_ns) / 1e6, hold_ns / 1e6);
+                   (picked_ns - item.submit_ns) / 1e6, hold_ns / 1e6,
+                   item.video_fence_wait_ns / 1e6);
     }
     {
       std::lock_guard<std::mutex> lock(m_pacer_mutex);
@@ -2942,8 +2949,8 @@ void VulkanOpenXR::CycleLoop()
 // frames the headset showed clean ended 16 to 19.5 ms after it, the ones it doubled within 12 ms
 // (a light room draws a frame in a few ms once its xrWaitFrame returned). late: hold the release and the end until 2.5 ms past the limit, so every frame is shown a
 // period later (PRIMEFRAME_PREDICT_EXTRA_MS=auto locates the poses for that refresh). auto: asap
-// while at most 2 of the last 120 frames finished past the limit, else late; back to asap when
-// the last 600 frames all finished 1 ms inside it, at the earliest 10 s after the switch (twice as
+// while 95 % of the last 120 frames finished 0.5 ms inside the limit, else late; back to asap when
+// 99 % of the last 600 finished 1.5 ms inside it, at the earliest 10 s after the switch (twice as
 // long after each return to asap that lasted under 30 s, up to 160 s). Returns the hold.
 int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
 {
@@ -2962,19 +2969,22 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
 
   if (m_end_cfg == 2)
   {
-    const auto count_last = [&](size_t n, auto&& pred) {
-      size_t hits = 0;
-      for (size_t i = 1; i <= n; ++i)
-        hits += pred(m_end_ready[(m_end_ready_next + m_end_ready.size() - i) % m_end_ready.size()]);
-      return hits;
+    // A percentile of the last n finish times (a few hitches, as at a load, do not count).
+    const auto percentile = [&](size_t n, double p) {
+      std::vector<float> last(n);
+      for (size_t i = 0; i < n; ++i)
+        last[i] = m_end_ready[(m_end_ready_next + m_end_ready.size() - 1 - i) % m_end_ready.size()];
+      const size_t k = std::min(n - 1, static_cast<size_t>(p * n));
+      std::nth_element(last.begin(), last.begin() + k, last.end());
+      return last[k];
     };
     const int64_t dwell = fence_ns - m_end_since_ns;
     int mode = m_end_mode;
-    size_t late = 0;
+    float level = 0;
     if (mode == 0 && m_end_ready_count >= 120)
     {
-      late = count_last(120, [&](float v) { return v > m_end_ontime_ms; });
-      if (late > 2)
+      level = percentile(120, 0.95);
+      if (level > m_end_ontime_ms - 0.5)
       {
         mode = 1;
         m_end_dwell_ns = dwell < 30'000'000'000LL ?
@@ -2984,17 +2994,17 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
     }
     else if (mode == 1 && m_end_ready_count >= m_end_ready.size() && dwell > m_end_dwell_ns)
     {
-      late = count_last(m_end_ready.size(), [&](float v) { return v > m_end_ontime_ms - 1.0f; });
-      if (late == 0)
+      level = percentile(m_end_ready.size(), 0.99);
+      if (level <= m_end_ontime_ms - 1.5)
         mode = 0;
     }
     if (mode != m_end_mode)
     {
       INFO_LOG_FMT(OPENXR,
-                   "PrimeFrame cycle end: {} ({} frames finished past {:.1f} ms after the "
-                   "wake-up; next return to asap after {} s at the earliest)",
-                   mode == 1 ? "late (held)" : "asap", late, mode == 1 ? m_end_ontime_ms :
-                                                             m_end_ontime_ms - 1.0,
+                   "PrimeFrame cycle end: {} (frames finished {:.2f} ms after the wake-up, "
+                   "{}; next return to asap after {} s at the earliest)",
+                   mode == 1 ? "late (held)" : "asap", level,
+                   mode == 1 ? "95th percentile of 2 s" : "99th percentile of 10 s",
                    m_end_dwell_ns / 1'000'000'000LL);
       m_end_mode = mode;
       m_end_since_ns = fence_ns;

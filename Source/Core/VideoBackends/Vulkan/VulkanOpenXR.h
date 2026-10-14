@@ -217,6 +217,7 @@ private:
     int64_t video_wait_ns = 0;
     int64_t video_cpu_ns = 0;
     int64_t video_wall_ns = 0;
+    int64_t video_fence_wait_ns = 0;
   };
 
   std::array<XRVkEyeSwapchain, 2>& EyeSet(uint32_t set)
@@ -310,6 +311,7 @@ private:
   // at the last submit.
   int64_t m_cycle_video_wait_ns = 0;
   int64_t m_cycle_last_cpu_ns = 0;
+  uint64_t m_cycle_last_fence_wait_us = 0;
   // Pipelined: release a set's images as soon as its fence signalled, before its refresh
   // (PRIMEFRAME_EARLY_RELEASE=0: at its refresh); the margin the pose target leaves before the
   // runtime's wake-up for it (PRIMEFRAME_PACE_MARGIN_MS, default 3).
