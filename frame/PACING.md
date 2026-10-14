@@ -734,6 +734,15 @@ time its poses were located for.
   frames over 17.5 ms had over 15.5 ms of CPU; its wait for the last frame, XRC `vw`, was 0); in the soak
   that CPU time rose from 14.7 to 16.1 ms a frame over the five minutes (heat), and the rate with it.
 
+### Not known until the headset
+
+Which hand-out SteamVR does for a call made while a frame is pending after the next refresh's wake-up
+(`MOCK_XR_EARLY=1` or `2`; the session suggests 2, the late plan handles both); whether the light room's
+calls block for the wake-up on the Frame as in the mock (XRF `blk` several ms, `w` near 0) and how much
+steadier that makes the HUD; how often late runs start and end in the heavy room and whether a run's end
+(one frame not shown) is visible; the heavy room's phase on the Frame (it sets the prediction between
+37.5 and 54 ms).
+
 ## The HUD: why it shakes, and a layer of its own (design; only a test quad built)
 
 The helmet and the 2D HUD are drawn head-locked into the projection layer (geometry shader paths
