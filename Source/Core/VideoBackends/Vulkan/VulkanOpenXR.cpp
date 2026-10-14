@@ -1337,6 +1337,7 @@ void VulkanOpenXR::DestroySwapchains()
 
   DestroyPrimedGunOverlaySwapchain(&m_primedgun_overlay_swapchain);
   DestroyPrimedGunOverlaySwapchain(&m_primedgun_position_marker_swapchain);
+  DestroyPrimedGunOverlaySwapchain(&m_hud_test_swapchain);
   DestroyPrimedGunLaserSwapchain();
 
   if (m_layered_image_acquired && m_layered_swapchain.swapchain != XR_NULL_HANDLE)
@@ -1702,6 +1703,55 @@ bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain
   overlay->content_kind = content_kind;
   overlay->generation = generation;
   overlay->texture_ready = true;
+  return true;
+}
+
+// PRIMEFRAME_HUD_TEST=1 (cycle only): a white ring with a cross, 8 cm wide, 1 m ahead and 12 cm
+// below the centre of view, in a quad layer in the VIEW reference space. SteamVR should compose
+// it head-locked without turning it from a predicted pose: while the head turns it should stay
+// perfectly still, where the game's HUD (in the projection layer) moves with every prediction
+// error. If it does, a HUD layer of its own is worth building (frame/PACING.md "The HUD").
+bool VulkanOpenXR::AppendHudTestLayer(std::vector<XrCompositionLayerBaseHeader*>* layers)
+{
+  static const bool s_on = EnvIs("PRIMEFRAME_HUD_TEST", "1");
+  if (!s_on || !VR::g_openxr || !layers)
+    return false;
+  const XrSpace view_space = VR::g_openxr->GetViewSpace();
+  if (view_space == XR_NULL_HANDLE)
+    return false;
+  constexpr uint32_t size = 256;
+  static const std::vector<uint32_t> s_pixels = [] {
+    std::vector<uint32_t> pixels(size * size, 0u);
+    const float c = (size - 1) / 2.0f;
+    for (uint32_t y = 0; y < size; ++y)
+    {
+      for (uint32_t x = 0; x < size; ++x)
+      {
+        const float dx = x - c, dy = y - c;
+        const float r = std::sqrt(dx * dx + dy * dy);
+        const bool ring = r > 100.0f && r < 116.0f;
+        const bool cross = (std::abs(dx) < 4.0f || std::abs(dy) < 4.0f) && r < 60.0f;
+        if (ring || cross)
+          pixels[y * size + x] = 0xFFFFFFFFu;  // opaque white (RGBA8)
+      }
+    }
+    return pixels;
+  }();
+  if (!EnsurePrimedGunOverlaySwapchain(&m_hud_test_swapchain, 6u, 1u, size, size, s_pixels))
+    return false;
+  m_hud_test_layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  m_hud_test_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                                XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+  m_hud_test_layer.space = view_space;
+  m_hud_test_layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  m_hud_test_layer.subImage.swapchain = m_hud_test_swapchain.swapchain;
+  m_hud_test_layer.subImage.imageRect.offset = {0, 0};
+  m_hud_test_layer.subImage.imageRect.extent = {static_cast<int32_t>(size),
+                                                static_cast<int32_t>(size)};
+  m_hud_test_layer.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+  m_hud_test_layer.pose.position = {0.0f, -0.12f, -1.0f};
+  m_hud_test_layer.size = {0.08f, 0.08f};
+  layers->push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_hud_test_layer));
   return true;
 }
 
@@ -2833,6 +2883,7 @@ bool VulkanOpenXR::SubmitFrameCycle()
   }
   std::vector<XrCompositionLayerBaseHeader*> quads;
   AppendPrimedGunOverlayLayers(&quads);
+  AppendHudTestLayer(&quads);
   for (XrCompositionLayerBaseHeader* quad : quads)
     item.quads.push_back(*reinterpret_cast<XrCompositionLayerQuad*>(quad));
 

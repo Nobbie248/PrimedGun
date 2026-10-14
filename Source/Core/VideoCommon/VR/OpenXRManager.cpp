@@ -102,6 +102,8 @@ OpenXRManager::~OpenXRManager()
 
   if (m_reference_space != XR_NULL_HANDLE)
     xrDestroySpace(m_reference_space);
+  if (m_view_space != XR_NULL_HANDLE)
+    xrDestroySpace(m_view_space);
 
   if (m_session != XR_NULL_HANDLE)
   {
@@ -1273,6 +1275,24 @@ bool OpenXRManager::CreateReferenceSpace()
   m_home_set = false;
   m_home_position = {0.0f, 0.0f, 0.0f};
   return true;
+}
+
+XrSpace OpenXRManager::GetViewSpace()
+{
+  if (!m_view_space_tried && m_session != XR_NULL_HANDLE)
+  {
+    m_view_space_tried = true;
+    XrReferenceSpaceCreateInfo space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    space_info.poseInReferenceSpace = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+    space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    const XrResult result = xrCreateReferenceSpace(m_session, &space_info, &m_view_space);
+    if (XR_FAILED(result))
+    {
+      m_view_space = XR_NULL_HANDLE;
+      WARN_LOG_FMT(OPENXR, "PrimeFrame: no VIEW reference space ({}).", static_cast<int>(result));
+    }
+  }
+  return m_view_space;
 }
 
 bool OpenXRManager::PollEvents()

@@ -364,6 +364,10 @@ private:
   XRVkLayeredSwapchain m_layered_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_overlay_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_position_marker_swapchain{};
+  // PRIMEFRAME_HUD_TEST=1: a small ring in a head-locked (VIEW space) quad layer, to see in the
+  // headset whether SteamVR keeps such a layer still while the projection layer's HUD moves.
+  XRPrimedGunVkOverlaySwapchain m_hud_test_swapchain{};
+  bool AppendHudTestLayer(std::vector<XrCompositionLayerBaseHeader*>* layers);
   XRPrimedGunVkLaserSwapchain m_primedgun_laser_swapchain{};
 
   // Image index selected by xrAcquireSwapchainImage for the current frame.
@@ -380,6 +384,7 @@ private:
   XrCompositionLayerQuad m_cinematic_screen_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_overlay_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_position_marker_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad m_hud_test_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_laser_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad m_primedgun_laser_hit_layer{XR_TYPE_COMPOSITION_LAYER_QUAD};
 

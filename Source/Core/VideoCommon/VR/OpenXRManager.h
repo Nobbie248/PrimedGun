@@ -284,6 +284,9 @@ public:
   XrSystemId GetSystemId() const { return m_system_id; }
   XrSession GetSession() const { return m_session; }
   XrSpace GetReferenceSpace() const { return m_reference_space; }
+  // A VIEW reference space (head-locked), created at the first call; XR_NULL_HANDLE if the
+  // runtime refuses it. For the PRIMEFRAME_HUD_TEST quad (frame/PACING.md "The HUD").
+  XrSpace GetViewSpace();
 
   XrTime GetPredictedDisplayTime() const
   {
@@ -441,6 +444,8 @@ private:
   FrameClock m_clock;
   std::atomic<uint32_t> m_wait_count{0};
   uint64_t m_wait_seq = 0;  // under m_wait_seq_mutex
+  XrSpace m_view_space = XR_NULL_HANDLE;
+  bool m_view_space_tried = false;
   std::atomic<uint64_t> m_begun_frames{0};
   std::atomic<uint64_t> m_ended_frames{0};
   std::mutex m_wait_seq_mutex;
