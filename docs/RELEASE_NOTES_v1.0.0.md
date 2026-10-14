@@ -1,32 +1,35 @@
 # PrimeFrame 1.0.0
 
-Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a fork of Nobbie248's PrimedGun with a native Linux Arm64 NoGUI build, Vulkan on SteamVR's own device and a launch wrapper for the Frame. You need your own Metroid Prime disc image; no game data is included.
-
-Nothing in this release has been confirmed in the headset yet. Every claim that needs it is marked [to confirm in the headset].
+Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a fork of Nobbie248's PrimedGun built as a native Linux Arm64 program with frame pacing written for SteamVR. It replaces running PrimedGun's PC build in a Linux container with the Frame's graphics driver mounted in. You need your own Metroid Prime disc image; no game data is included.
 
 ### The game on the Frame
 
-- A native Linux Arm64 build that runs in the Frame's SteamVR. No container, Lepton, APK or PC.
-- PrimedGun's VR game code as it is: the visor, the arm cannon, the in-headset settings menu. [to confirm in the headset]
-- No desktop window. Settings are the ini files and PrimedGun's own menu.
+- A native Linux Arm64 build, launched from the Steam library into the Frame's own SteamVR. No container, no PC.
+- PrimedGun's game code, controls and in-VR menu as they are. No desktop window; settings are the ini files and the menu.
 - Settings, memory card and save states in plain folders under `~/.local/share/PrimeFrame`.
 
-### Rendering
+### Resolution and frame rate
 
-- Vulkan on SteamVR's own device, with the OpenXR loader built in.
-- 1728 pixels per eye, SteamVR's own 100 % on the Frame, and 2x internal resolution as the starting point. [to confirm in the headset]
-- Eye images handed to SteamVR only after the GPU has finished them. [to confirm in the headset]
-- GPU texture decoding off by default: with it on, the Frame's GPU reads bad memory and takes SteamVR down.
-- Smooth head motion and no ghosting in either eye. [to confirm in the headset]
+- Internal resolution 3x (1920x1584 per eye) and 2160 pixel eye images, the panel's native size. The container setup ran 2x and 1728.
+- The 120 Hz display, with SteamVR pacing the game at its own 60 frames a second.
+- Heavy rooms hold 60 frames a second: 59.5 on average in the heaviest room I know, where the container setup ran 20 to 30.
+- No doubled images, and a steady helmet HUD.
 
-### Controls
+### What changed under the hood
 
-- PrimedGun's own controls through OpenXR, remapped to the Frame controllers by SteamVR. [to confirm in the headset]
+- The Frame's GPU renders straight to memory instead of in tiles. The stereo geometry shader made every draw run once per tile; the GPU time per frame in the heaviest room went from 19 ms to 6 ms at the old settings (measured headless). That paid for 3x and 2160.
+- Eye images are released to SteamVR only after the GPU has finished them, instead of draining the GPU every frame.
+- Each game frame goes to SteamVR in its own frame cycle, with one landing per room.
+- Head and controller poses are predicted for the refresh the frame really appears on.
+- The game's video timing is exactly 60 Hz instead of 59.94, so frames stop drifting against SteamVR's slots.
+- The GPU gets the game's drawing every 100 draws, and the eye image is no longer cleared before it is overwritten.
+- The shader cache works now. The no-window build never created its folder, so every launch recompiled every shader; only the first launch stutters.
+- GPU texture decoding stays off, because the Frame's GPU faults with it on.
 
 ### Install
 
-- An installer that unpacks the program, creates the settings folder where files are missing, finds your disc image, and adds the Steam library entry.
-- A launch wrapper that sets SteamVR's per-app settings (120 Hz, no throttling, no extra prediction, motion smoothing off, 1728 resolution) at every launch and writes a session folder with the logs and a report.
+- An installer that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag.
+- A launcher that sets SteamVR's per-app settings at every launch (120 Hz, SteamVR pacing the game at 60, no extra prediction, motion smoothing off, 2160 per eye) and keeps session logs.
 - Tools to collect logs for a bug report and to remove the program again.
 
 ## Download
@@ -40,8 +43,17 @@ Clone the repository, then run `frame/install.sh --rom <your disc image>` with t
 
 ## Known
 
-[to confirm in the headset]
+- The game's world, enemies and the arm cannon move at 60 frames a second. On the 120 Hz display an object your eye follows can look doubled along its movement. Head movement is corrected at 120.
+- A very light jitter is left on the helmet HUD on fast head turns.
+- The first launch stutters while the shaders compile.
+- A 75 ms hitch at the step from the ship flight intro into play. It is the game's own.
+- Not yet confirmed in the headset: starting from the title screen, loading and saving the memory card save, the controls under SteamVR's automatic binding, the in-VR menu, and the sharpness against the container setup. [to confirm in the headset]
+- Played on one Steam Frame with the US disc.
 
 ## Reporting problems
 
 Open an issue with what you did, what you expected and what happened, and the archive from `~/Games/PrimeFrame/app/tools/collect-logs.sh`.
+
+## Credits
+
+Nobbie and [PrimedGun](https://github.com/Nobbie248/PrimedGun), iChris4 and Dolphin ReduX, Carl Kenner and the Dolphin VR contributors, josethevrtech and PrimedSteam, the Dolphin team, and Valve. The README has the links and the full list.

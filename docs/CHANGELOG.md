@@ -2,28 +2,34 @@
 
 ## 1.0.0 (October 2026)
 
-The first release of PrimeFrame, Metroid Prime in VR running natively on the Valve Steam Frame. It is a fork of Nobbie248's PrimedGun. Nothing here has been confirmed in the headset yet; claims that need it are marked [to confirm in the headset].
+The first release of PrimeFrame, Metroid Prime in VR running natively on the Valve Steam Frame. It is a fork of Nobbie248's PrimedGun. It replaces running PrimedGun's PC build in a Linux container on the Frame.
 
 ### The game on the Frame
 
-- A native Linux Arm64 NoGUI build that runs in the Frame's SteamVR. No container, Lepton, APK or PC.
-- PrimedGun's VR game code as it is. [to confirm in the headset]
+- A native Linux Arm64 NoGUI build that runs in the Frame's SteamVR, launched from the Steam library. No container, no PC.
+- PrimedGun's game code, controls and in-VR menu as they are.
 - Settings, memory card and save states in plain folders under `~/.local/share/PrimeFrame`.
 
-### Rendering
+### Resolution and frame rate
 
-- Vulkan on SteamVR's own device, with the OpenXR loader built in.
-- 1728 pixels per eye and 2x internal resolution as the starting point. [to confirm in the headset]
-- Eye images handed to SteamVR only after the GPU has finished them. [to confirm in the headset]
-- GPU texture decoding off by default, because the Frame's GPU reads bad memory with it on.
+- Internal resolution 3x (1920x1584 per eye) and 2160 pixel eye images.
+- The 120 Hz display, with SteamVR pacing the game at 60 frames a second.
+- Heavy rooms hold 60 frames a second (59.5 on average in the heaviest room I know). No doubled images.
 
-### Controls
+### Rendering and pacing
 
-- PrimedGun's controls through OpenXR, remapped to the Frame controllers by SteamVR. [to confirm in the headset]
+- Direct rendering on the Frame's GPU (`TU_DEBUG=sysmem`): the GPU time per frame in the heaviest room went from 19 ms to 6 ms at the old settings (measured headless).
+- Eye images released to SteamVR after a fence shows the GPU finished them, with no GPU drain.
+- Each game frame in its own SteamVR frame cycle, with one landing per room.
+- Poses predicted for the refresh the frame appears on.
+- The game's video timing at exactly 60 Hz instead of 59.94.
+- The GPU handed the game's drawing every 100 draws; the eye image is not cleared before it is overwritten.
+- The shader cache works; only the first launch stutters.
+- GPU texture decoding off by default, because the Frame's GPU faults with it on.
 
 ### Install
 
-- An installer that unpacks the program, creates the settings folder, finds your disc image and adds the Steam library entry.
-- A launch wrapper that sets SteamVR's per-app settings at every launch and writes a session folder with the logs and a report.
+- An installer that unpacks the release, seeds the settings, finds your disc image and adds the Steam shortcut with the VR flag.
+- A launcher that sets SteamVR's per-app settings at every launch and keeps session logs.
 - Tools to collect logs for a bug report and to remove the program again.
 - A privacy check for my own additions, the history after upstream and the release tarball.
