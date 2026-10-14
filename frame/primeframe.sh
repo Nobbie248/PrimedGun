@@ -18,6 +18,8 @@
 #   PRIMEFRAME_SYSMEM=0     leaves TU_DEBUG unset (Turnip's tiled rendering); by default the wrapper sets
 #                           TU_DEBUG=sysmem (renders straight to memory: a third of the GPU time here)
 #   PRIMEFRAME_PACING       passed through to the game, which has its own default when unset
+#   PRIMEFRAME_REPEATS=1    the game ends a frame every refresh, repeating the last eye set (the old
+#                           pipelined behaviour, for comparison; passed through like any game switch)
 #   PRIMEFRAME_PLATFORM     Dolphin NoGUI platform, default x11 (headless never presents VR)
 #   PRIMEFRAME_VRTIMING=0   no compositor timing log
 #   PRIMEFRAME_STATE        start from a save state: a slot number 1 to 10 (user/StateSaves/GM8E01.s01..s10)
@@ -25,6 +27,7 @@
 #   PRIMEFRAME_KEEP_SESSIONS number of session folders kept (default 30)
 # session.env: if $PRIMEFRAME_HOME/session.env exists it is sourced for ONE launch (VAR=value
 # lines, any of the above or the game's own PRIMEDGUN_* switches), then renamed session.env.used.
+# session.env.next, if present, then becomes session.env for the launch after (two-launch tests).
 # Test hooks: PRIMEFRAME_VRCMD, PRIMEFRAME_STEAMVR_DIR, PRIMEFRAME_VRSETTINGS, PRIMEFRAME_VRTIMING_PY,
 # PRIMEFRAME_REPORT_PY, PRIMEFRAME_EXE.
 HERE=$(dirname "$(readlink -f "$0")")
@@ -43,6 +46,9 @@ if [ -f "$PFHOME/session.env" ]; then
     set -a; . "$PFHOME/session.env"; set +a
     mv -f "$PFHOME/session.env" "$PFHOME/session.env.used"
     log "session.env renamed to session.env.used"
+    if [ -f "$PFHOME/session.env.next" ]; then
+        mv -f "$PFHOME/session.env.next" "$PFHOME/session.env"; log "session.env.next is the next launch's session.env"
+    fi
 fi
 # The game must use the -u folder, never a user path from the environment.
 unset DOLPHIN_EMU_USERPATH

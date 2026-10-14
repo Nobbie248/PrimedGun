@@ -195,6 +195,11 @@ mkdir -p "$PRIMEFRAME_HOME/user/StateSaves"; echo s > "$PRIMEFRAME_HOME/user/Sta
 printf 'PRIMEFRAME_STATE=2\n' > "$PRIMEFRAME_HOME/session.env"; run
 check "PRIMEFRAME_STATE=2 starts from slot 2" grep -q -- "-e $W/disc.rvz -s $PRIMEFRAME_HOME/user/StateSaves/GM8E01.s02\$" "$W/args.txt"
 rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
+printf 'PRIMEFRAME_STATE=2\n' > "$PRIMEFRAME_HOME/session.env"; printf 'PRIMEFRAME_PACING=drain\n' > "$PRIMEFRAME_HOME/session.env.next"; run
+check "session.env.next becomes the next launch's session.env" test ! -f "$PRIMEFRAME_HOME/session.env.next" -a -f "$PRIMEFRAME_HOME/session.env" && has "$PRIMEFRAME_HOME/session.env" "PACING=drain"
+sleep 1; run
+check "the second launch uses it, then nothing is left" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "PACING=drain" && test ! -f "$PRIMEFRAME_HOME/session.env"
+rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
 for k in preferredRefreshRate=120 framesToThrottle=0 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
     check "vrcmd --set-settings-int steam.app.4242.${k%=*} ${k#*=}" has "$W/vrcmd.log" "^--set-settings-int steam.app.4242.${k%=*} ${k#*=}\$"
 done

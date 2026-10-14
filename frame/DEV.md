@@ -215,8 +215,12 @@ In short:
   means `drain`. Pipelined: two eye swapchain sets; the video thread renders a set, puts a fenced empty
   submission behind it and hands it to a pacing thread, which runs xrWaitFrame, xrBeginFrame and
   xrEndFrame every refresh, releases a set only after its fence and ends it with exactly the poses it
-  was rendered with; refreshes without a new set repeat the last layer. Controller actions are polled on
-  the pacing thread.
+  was rendered with; the pacing thread ends a frame only for the refresh a new set is due on, with the
+  display time its poses were located for, and SteamVR shows it again itself on the refreshes between
+  (XRSTATS layers about 60 at 60 fps; `PRIMEFRAME_REPEATS=1` is the old every-refresh repeat, which
+  doubled images in the headset). Controller actions are polled on the pacing thread. Keep
+  `ImmediateXFBEnable = True`: with it off the mock's stamp check shows images drawn a game frame before
+  their pose.
 - While the OpenXR session runs the desktop window is neither drawn nor presented
   (`PRIMEFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
   present, which hid every early release and cost the heavy room about 40 % of its frame rate.
