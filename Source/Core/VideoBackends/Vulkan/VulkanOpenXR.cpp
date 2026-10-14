@@ -505,9 +505,18 @@ bool VulkanOpenXR::WaitForPendingFrameFinalization(std::string_view reason)
   {
     const int64_t wait_start = SteadyNs();
     std::unique_lock<std::mutex> lock(m_pacer_mutex);
-    if (!m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
-          return (m_pending.empty() && !m_cycle_busy) || m_pacer_exit.load();
-        }))
+    // At the eye acquire the video thread needs the eye images the releaser may still hold back
+    // (CycleEndHold): the hold ends now rather than stall the game.
+    if (reason == "eye acquire" && !(m_pending.empty() && !m_cycle_busy))
+    {
+      m_cycle_hurry = true;
+      m_pacer_cv.notify_all();
+    }
+    const bool ended = m_pacer_cv.wait_for(lock, std::chrono::seconds(2), [&] {
+      return (m_pending.empty() && !m_cycle_busy) || m_pacer_exit.load();
+    });
+    m_cycle_hurry = false;
+    if (!ended)
     {
       ERROR_LOG_FMT(OPENXR, "PrimeFrame cycle: the last frame was not ended within 2 s ({}).",
                     reason);
@@ -2645,8 +2654,8 @@ void VulkanOpenXR::EmitStats()
                "end_avg_ms={:.2f} end_max_ms={:.2f} end_late={} age_avg_ms={:.2f} "
                "age_max_ms={:.2f} lead_avg_ms={:.2f} pose_off={} extra_avg_ms={:.2f} extra_frames={} "
                "early={} wake_lead_ms={:.2f}{} slot_ms={:.2f} end_mode={} plan={}/{}/{} "
-               "plan_breaks={} plan_catchups={} plan_drops={} eye={}x{} game_fps={:.1f} "
-               "game_vps={:.1f}",
+               "plan_breaks={} plan_catchups={} plan_drops={} hold_cuts={} eye={}x{} "
+               "game_fps={:.1f} game_vps={:.1f}",
                m_pacing == Pacing::Pipelined ? (m_no_gpu_wait ? "pipelined-nowait" : "pipelined") :
                m_pacing == Pacing::Inline    ? (m_no_gpu_wait ? "inline-nowait" : "inline") :
                m_pacing == Pacing::Cycle     ? (m_no_gpu_wait ? "cycle-nowait" : "cycle") :
@@ -2663,6 +2672,7 @@ void VulkanOpenXR::EmitStats()
                timing.extra_frames, timing.early_frames, wake_lead_ms, lead_exact ? "" : "?",
                slot_ms, m_end_plan ? "plan" : "asap", timing.plan_slots[0], timing.plan_slots[1],
                timing.plan_slots[2], timing.plan_breaks, timing.plan_catchups, timing.plan_drops,
+               m_cycle_hold_cuts.exchange(0),
                m_eye_swapchains[0].width,
                m_eye_swapchains[0].height,
                g_perf_metrics.GetFPS(), g_perf_metrics.GetVPS());
@@ -3044,8 +3054,15 @@ int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
   const int64_t now = SteadyNs();
   if (target <= now)
     return 0;
-  std::this_thread::sleep_for(std::chrono::nanoseconds(target - now));
-  return target - now;
+  // Cut short when the video thread already waits for the eye images (the plan keeps holds
+  // before the next frame's present; this is for the frames around a hitch or a load).
+  std::unique_lock<std::mutex> lock(m_pacer_mutex);
+  const bool cut = m_pacer_cv.wait_for(lock, std::chrono::nanoseconds(target - now), [&] {
+    return m_cycle_hurry || m_pacer_exit.load();
+  });
+  if (cut)
+    m_cycle_hold_cuts++;
+  return SteadyNs() - now;
 }
 
 bool VulkanOpenXR::ReleaseItem(XRFrameItem& item, bool wait_gpu)

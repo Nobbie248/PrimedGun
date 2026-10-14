@@ -290,6 +290,10 @@ private:
   // Cycle: PRIMEFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
   bool m_lazy_start = true;
   bool m_cycle_busy = false;  // the releaser thread is ending a frame (under m_pacer_mutex)
+  // The video thread waits at the eye acquire for the frame the releaser holds: the hold ends now
+  // (under m_pacer_mutex); holds cut short, for XRSTATS (releaser thread).
+  bool m_cycle_hurry = false;
+  std::atomic<uint32_t> m_cycle_hold_cuts{0};
   // Cycle overlap (default; PRIMEFRAME_CYCLE_OVERLAP=0 turns it off): the next frame's
   // xrWaitFrame does not wait for the last frame's end; the releaser thread begins the waited
   // frame right after that end (m_cycle_begin_pending, under m_pacer_mutex).
