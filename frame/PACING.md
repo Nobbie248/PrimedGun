@@ -908,8 +908,10 @@ whether SteamVR counts it as on time, is bookkeeping. So the cycle loop keeps on
   call-to-submit time) when the limit before the landing is not past by then: it lands the frame on the
   last frame's refresh instead (`plan_drops`); and the releaser ends a hold at once when the video thread
   already waits for the eye images (`hold_cuts`; only seen around loads).
-- **The refresh step never grows** (`UpdateWakeGrid`): the smallest recurring step between display times,
-  never replaced by a larger one, so dup and skip hand-outs cannot make it 33.3 ms again.
+- **The refresh step** (`UpdateWakeGrid`): the smallest value recurring among the steps between display
+  times and SteamVR's `predictedDisplayPeriod` values (mostly 22.2 ms, but 16.67 recurs: 2311 of 4400 frames
+  in the light launch, 847 of 8000 in the heavy one), never replaced by a larger one: dup and skip hand-outs
+  (steps of 0 and 33.3 ms only) and a loading game (steps of two refreshes) cannot make it 33.3 ms again.
 - The asap wait, the late mode, the auto switch and the late-run ends are gone. `PRIMEFRAME_CYCLE_END=asap`
   is section "The wake-up"'s asap (each `xrWaitFrame` after the last end) for an A/B.
 

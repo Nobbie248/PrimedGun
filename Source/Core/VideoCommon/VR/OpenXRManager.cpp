@@ -1490,38 +1490,52 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   m_clock.grid_offset_ns = m_wake_lead_ns + m_xr_offset_ns;
   m_clock.early = m_wake_lead_exact && lead > m_wake_lead_ns + 500'000;
 
-  // The refresh spacing: the smallest step between consecutive display times seen at least four
-  // times in the last 64 (a step of 0, the same refresh handed out twice, or two refreshes do
-  // not count). It never grows: SteamVR can hand out the same refresh twice and then skip one for
-  // as long as the game's phase stays (session of 2026-10-14, light room: steps of 0 and 33.3 ms
-  // only, which made the slot 33.3 ms and the landing plan wrong by a refresh: the 1-3 cadence).
-  if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
-  {
-    const int64_t step_now = m_clock.display_time - m_prev_wait_display_time;
-    m_display_steps[m_display_step_next] = step_now;
-    m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
-    m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
+  // The refresh spacing: the smallest value seen at least four times among the last 64 steps
+  // between consecutive display times (a step of 0, the same refresh handed out twice, does not
+  // count) and the last 256 predictedDisplayPeriod values (SteamVR's are mostly 22.2 ms at
+  // framesToThrottle 1, but 16.67 recurs). It never grows: SteamVR can hand out the same refresh
+  // twice and then skip one for as long as the game's phase stays, and a loading game makes steps
+  // of two refreshes (session of 2026-10-14, light room: steps of 0 and 33.3 ms only, which made the
+  // slot 33.3 ms and the landing plan wrong by a refresh: the 1-3 cadence).
+  const auto smallest_recurring = [](const auto& ring, size_t count) {
     int64_t best = 0;
-    for (size_t i = 0; i < m_display_step_count; ++i)
+    for (size_t i = 0; i < count; ++i)
     {
-      const int64_t step = m_display_steps[i];
-      if (best != 0 && step >= best)
+      const int64_t v = ring[i];
+      if (v <= 2'000'000 || (best != 0 && v >= best))
         continue;
       int near = 0;
-      for (size_t j = 0; j < m_display_step_count; ++j)
-        near += std::abs(m_display_steps[j] - step) < 500'000;
+      for (size_t j = 0; j < count; ++j)
+        near += std::abs(ring[j] - v) < 500'000;
       if (near >= 4)
-        best = step;
+        best = v;
     }
-    if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns))
+    return best;
+  };
+  if (m_clock.period_ns > 2'000'000)
+  {
+    m_periods[m_period_next] = m_clock.period_ns;
+    m_period_next = (m_period_next + 1) % m_periods.size();
+    m_period_count = std::min(m_period_count + 1, m_periods.size());
+  }
+  if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
+  {
+    m_display_steps[m_display_step_next] = m_clock.display_time - m_prev_wait_display_time;
+    m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
+    m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
+  }
+  int64_t best = smallest_recurring(m_display_steps, m_display_step_count);
+  const int64_t best_period = smallest_recurring(m_periods, m_period_count);
+  if (best_period != 0 && (best == 0 || best_period < best))
+    best = best_period;
+  if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns))
+  {
+    if (m_slot_ns == 0 || best < m_slot_ns - 500'000)
     {
-      if (m_slot_ns == 0 || best < m_slot_ns - 500'000)
-      {
-        INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms{}", best / 1e6,
-                     m_slot_ns ? fmt::format(" (was {:.2f} ms)", m_slot_ns / 1e6) : "");
-      }
-      m_slot_ns = best;
+      INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms{}", best / 1e6,
+                   m_slot_ns ? fmt::format(" (was {:.2f} ms)", m_slot_ns / 1e6) : "");
     }
+    m_slot_ns = best;
   }
   m_prev_wait_display_time = m_clock.display_time;
 }

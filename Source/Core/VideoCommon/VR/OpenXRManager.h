@@ -612,6 +612,9 @@ private:
   std::array<int64_t, 64> m_display_steps{};
   size_t m_display_step_next = 0;
   size_t m_display_step_count = 0;
+  std::array<int64_t, 256> m_periods{};  // the last predictedDisplayPeriod values
+  size_t m_period_next = 0;
+  size_t m_period_count = 0;
   int64_t m_slot_ns = 0;
   int m_calib_attempts = 0;
   int64_t m_calib_last_ns = 0;
