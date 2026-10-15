@@ -1415,12 +1415,17 @@ const PredictConfig& GetPredictConfig()
 // is kept in XrTime and converted with the offset of the moment, so it does not drift.
 void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
 {
-  timespec raw_ts{};
-  clock_gettime(CLOCK_MONOTONIC_RAW, &raw_ts);
-  const int64_t raw_now = static_cast<int64_t>(raw_ts.tv_sec) * 1'000'000'000LL + raw_ts.tv_nsec;
   const int64_t steady_now = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                  std::chrono::steady_clock::now().time_since_epoch())
                                  .count();
+#ifdef _WIN32
+  // No raw clock on Windows: both choices read the steady clock.
+  const int64_t raw_now = steady_now;
+#else
+  timespec raw_ts{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &raw_ts);
+  const int64_t raw_now = static_cast<int64_t>(raw_ts.tv_sec) * 1'000'000'000LL + raw_ts.tv_nsec;
+#endif
   const int64_t raw_offset = raw_now - steady_now;
   if (m_xr_clock == 0 && m_clock.display_time > 0)
   {

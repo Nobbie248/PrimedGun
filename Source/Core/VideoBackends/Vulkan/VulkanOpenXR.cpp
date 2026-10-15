@@ -216,9 +216,14 @@ uint64_t ElapsedUs(uint64_t start_us, uint64_t end_us)
 #if !defined(ANDROID)
 int64_t ThreadCpuNs()
 {
+#ifdef _WIN32
+  // The thread's CPU time is not measured on Windows; the per-frame line shows 0 for it.
+  return 0;
+#else
   timespec ts{};
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
   return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+#endif
 }
 
 int64_t SteadyNs()
