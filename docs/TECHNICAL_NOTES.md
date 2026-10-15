@@ -48,7 +48,7 @@ The seed in `frame/seed/user` is what the installer puts in the user folder wher
 - SteamVR allocates only mip level 0 of a Vulkan swapchain image, so swapchains have a single level.
 - The head should be located once per refresh and both eyes rendered from exactly those poses; releasing and ending the frame with the same poses. A right eye rendered a refresh later got a random placement error.
 - The Vulkan instance must be 1.0 to 1.2, with newer features as extensions, and there is one queue; the SteamVR client submits on it inside the frame calls in our process.
-- `XR_EXT_frame_synthesis` and `XR_FB_space_warp` are accepted and ignored. Depth submission works.
+- `XR_EXT_frame_synthesis` and `XR_FB_space_warp` are accepted and ignored, as the GalaxyFrame probe showed on the same runtime; I have not tested depth submission in this game.
 - SteamVR drops per-app settings now and then, so the launcher sets them at every launch.
 - SteamVR takes focus for a few milliseconds now and then. That is not a pause.
 - Valve's implicit layer `XR_APILAYER_VALVE_fdm_injection` sits in the Vulkan chain. `PRIMEDFRAME_FDM_LAYER=0` turns it off for an A/B comparison.
