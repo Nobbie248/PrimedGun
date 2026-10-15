@@ -10,7 +10,7 @@
 #
 # The tarball has no top level folder: primedframe (the binary), Sys/, assets/, primedframe.sh,
 # install.sh, uninstall.sh, collect-logs.sh, steam-cef.py, tools/{vrtiming.py,session-report.py},
-# seed/, art/ (the Steam library images), README.md, README.upstream.md, THIRD-PARTY-NOTICES.md, COPYING, LICENSES/,
+# seed/, art/ (the Steam library images), README.md, STEAM_FRAME.md, THIRD-PARTY-NOTICES.md, COPYING, LICENSES/,
 # licenses/GPL-3.0.txt, docs/. install.sh unpacks it into the app folder. Nothing from the user folder,
 # no disc image, no save, no state. Then frame/tools/privacy-check.sh runs on the tarball (upstream's
 # Sys/ is skipped by path) and the sha256 is written beside it. Any failure removes the tarball again.
@@ -35,7 +35,7 @@ done
 bin=$build/Binaries
 [[ -x $bin/dolphin-nogui ]] || fail "no $bin/dolphin-nogui (build with frame/build.sh first)"
 [[ -d $bin/Sys ]] || fail "no $bin/Sys"
-for f in README.md README.upstream.md COPYING THIRD-PARTY-NOTICES.md docs/RELEASE_NOTES_v1.0.0.md docs/CHANGELOG.md docs/TECHNICAL_NOTES.md \
+for f in README.md STEAM_FRAME.md COPYING THIRD-PARTY-NOTICES.md docs/TECHNICAL_NOTES.md \
          frame/primedframe.sh frame/install.sh frame/uninstall.sh frame/collect-logs.sh frame/steam-cef.py frame/LICENSE-GPLv3.txt \
          frame/tools/vrtiming.py frame/tools/session-report.py frame/tools/privacy-check.sh frame/seed/user/Config/GFX.ini \
          frame/seed/user/Config/PrimedGun.ini frame/art/grid.png frame/art/grid_p.png frame/art/hero.png frame/art/logo.png frame/art/icon.ico; do
@@ -63,8 +63,8 @@ for f in primedframe.sh install.sh uninstall.sh collect-logs.sh steam-cef.py; do
 install -m 0644 "$here/tools/vrtiming.py" "$here/tools/session-report.py" "$stage/tools/"
 cp -r "$here/seed" "$stage/seed"
 cp -r "$here/art" "$stage/art"
-install -m 0644 "$repo/README.md" "$repo/README.upstream.md" "$repo/THIRD-PARTY-NOTICES.md" "$repo/COPYING" "$stage/"
-install -m 0644 "$repo/docs/RELEASE_NOTES_v1.0.0.md" "$repo/docs/CHANGELOG.md" "$repo/docs/TECHNICAL_NOTES.md" "$stage/docs/"
+install -m 0644 "$repo/README.md" "$repo/STEAM_FRAME.md" "$repo/THIRD-PARTY-NOTICES.md" "$repo/COPYING" "$stage/"
+install -m 0644 "$repo/docs/TECHNICAL_NOTES.md" "$stage/docs/"
 install -m 0644 "$here/LICENSE-GPLv3.txt" "$stage/licenses/GPL-3.0.txt"
 cp -r "$repo/LICENSES/." "$stage/LICENSES"
 # The user folder, a disc image, saves and states must never get in.

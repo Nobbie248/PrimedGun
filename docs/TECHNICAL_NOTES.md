@@ -2,7 +2,7 @@
 
 PrimedFrame is a fork of Nobbie248's [PrimedGun](https://github.com/Nobbie248/PrimedGun), the Dolphin based build that plays Metroid Prime in VR through OpenXR. PrimedFrame builds it as a native Linux Arm64 NoGUI program (`dolphin-nogui`, renamed `primedframe` on install) that runs in the Valve Steam Frame's own SteamVR. This document is for version 1.0.0.
 
-Install, settings, troubleshooting and how to report problems are in the [README](../README.md). This one says how the build and the wrapper work and what I learned about SteamVR on the Frame. The developer notes with the build flags, the headless test setup and the statistics line are in [frame/DEV.md](../frame/DEV.md).
+Install, settings, troubleshooting and how to report problems are in the [STEAM_FRAME.md](../STEAM_FRAME.md). This one says how the build and the wrapper work and what I learned about SteamVR on the Frame. The developer notes with the build flags, the headless test setup and the statistics line are in [frame/DEV.md](../frame/DEV.md).
 
 Not affiliated with Valve, Nintendo, the Dolphin team or the PrimedGun author.
 
