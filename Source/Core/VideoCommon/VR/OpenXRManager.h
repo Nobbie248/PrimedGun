@@ -71,7 +71,7 @@ public:
   virtual std::unique_lock<std::mutex> AcquireGraphicsQueueLock() { return {}; }
   virtual bool WaitForPendingFrameFinalization(std::string_view reason = {}) { return true; }
 
-  // PrimeFrame pacing (Vulkan). Pipelined: a pacing thread owns xrWaitFrame/xrBeginFrame/
+  // PrimedFrame pacing (Vulkan). Pipelined: a pacing thread owns xrWaitFrame/xrBeginFrame/
   // xrEndFrame and the releases; the video thread only renders, hands each eye set over and
   // locates the pose for the next game frame (LocateNextFramePose). The desktop window present
   // is skipped while the session runs when SkipsWindowPresent() (nobody sees it in the headset).
@@ -82,7 +82,7 @@ public:
   // the frame's first draw that needs the head pose (the presenter arms it, OpenXRManager starts
   // it), and a releaser thread ends it once the GPU has finished.
   virtual bool UsesLazyFrameStart() const { return false; }
-  // Cycle overlap (default, PRIMEFRAME_CYCLE_OVERLAP=0 off; frame/PACING.md): the next frame's
+  // Cycle overlap (default, PRIMEDFRAME_CYCLE_OVERLAP=0 off; frame/PACING.md): the next frame's
   // xrWaitFrame does not wait for the last frame's end; its xrBeginFrame follows that end (on
   // the releaser thread when the end comes later). CycleBeforeWait blocks until the last waited
   // frame was begun; CycleBeginNowAfterWait says whether the caller begins the frame it just
@@ -194,7 +194,7 @@ public:
   bool LocateViewsAt(XrTime display_time, int64_t extra_ns = 0);
   void RecordRenderedEyeViews();
 
-  // Prediction for the real display time (PRIMEFRAME_PREDICT_EXTRA_MS=<ms>|auto, frame/PACING.md):
+  // Prediction for the real display time (PRIMEDFRAME_PREDICT_EXTRA_MS=<ms>|auto, frame/PACING.md):
   // the head views and the controller poses of a frame are located that much after the
   // predicted display time its xrWaitFrame returned; xrEndFrame keeps that display time. Only
   // where the frame is located right after its own xrWaitFrame (cycle, drain, inline).
@@ -215,12 +215,12 @@ public:
   // Per-frame timing (all pacing modes), noted at every xrEndFrame: how long the frame's
   // xrWaitFrame blocked, the time from its return to the xrEndFrame, the age of the poses at the
   // end, and whether the poses were located for the display time the frame ends with. One
-  // "XRF" line per frame unless PRIMEFRAME_FRAME_LOG=0; per-second sums for XRSTATS.
+  // "XRF" line per frame unless PRIMEDFRAME_FRAME_LOG=0; per-second sums for XRSTATS.
   struct FrameTimingStats
   {
     uint32_t frames = 0;           // xrEndFrame calls with layers
     uint32_t pose_mismatch = 0;    // poses located for another display time than the end's
-    uint32_t ended_late = 0;       // ended more than PRIMEFRAME_ONTIME_MS after the wake-up
+    uint32_t ended_late = 0;       // ended more than PRIMEDFRAME_ONTIME_MS after the wake-up
     double end_sum_ms = 0, end_max_ms = 0;  // xrWaitFrame return (or the grid wake) to end
     double age_sum_ms = 0, age_max_ms = 0;  // the poses' xrLocateViews call to end
     double lead_sum_ms = 0;                 // predicted display time minus xrWaitFrame return
@@ -270,7 +270,7 @@ public:
   // predictedDisplayPeriod says).
   void GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_ms) const;
   // Cycle pacing (frame/PACING.md "One landing"): SetCycleEndLate(true) turns the landing plan on
-  // (PRIMEFRAME_CYCLE_END=plan, the default, with the overlap): every frame is planned at its
+  // (PRIMEDFRAME_CYCLE_END=plan, the default, with the overlap): every frame is planned at its
   // xrWaitFrame to land on the refresh after the last frame's (whichever refresh SteamVR handed
   // it), later only when it cannot make that one, held past the on-time limit when it lands
   // after its display time, its poses located for the landing refresh. false: asap (lane L's
@@ -295,7 +295,7 @@ public:
   XrSession GetSession() const { return m_session; }
   XrSpace GetReferenceSpace() const { return m_reference_space; }
   // A VIEW reference space (head-locked), created at the first call; XR_NULL_HANDLE if the
-  // runtime refuses it. For the PRIMEFRAME_HUD_TEST quad (frame/PACING.md "The HUD").
+  // runtime refuses it. For the PRIMEDFRAME_HUD_TEST quad (frame/PACING.md "The HUD").
   XrSpace GetViewSpace();
 
   XrTime GetPredictedDisplayTime() const
@@ -324,7 +324,7 @@ public:
   void StampXFBPose(uint32_t xfb_addr);
   void SelectPresentPoseForXFB(uint32_t xfb_addr);
 
-  // PrimeFrame pose bookkeeping (video thread). Every xrLocateViews is named by the display time
+  // PrimedFrame pose bookkeeping (video thread). Every xrLocateViews is named by the display time
   // it was made for. The draws note the locate their constants came from; an XFB copy keeps the
   // oldest and newest of its draws with the XFB (StampXFBPose), and the present picks them up
   // with the XFB it shows (SelectPresentPoseForXFB).

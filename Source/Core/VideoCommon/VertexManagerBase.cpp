@@ -2649,14 +2649,14 @@ void VertexManagerBase::OnConfigChange()
   m_index_generator.Init();
 }
 
-// PrimeFrame (frame/PACING.md): in OpenXR, hand the GPU the frame's draws every
-// PRIMEFRAME_KICK_DRAWS (100) draws instead of all of them at the present, so the GPU works while
+// PrimedFrame (frame/PACING.md): in OpenXR, hand the GPU the frame's draws every
+// PRIMEDFRAME_KICK_DRAWS (100) draws instead of all of them at the present, so the GPU works while
 // the game still draws and only the last part of the frame is left after the present (the GPU
 // tail that every OpenXR frame waits for before its release). 0 turns it off.
 static u32 OpenXRKickDraws()
 {
   static const u32 s_draws = [] {
-    const char* env = std::getenv("PRIMEFRAME_KICK_DRAWS");
+    const char* env = std::getenv("PRIMEDFRAME_KICK_DRAWS");
     return env ? static_cast<u32>(std::max(0, std::atoi(env))) : 100u;
   }();
   return s_draws;

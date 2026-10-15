@@ -2,7 +2,7 @@
 """Evaluate JavaScript in Steam's SharedJSContext over the CEF remote debugging port.
 Usage: steam-cef.py 'JS expression'   (awaits promises; prints JSON result)
 
-Offline mode, for a copied Steam config (install.sh with PRIMEFRAME_STEAM_DIR; Steam must not be
+Offline mode, for a copied Steam config (install.sh with PRIMEDFRAME_STEAM_DIR; Steam must not be
 running when the real file is edited): the same shortcut operations on a shortcuts.vdf.
   steam-cef.py --vdf FILE --name N --exe E --startdir D [--opts O] [--icon I]    add or update; prints the appid
   steam-cef.py --vdf FILE --name N --remove                           remove; prints 1 or 0

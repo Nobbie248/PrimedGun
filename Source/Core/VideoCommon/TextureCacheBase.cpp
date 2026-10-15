@@ -2676,11 +2676,11 @@ void TextureCacheBase::FlushStaleBinds()
   }
 }
 
-namespace PrimeFramePerf
+namespace PrimedFramePerf
 {
-extern std::atomic<u32> efb_ram_reads;  // PerformanceMetrics.cpp (PRIMEFRAME_FRAMELOG)
+extern std::atomic<u32> efb_ram_reads;  // PerformanceMetrics.cpp (PRIMEDFRAME_FRAMELOG)
 extern std::atomic<u64> efb_ram_read_us;
-}  // namespace PrimeFramePerf
+}  // namespace PrimedFramePerf
 
 void TextureCacheBase::WriteEFBCopyToRAM(u8* dst_ptr, u32 width, u32 height, u32 stride,
                                          std::unique_ptr<AbstractStagingTexture> staging_texture)
@@ -2689,8 +2689,8 @@ void TextureCacheBase::WriteEFBCopyToRAM(u8* dst_ptr, u32 width, u32 height, u32
   MathUtil::Rectangle<int> copy_rect(0, 0, static_cast<int>(width), static_cast<int>(height));
   staging_texture->ReadTexels(copy_rect, dst_ptr, stride);
   ReleaseEFBCopyStagingTexture(std::move(staging_texture));
-  PrimeFramePerf::efb_ram_reads.fetch_add(1, std::memory_order_relaxed);
-  PrimeFramePerf::efb_ram_read_us.fetch_add(
+  PrimedFramePerf::efb_ram_reads.fetch_add(1, std::memory_order_relaxed);
+  PrimedFramePerf::efb_ram_read_us.fetch_add(
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start)
           .count(),
       std::memory_order_relaxed);

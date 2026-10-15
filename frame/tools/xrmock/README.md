@@ -53,9 +53,9 @@ focus blips (`MOCK_XR_FOCUS_BLIP=<ms>[@<s>]`), a current interaction profile
 (`MOCK_XR_PROFILE`), and a second summary line counting frames that showed newly released eyes
 (and for which display time their one locate was made) apart from repeated layers.
 
-PrimeFrame additions (headset session H1, doubled images when turning the head):
+PrimedFrame additions (headset session H1, doubled images when turning the head):
 
-- `MOCK_XR_STAMP=1` (mockrun `--stamp`, which also sets the game's `PRIMEFRAME_FRAME_STAMP=1`): the
+- `MOCK_XR_STAMP=1` (mockrun `--stamp`, which also sets the game's `PRIMEDFRAME_FRAME_STAMP=1`): the
   game writes into a 256x20 block of each eye image the oldest and the newest locate (the display
   time it was made for) whose poses the draws of the XFB shown used; the mock copies the block out
   at every release of a colour-attachment swapchain and, for every projection layer, compares both

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Removes PrimeFrame's Steam shortcut and program folder. The data folder (user/ with your saves,
+# Removes PrimedFrame's Steam shortcut and program folder. The data folder (user/ with your saves,
 # states and settings, the rom file, sessions) stays unless --purge.
 #
 #   frame/uninstall.sh [--dev] [--name NAME] [--purge]
 #
-# Environment: PRIMEFRAME_APP, PRIMEFRAME_HOME, PRIMEFRAME_SKIP_STEAM, PRIMEFRAME_STEAM_DIR as in install.sh.
-# --purge also removes $PRIMEFRAME_HOME (saves, states, settings, logs); there is no undo.
+# Environment: PRIMEDFRAME_APP, PRIMEDFRAME_HOME, PRIMEDFRAME_SKIP_STEAM, PRIMEDFRAME_STEAM_DIR as in install.sh.
+# --purge also removes $PRIMEDFRAME_HOME (saves, states, settings, logs); there is no undo.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 export PYTHONDONTWRITEBYTECODE=1
@@ -21,17 +21,17 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ "$DEV" = 1 ]; then
-    NAME=${NAME:-PrimeFrame (dev)}; APP=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app-dev}
+    NAME=${NAME:-PrimedFrame (dev)}; APP=${PRIMEDFRAME_APP:-$HOME/Games/PrimedFrame/app-dev}
 else
-    NAME=${NAME:-PrimeFrame}; APP=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app}
+    NAME=${NAME:-PrimedFrame}; APP=${PRIMEDFRAME_APP:-$HOME/Games/PrimedFrame/app}
 fi
-PFHOME=${PRIMEFRAME_HOME:-$HOME/.local/share/PrimeFrame}
-STEAM=${PRIMEFRAME_STEAM_DIR:-$HOME/.local/share/Steam}
-if pgrep -f "^$APP/primeframe( |\$)" > /dev/null 2>&1; then echo "the game is running; quit it first" >&2; exit 1; fi
+PFHOME=${PRIMEDFRAME_HOME:-$HOME/.local/share/PrimedFrame}
+STEAM=${PRIMEDFRAME_STEAM_DIR:-$HOME/.local/share/Steam}
+if pgrep -f "^$APP/primedframe( |\$)" > /dev/null 2>&1; then echo "the game is running; quit it first" >&2; exit 1; fi
 
-if [ -n "$PRIMEFRAME_SKIP_STEAM" ]; then
-    echo "PRIMEFRAME_SKIP_STEAM set: Steam left alone"
-elif [ -n "$PRIMEFRAME_STEAM_DIR" ]; then
+if [ -n "$PRIMEDFRAME_SKIP_STEAM" ]; then
+    echo "PRIMEDFRAME_SKIP_STEAM set: Steam left alone"
+elif [ -n "$PRIMEDFRAME_STEAM_DIR" ]; then
     for CFG in "$STEAM"/userdata/*/config; do
         [ -d "$CFG" ] || continue
         ID=$(python3 -I -B - "$HERE/steam-cef.py" "$CFG/shortcuts.vdf" "$NAME" << 'PY'

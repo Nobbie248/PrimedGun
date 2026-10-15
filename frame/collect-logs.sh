@@ -3,14 +3,14 @@
 #
 #   frame/collect-logs.sh [SESSION_DIR]
 #
-# Without an argument the newest session is used ($PRIMEFRAME_HOME/sessions/latest). Collected: the
+# Without an argument the newest session is used ($PRIMEDFRAME_HOME/sessions/latest). Collected: the
 # session's launch.log, stdout.log, dolphin.log, the stall file, vrtiming.log, report.txt and
 # session.env, the three ini files of the user folder, and a summary (SteamOS version, binary hash).
 # Masked: IP and MAC addresses, UUIDs, hostnames, Wi-Fi network names, serial numbers, Steam IDs,
 # email addresses, tokens, certificate and key blocks, and user names in /home paths.
 # The masking is a best effort. Read the files before you post them.
 set -euo pipefail
-PFHOME=${PRIMEFRAME_HOME:-$HOME/.local/share/PrimeFrame}
+PFHOME=${PRIMEDFRAME_HOME:-$HOME/.local/share/PrimedFrame}
 USERDIR=$PFHOME/user
 SESSION=${1:-$PFHOME/sessions/latest}
 [ -d "$SESSION" ] || { echo "no session folder at $SESSION (launch the game once, or pass a session folder)"; exit 1; }
@@ -18,7 +18,7 @@ SESSION=$(readlink -f "$SESSION")
 
 STAMP=$(date +%Y%m%d-%H%M%S)
 WORK=$(mktemp -d)
-RAW=$WORK/raw; OUT=$WORK/primeframe-logs-$STAMP
+RAW=$WORK/raw; OUT=$WORK/primedframe-logs-$STAMP
 mkdir -p "$RAW" "$OUT"
 grab() { [ -f "$1" ] && cp "$1" "$RAW/$2" || true; }
 
@@ -29,7 +29,7 @@ grab "$USERDIR/Config/Dolphin.ini" Dolphin.ini; grab "$USERDIR/Config/GFX.ini" G
     echo "collected: $(date -u +%Y-%m-%dT%H:%MZ)"
     echo "session: $(basename "$SESSION")"
     grep -E '^(VERSION_ID|BUILD_ID)=' /etc/os-release 2>/dev/null | sed 's/^/steamos /' || true
-    APPBIN=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app}/primeframe
+    APPBIN=${PRIMEDFRAME_APP:-$HOME/Games/PrimedFrame/app}/primedframe
     [ -x "$APPBIN" ] && echo "binary sha256: $(sha256sum "$APPBIN" | cut -d' ' -f1)"
 } > "$RAW/summary.txt"
 
@@ -63,7 +63,7 @@ for name in sorted(os.listdir(src)):
     open(os.path.join(dst, name), 'w').write(text)
 EOF
 
-DEST=${PRIMEFRAME_LOG_DIR:-$HOME}/primeframe-logs-$STAMP.tar.gz
+DEST=${PRIMEDFRAME_LOG_DIR:-$HOME}/primedframe-logs-$STAMP.tar.gz
 tar -czf "$DEST" -C "$WORK" "$(basename "$OUT")"
 rm -rf "$WORK"
 echo "wrote $DEST"

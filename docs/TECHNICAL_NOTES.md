@@ -1,6 +1,6 @@
-# PrimeFrame: technical notes
+# PrimedFrame: technical notes
 
-PrimeFrame is a fork of Nobbie248's [PrimedGun](https://github.com/Nobbie248/PrimedGun), the Dolphin based build that plays Metroid Prime in VR through OpenXR. PrimeFrame builds it as a native Linux Arm64 NoGUI program (`dolphin-nogui`, renamed `primeframe` on install) that runs in the Valve Steam Frame's own SteamVR. This document is for version 1.0.0.
+PrimedFrame is a fork of Nobbie248's [PrimedGun](https://github.com/Nobbie248/PrimedGun), the Dolphin based build that plays Metroid Prime in VR through OpenXR. PrimedFrame builds it as a native Linux Arm64 NoGUI program (`dolphin-nogui`, renamed `primedframe` on install) that runs in the Valve Steam Frame's own SteamVR. This document is for version 1.0.0.
 
 Install, settings, troubleshooting and how to report problems are in the [README](../README.md). This one says how the build and the wrapper work and what I learned about SteamVR on the Frame. The developer notes with the build flags, the headless test setup and the statistics line are in [frame/DEV.md](../frame/DEV.md).
 
@@ -18,18 +18,18 @@ I played this on one Steam Frame in the headset. Smoothness, the frame rate in h
 
 ### Build
 
-`frame/build.sh` is the single source of the CMake flags: Ninja, clang, Release, Vulkan and VR on, Qt off, NoGUI on, analytics, Discord, achievements, LLVM and auto update off, and `LINUX_LOCAL_DEV=ON`. That last flag gives a relocatable layout: `Sys/` and `assets/` are looked up next to the binary, so an install is a folder copy. The program also takes `-u <dir>` for the user folder, which the wrapper uses to keep everything under `~/.local/share/PrimeFrame/user`. The OpenXR loader, SDL3 and the other bundled libraries are linked in; the rest are stock SteamOS packages. Vulkan is loaded at run time.
+`frame/build.sh` is the single source of the CMake flags: Ninja, clang, Release, Vulkan and VR on, Qt off, NoGUI on, analytics, Discord, achievements, LLVM and auto update off, and `LINUX_LOCAL_DEV=ON`. That last flag gives a relocatable layout: `Sys/` and `assets/` are looked up next to the binary, so an install is a folder copy. The program also takes `-u <dir>` for the user folder, which the wrapper uses to keep everything under `~/.local/share/PrimedFrame/user`. The OpenXR loader, SDL3 and the other bundled libraries are linked in; the rest are stock SteamOS packages. Vulkan is loaded at run time.
 
 ### Launch
 
-The Steam shortcut's program is `~/Games/PrimeFrame/app/primeframe` and its launch options are `"<app>/primeframe.sh" %command%`, so Steam passes the program's path to the wrapper. The wrapper:
+The Steam shortcut's program is `~/Games/PrimedFrame/app/primedframe` and its launch options are `"<app>/primedframe.sh" %command%`, so Steam passes the program's path to the wrapper. The wrapper:
 
-1. makes the session folder `~/.local/share/PrimeFrame/sessions/<date-time>/` and points `sessions/latest` at it;
+1. makes the session folder `~/.local/share/PrimedFrame/sessions/<date-time>/` and points `sessions/latest` at it;
 2. sources `session.env` once if it exists (one launch of test settings), then renames it to `session.env.used`;
-3. reads the disc image path from `~/.local/share/PrimeFrame/rom` and refuses to start with a clear line in `launch.log` if the file is missing (there is no window to ask in);
+3. reads the disc image path from `~/.local/share/PrimedFrame/rom` and refuses to start with a clear line in `launch.log` if the file is missing (there is no window to ask in);
 4. sets the SteamVR per-app settings for the shortcut's app id with `vrcmd` and reads them back from `steamvr.vrsettings`;
 5. starts `vrtiming.py`, which logs SteamVR's compositor timing once a second;
-6. runs `primeframe -u <user> -p x11 -v Vulkan -e <disc image>` and stays alive to stop the logger, copy `dolphin.log` and a stall file if there is one, and write `report.txt`.
+6. runs `primedframe -u <user> -p x11 -v Vulkan -e <disc image>` and stays alive to stop the logger, copy `dolphin.log` and a stall file if there is one, and write `report.txt`.
 
 The platform is `x11`. Dolphin's headless platform never presents VR frames, because the Vulkan presenter returns early without a swapchain; on the Frame the X11 window lives in Steam's own session.
 
@@ -51,7 +51,7 @@ The seed in `frame/seed/user` is what the installer puts in the user folder wher
 - `XR_EXT_frame_synthesis` and `XR_FB_space_warp` are accepted and ignored. Depth submission works.
 - SteamVR drops per-app settings now and then, so the launcher sets them at every launch.
 - SteamVR takes focus for a few milliseconds now and then. That is not a pause.
-- Valve's implicit layer `XR_APILAYER_VALVE_fdm_injection` sits in the Vulkan chain. `PRIMEFRAME_FDM_LAYER=0` turns it off for an A/B comparison.
+- Valve's implicit layer `XR_APILAYER_VALVE_fdm_injection` sits in the Vulkan chain. `PRIMEDFRAME_FDM_LAYER=0` turns it off for an A/B comparison.
 
 ## Pacing
 
@@ -61,7 +61,7 @@ The full record, with the headset sessions and the numbers, is [frame/PACING.md]
 
 - **The first loop** (a drain): after every frame the CPU waited for the GPU, then released the eye images. It fixed the ghosting in the right eye but serialised the CPU, the GPU and the compositor, which cost frame rate.
 - **A pipelined loop** with two sets of eye swapchains and a separate pacing thread that ended a frame on every refresh. At 60 game frames on 120 Hz it repeated the last layer on the refresh between new frames, with poses located for the refresh before. The headset showed doubled images when turning the head, in every variant I tried.
-- **The frame-per-cycle loop** won. Each game frame runs in its own `xrWaitFrame` cycle: wait, begin, locate the views once, draw, release after a fence, end the frame with the same display time and poses, and let SteamVR show the frame twice itself. A releaser thread waits for the fence so the emulation thread keeps going. The pipelined and drain loops stay as switches (`PRIMEFRAME_PACING`).
+- **The frame-per-cycle loop** won. Each game frame runs in its own `xrWaitFrame` cycle: wait, begin, locate the views once, draw, release after a fence, end the frame with the same display time and poses, and let SteamVR show the frame twice itself. A releaser thread waits for the fence so the emulation thread keeps going. The pipelined and drain loops stay as switches (`PRIMEDFRAME_PACING`).
 
 ### The landing plan
 
@@ -69,7 +69,7 @@ The only thing that matters for the cadence is which refresh a frame is shown on
 
 ### Prediction
 
-The game predicts head and controller poses for the refresh the frame really appears on, not for the display time `xrWaitFrame` returned (`PRIMEFRAME_PREDICT_EXTRA_MS=auto`, the launcher's default). Less lag in the headset.
+The game predicts head and controller poses for the refresh the frame really appears on, not for the display time `xrWaitFrame` returned (`PRIMEDFRAME_PREDICT_EXTRA_MS=auto`, the launcher's default). Less lag in the headset.
 
 ### Exactly 60 Hz
 
@@ -94,8 +94,8 @@ frame/build.sh . dolphin-nogui
 frame/install.sh --dev build-linux
 ```
 
-The second line installs the build as a separate "PrimeFrame (dev)" shortcut in `~/Games/PrimeFrame/app-dev`. Run it again after a rebuild.
+The second line installs the build as a separate "PrimedFrame (dev)" shortcut in `~/Games/PrimedFrame/app-dev`. Run it again after a rebuild.
 
 ## Release
 
-`frame/release.sh` packs the binary, `Sys/`, `assets/`, the wrapper, the install, uninstall and log scripts, the two run time tools, the seed, the README and the licences into `primeframe-1.0.0-linux-arm64.tar.gz`, and runs the privacy check on the tarball. The ROM, saves, states and anything from the user folder are never packed.
+`frame/release.sh` packs the binary, `Sys/`, `assets/`, the wrapper, the install, uninstall and log scripts, the two run time tools, the seed, the README and the licences into `primedframe-1.0.0-linux-arm64.tar.gz`, and runs the privacy check on the tarball. The ROM, saves, states and anything from the user folder are never packed.

@@ -70,7 +70,7 @@
 //                             <dir>/t<seconds>-sc<id>-<n>.ppm: at the seconds in
 //                             MOCK_XR_DUMP_AT=<s>,<s>... (default every 10 s), the next
 //                             MOCK_XR_DUMP_FRAMES=<n> (1) releases of every swapchain
-//   MOCK_XR_STAMP=1           Vulkan, with PRIMEFRAME_FRAME_STAMP=1 in the app: every eye image
+//   MOCK_XR_STAMP=1           Vulkan, with PRIMEDFRAME_FRAME_STAMP=1 in the app: every eye image
 //                             carries (a block in its corner) the oldest and newest locate (display
 //                             time) whose poses the draws of that image used; both are compared with
 //                             the locate the submitted layer's poses came from (summary "stamps";

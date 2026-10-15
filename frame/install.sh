@@ -1,14 +1,14 @@
 #!/bin/bash
-# Installs PrimeFrame on the Steam Frame: the program into ~/Games/PrimeFrame/app, the launch
-# wrapper and tools beside it, a default user folder in PRIMEFRAME_HOME, and a non-Steam shortcut
+# Installs PrimedFrame on the Steam Frame: the program into ~/Games/PrimedFrame/app, the launch
+# wrapper and tools beside it, a default user folder in PRIMEDFRAME_HOME, and a non-Steam shortcut
 # in Steam's library (through Steam's own client API, so Steam must be running).
 #
-#   install.sh [options] [primeframe-*-linux-arm64.tar.gz | UNPACKED_RELEASE_DIR]
+#   install.sh [options] [primedframe-*-linux-arm64.tar.gz | UNPACKED_RELEASE_DIR]
 #   install.sh --dev [BUILD_DIR]     install a build tree (default <repo>/build-linux) as
-#                                    "PrimeFrame (dev)" in app-dev; run again after a rebuild
+#                                    "PrimedFrame (dev)" in app-dev; run again after a rebuild
 #
-#   --name NAME        shortcut name (default "PrimeFrame", with --dev "PrimeFrame (dev)")
-#   --rom PATH         your Metroid Prime (USA) disc image (.rvz .iso .gcm); written to PRIMEFRAME_HOME/rom.
+#   --name NAME        shortcut name (default "PrimedFrame", with --dev "PrimedFrame (dev)")
+#   --rom PATH         your Metroid Prime (USA) disc image (.rvz .iso .gcm); written to PRIMEDFRAME_HOME/rom.
 #                      Without it, an existing rom file is kept, else ~/Documents/Roms/gc is searched
 #   --import-podman [DIR]  owner only: copy the memory card, SRAM, save states, the VR / game
 #                      overrides and the [primedgun] settings (Qt.ini) from the old Podman user folder (default
@@ -17,10 +17,10 @@
 #   -h, --help
 #
 # Environment:
-#   PRIMEFRAME_APP=DIR       where the program goes (default ~/Games/PrimeFrame/app; dev: app-dev)
-#   PRIMEFRAME_HOME=DIR      data folder (default ~/.local/share/PrimeFrame)
-#   PRIMEFRAME_SKIP_STEAM=1  no Steam shortcut at all (Steam need not be running)
-#   PRIMEFRAME_STEAM_DIR=DIR edit the shortcuts.vdf files of this (copied) Steam folder offline
+#   PRIMEDFRAME_APP=DIR       where the program goes (default ~/Games/PrimedFrame/app; dev: app-dev)
+#   PRIMEDFRAME_HOME=DIR      data folder (default ~/.local/share/PrimedFrame)
+#   PRIMEDFRAME_SKIP_STEAM=1  no Steam shortcut at all (Steam need not be running)
+#   PRIMEDFRAME_STEAM_DIR=DIR edit the shortcuts.vdf files of this (copied) Steam folder offline
 #                            instead of the live one: DIR/userdata/*/config/shortcuts.vdf, grid art
 #                            beside it. Used for dry runs; nothing of the real Steam is touched.
 # Your user folder is seeded from seed/ only where files are missing; nothing there is overwritten.
@@ -43,65 +43,65 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ -z "$ROM_ARG" ] || [ -f "$ROM_ARG" ] || { echo "no such disc image: $ROM_ARG" >&2; exit 1; }
-PFHOME=${PRIMEFRAME_HOME:-$HOME/.local/share/PrimeFrame}
-STEAM=${PRIMEFRAME_STEAM_DIR:-$HOME/.local/share/Steam}
+PFHOME=${PRIMEDFRAME_HOME:-$HOME/.local/share/PrimedFrame}
+STEAM=${PRIMEDFRAME_STEAM_DIR:-$HOME/.local/share/Steam}
 SCRATCH=
 cleanup() { [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"; return 0; }
 trap cleanup EXIT
 
-# ---- where the files come from: ROOT holds primeframe.sh, tools/, seed/; BIN_DIR holds the binary, Sys/, assets/
+# ---- where the files come from: ROOT holds primedframe.sh, tools/, seed/; BIN_DIR holds the binary, Sys/, assets/
 if [ "$DEV" = 1 ]; then
-    NAME=${NAME:-PrimeFrame (dev)}
-    APP=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app-dev}
+    NAME=${NAME:-PrimedFrame (dev)}
+    APP=${PRIMEDFRAME_APP:-$HOME/Games/PrimedFrame/app-dev}
     BUILD=$(cd "${SRC:-$HERE/../build-linux}" 2> /dev/null && pwd) || { echo "no build tree at ${SRC:-$HERE/../build-linux}" >&2; exit 1; }
     BIN_DIR=$BUILD; [ -x "$BUILD/Binaries/dolphin-nogui" ] && BIN_DIR=$BUILD/Binaries
     [ -x "$BIN_DIR/dolphin-nogui" ] || { echo "no dolphin-nogui in $BUILD (build with frame/build.sh first)" >&2; exit 1; }
     BIN=$BIN_DIR/dolphin-nogui
     ROOT=$HERE
 else
-    NAME=${NAME:-PrimeFrame}
-    APP=${PRIMEFRAME_APP:-$HOME/Games/PrimeFrame/app}
+    NAME=${NAME:-PrimedFrame}
+    APP=${PRIMEDFRAME_APP:-$HOME/Games/PrimedFrame/app}
     if [ -f "$SRC" ]; then
         mkdir -p "${TMPDIR:-$HOME/.cache}"
         SCRATCH=$(mktemp -d "${TMPDIR:-$HOME/.cache}/pf-install.XXXXXX")
         tar -xzf "$SRC" -C "$SCRATCH"
         ROOT=$SCRATCH
-        [ -f "$ROOT/primeframe.sh" ] || ROOT=$(dirname "$(find "$SCRATCH" -maxdepth 2 -name primeframe.sh | head -1)")
+        [ -f "$ROOT/primedframe.sh" ] || ROOT=$(dirname "$(find "$SCRATCH" -maxdepth 2 -name primedframe.sh | head -1)")
     elif [ -d "$SRC" ]; then
         ROOT=$(cd "$SRC" && pwd)
-    elif [ -z "$SRC" ] && [ -x "$HERE/primeframe" ]; then
+    elif [ -z "$SRC" ] && [ -x "$HERE/primedframe" ]; then
         ROOT=$HERE      # run from inside an unpacked release
     else
-        echo "usage: $0 [--dev [BUILD_DIR]] | primeframe-*-linux-arm64.tar.gz | UNPACKED_RELEASE_DIR" >&2; exit 1
+        echo "usage: $0 [--dev [BUILD_DIR]] | primedframe-*-linux-arm64.tar.gz | UNPACKED_RELEASE_DIR" >&2; exit 1
     fi
-    BIN_DIR=$ROOT; BIN=$ROOT/primeframe
-    [ -x "$BIN" ] && [ -f "$ROOT/primeframe.sh" ] && [ -d "$ROOT/Sys" ] || { echo "$ROOT is not a PrimeFrame release (primeframe, primeframe.sh, Sys/ expected)" >&2; exit 1; }
+    BIN_DIR=$ROOT; BIN=$ROOT/primedframe
+    [ -x "$BIN" ] && [ -f "$ROOT/primedframe.sh" ] && [ -d "$ROOT/Sys" ] || { echo "$ROOT is not a PrimedFrame release (primedframe, primedframe.sh, Sys/ expected)" >&2; exit 1; }
 fi
-[ -f "$ROOT/primeframe.sh" ] && [ -d "$ROOT/seed/user" ] || { echo "primeframe.sh or seed/ missing in $ROOT" >&2; exit 1; }
+[ -f "$ROOT/primedframe.sh" ] && [ -d "$ROOT/seed/user" ] || { echo "primedframe.sh or seed/ missing in $ROOT" >&2; exit 1; }
 [ -d "$BIN_DIR/Sys" ] || { echo "no Sys/ beside the binary in $BIN_DIR" >&2; exit 1; }
 case $NAME in *\'* | *\\*) echo "the shortcut name cannot hold a quote or backslash" >&2; exit 2 ;; esac
-if [ -z "$PRIMEFRAME_SKIP_STEAM" ] && [ -z "$PRIMEFRAME_STEAM_DIR" ]; then
+if [ -z "$PRIMEDFRAME_SKIP_STEAM" ] && [ -z "$PRIMEDFRAME_STEAM_DIR" ]; then
     curl -s --max-time 3 127.0.0.1:8080/json > /dev/null || {
         echo "Steam's debugging port is not reachable. Make sure Steam is running (on SteamOS it is on by default)," >&2
-        echo "or set PRIMEFRAME_SKIP_STEAM=1 to install without the library entry." >&2
+        echo "or set PRIMEDFRAME_SKIP_STEAM=1 to install without the library entry." >&2
         exit 1
     }
 fi
-if pgrep -f "^$APP/primeframe( |\$)" > /dev/null 2>&1; then echo "the game is running from $APP; quit it first" >&2; exit 1; fi
+if pgrep -f "^$APP/primedframe( |\$)" > /dev/null 2>&1; then echo "the game is running from $APP; quit it first" >&2; exit 1; fi
 
 # ---- the program: binary, Sys/ and assets/ beside it (the build looks them up next to the binary)
 echo "installing into $APP"
 mkdir -p "$APP/tools" "$PFHOME/user"
-cp "$BIN" "$APP/primeframe.new" && mv "$APP/primeframe.new" "$APP/primeframe"
-chmod +x "$APP/primeframe"
+cp "$BIN" "$APP/primedframe.new" && mv "$APP/primedframe.new" "$APP/primedframe"
+chmod +x "$APP/primedframe"
 for d in Sys assets; do
     [ -d "$BIN_DIR/$d" ] || continue
     rm -rf "${APP:?}/$d"; cp -rL "$BIN_DIR/$d" "$APP/$d"
 done
-cp "$ROOT/primeframe.sh" "$APP/primeframe.sh"
+cp "$ROOT/primedframe.sh" "$APP/primedframe.sh"
 for t in vrtiming.py session-report.py; do cp "$ROOT/tools/$t" "$APP/tools/$t"; done
 cp "$ROOT/steam-cef.py" "$APP/tools/steam-cef.py"
-chmod +x "$APP/primeframe.sh" "$APP/tools/steam-cef.py"
+chmod +x "$APP/primedframe.sh" "$APP/tools/steam-cef.py"
 for f in install.sh uninstall.sh collect-logs.sh; do [ -f "$ROOT/$f" ] && cp "$ROOT/$f" "$APP/tools/$f" && chmod +x "$APP/tools/$f"; done
 for f in README.md COPYING THIRD-PARTY-NOTICES.md; do [ -f "$ROOT/$f" ] && cp "$ROOT/$f" "$APP/$f"; done
 rm -rf "$APP/seed"; cp -r "$ROOT/seed" "$APP/seed"
@@ -205,12 +205,12 @@ PY
 fi
 
 # ---- Steam shortcut
-EXE=$APP/primeframe
-LAUNCH="\"$APP/primeframe.sh\" %command%"
+EXE=$APP/primedframe
+LAUNCH="\"$APP/primedframe.sh\" %command%"
 APPID=none; GRID=
-if [ -n "$PRIMEFRAME_SKIP_STEAM" ]; then
-    echo "PRIMEFRAME_SKIP_STEAM set: no Steam shortcut"
-elif [ -n "$PRIMEFRAME_STEAM_DIR" ]; then
+if [ -n "$PRIMEDFRAME_SKIP_STEAM" ]; then
+    echo "PRIMEDFRAME_SKIP_STEAM set: no Steam shortcut"
+elif [ -n "$PRIMEDFRAME_STEAM_DIR" ]; then
     for CFG in "$STEAM"/userdata/*/config; do
         [ -d "$CFG" ] || continue
         APPID=$(python3 "$HERE/steam-cef.py" --vdf "$CFG/shortcuts.vdf" --name "$NAME" --exe "\"$EXE\"" \
@@ -245,7 +245,7 @@ if [ "$APPID" != none ] && [ -n "$GRID" ]; then
         done
         echo "art: library images written to $GRID ($NEWID*)"
         # offline copies only: the vdf icon field (a live Steam rewrites shortcuts.vdf itself)
-        if [ -n "$PRIMEFRAME_STEAM_DIR" ] && [ -f "$GRID/${NEWID}_icon.ico" ]; then
+        if [ -n "$PRIMEDFRAME_STEAM_DIR" ] && [ -f "$GRID/${NEWID}_icon.ico" ]; then
             for CFG in "$STEAM"/userdata/*/config; do
                 [ -d "$CFG" ] && python3 "$HERE/steam-cef.py" --vdf "$CFG/shortcuts.vdf" --name "$NAME" --exe "\"$EXE\"" \
                     --startdir "\"$APP\"" --opts "$LAUNCH" --icon "$CFG/grid/${NEWID}_icon.ico" > /dev/null
@@ -259,7 +259,7 @@ fi
 cat << MSG
 
 Installed in $APP.
-$([ "$APPID" != none ] && echo "Steam library entry \"$NAME\" (appid $APPID) runs $EXE through $APP/primeframe.sh.")
+$([ "$APPID" != none ] && echo "Steam library entry \"$NAME\" (appid $APPID) runs $EXE through $APP/primedframe.sh.")
 $([ -s "$ROMFILE" ] || echo "Before you play: install.sh --rom <your Metroid Prime (USA) disc image>")
 Launch it from the library with SteamVR running.
 Logs: $PFHOME/sessions/latest/ (launch.log, dolphin.log, vrtiming.log, report.txt)

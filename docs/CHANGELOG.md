@@ -2,13 +2,13 @@
 
 ## 1.0.0 (October 2026)
 
-The first release of PrimeFrame, Metroid Prime in VR running natively on the Valve Steam Frame. It is a fork of Nobbie248's PrimedGun. It replaces running PrimedGun's PC build in a Linux container on the Frame.
+The first release of PrimedFrame, Metroid Prime in VR running natively on the Valve Steam Frame. It is a fork of Nobbie248's PrimedGun. It replaces running PrimedGun's PC build in a Linux container on the Frame.
 
 ### The game on the Frame
 
 - A native Linux Arm64 NoGUI build that runs in the Frame's SteamVR, launched from the Steam library. No container, no PC.
 - PrimedGun's game code, controls and in-VR menu as they are.
-- Settings, memory card and save states in plain folders under `~/.local/share/PrimeFrame`.
+- Settings, memory card and save states in plain folders under `~/.local/share/PrimedFrame`.
 
 ### Resolution and frame rate
 

@@ -3,11 +3,11 @@
 # One build at a time on the Frame (RAM + 5 CPUs); ccache shared across worktrees.
 # Env: BUILD (default build-linux), JOBS (4), PF_CMAKE_ARGS (extra CMake args),
 #      PF_CONFIGURE_ONLY=1 (configure without taking the lock, then stop).
-# Other heavy jobs (soaks, mock runs) take the same lock: flock ~/Games/PrimeFrame/.build.lock <cmd>
+# Other heavy jobs (soaks, mock runs) take the same lock: flock ~/Games/PrimedFrame/.build.lock <cmd>
 set -e
 WT=$(cd "${1:?worktree}" && pwd); shift
 BUILD=${BUILD:-build-linux}
-PF=$HOME/Games/PrimeFrame
+PF=$HOME/Games/PrimedFrame
 cd "$WT"
 export CCACHE_BASEDIR=$PF CCACHE_DIR=${CCACHE_DIR:-$HOME/.cache/ccache-pf}
 L=""; command -v ccache >/dev/null && L="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
@@ -25,7 +25,7 @@ configure() {
 }
 if [ -n "$PF_CONFIGURE_ONLY" ]; then configure; exit; fi
 # Never build while the owner is in the headset: a game's launch wrapper writes this file ("<name> <pid>")
-# while it runs (PrimeFrame's and the sibling projects'); a stale file whose process is gone is ignored.
+# while it runs (PrimedFrame's and the sibling projects'); a stale file whose process is gone is ignored.
 # A build that is already running is paused (SIGSTOP) while the file names a live process.
 M=${XDG_CACHE_HOME:-$HOME/.cache}/headset-in-use
 in_use() { [ -f "$M" ] && kill -0 "$(awk '{print $2}' "$M" 2>/dev/null)" 2>/dev/null; }

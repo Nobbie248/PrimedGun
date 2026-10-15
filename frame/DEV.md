@@ -1,6 +1,6 @@
-# PrimeFrame developer notes
+# PrimedFrame developer notes
 
-PrimeFrame is the native Linux arm64 build of PrimedGun (the Dolphin fork with OpenXR VR for
+PrimedFrame is the native Linux arm64 build of PrimedGun (the Dolphin fork with OpenXR VR for
 Metroid Prime) for the Steam Frame. It is a NoGUI build (`dolphin-nogui`, no Qt, no desktop
 window of its own), run in the Frame's own SteamVR. This file is how to build it, how to run it
 headless against the mock OpenXR runtime, and what the tools print.
@@ -22,7 +22,7 @@ headless against the mock OpenXR runtime, and what the tools print.
 frame/build.sh . dolphin-nogui          # binary: build-linux/Binaries/dolphin-nogui
 ```
 
-It takes `~/Games/PrimeFrame/.build.lock` (waits for another build or mock run), configures on
+It takes `~/Games/PrimedFrame/.build.lock` (waits for another build or mock run), configures on
 first use and runs `nice ninja -j4`. Environment: `BUILD` (default `build-linux`), `JOBS`,
 `PF_CMAKE_ARGS` (extra CMake arguments), `PF_CONFIGURE_ONLY=1` (configure only, no lock).
 
@@ -47,7 +47,7 @@ What the host needed (everything else configured and compiled as it came):
 - `LINUX_LOCAL_DEV=ON`: relocatable layout, `Sys/` and `assets/` are looked up next to the binary
   (the build links both into `build-linux/Binaries/`; an install copies them). In this mode the
   stock code ignored `-u` and forced a `user/` folder next to the binary; `UICommon.cpp` now lets
-  `-u <dir>` win, so the user dir can live in `PRIMEFRAME_HOME`.
+  `-u <dir>` win, so the user dir can live in `PRIMEDFRAME_HOME`.
 - The CMake target keeps the name `dolphin-nogui` and now also produces a binary of that name
   (upstream's output name is `dolphin-emu-nogui`).
 
@@ -167,20 +167,20 @@ set from the kernel's DRM fdinfo. `frame/tools/session-report.py` reads the fiel
 
 ## Install, wrapper and release
 
-- `frame/primeframe.sh` is the launch wrapper; its header lists every `PRIMEFRAME_*` switch. The
-  Steam shortcut runs it as `"<app>/primeframe.sh" %command%`. Per launch it sets the five SteamVR
+- `frame/primedframe.sh` is the launch wrapper; its header lists every `PRIMEDFRAME_*` switch. The
+  Steam shortcut runs it as `"<app>/primedframe.sh" %command%`. Per launch it sets the five SteamVR
   per-app keys with `vrcmd` for `$SteamAppId` and reads them back, makes
-  `~/.local/share/PrimeFrame/sessions/<date-time>/` (`launch.log`, `stdout.log`, `dolphin.log`,
+  `~/.local/share/PrimedFrame/sessions/<date-time>/` (`launch.log`, `stdout.log`, `dolphin.log`,
   stall file, `vrtiming.log`, `report.txt`), and runs
-  `primeframe -u <home>/user -p x11 -v Vulkan -e <rom> "$@"`. `session.env` (VAR=value lines) is
+  `primedframe -u <home>/user -p x11 -v Vulkan -e <rom> "$@"`. `session.env` (VAR=value lines) is
   sourced for one launch and renamed `session.env.used`: this is how a test setting such as
-  `PRIMEDGUN_XR_WAIT_GPU=1` or `PRIMEFRAME_PACING=...` reaches the game from the Steam library.
-  `TU_DEBUG=sysmem` is set by default (a third of the GPU time in the heavy room, frame/perf/RESULTS.md); `PRIMEFRAME_SYSMEM=0` leaves Turnip tiled. `PRIMEFRAME_EYE` (default 2160) is the eye image size asked of SteamVR.
-- `frame/install.sh --dev build-linux` copies `Binaries/dolphin-nogui` as `primeframe`, plus
-  `Sys/` and `assets/` (links followed) into `~/Games/PrimeFrame/app-dev` and adds the shortcut
-  "PrimeFrame (dev)". Without `--dev` it takes a release tarball or an unpacked release.
-  `PRIMEFRAME_STEAM_DIR=<copy of a Steam folder>` edits the copy's `shortcuts.vdf` instead of the live
-  Steam; `PRIMEFRAME_SKIP_STEAM=1` skips Steam. The user folder is seeded from `frame/seed/user`
+  `PRIMEDGUN_XR_WAIT_GPU=1` or `PRIMEDFRAME_PACING=...` reaches the game from the Steam library.
+  `TU_DEBUG=sysmem` is set by default (a third of the GPU time in the heavy room, frame/perf/RESULTS.md); `PRIMEDFRAME_SYSMEM=0` leaves Turnip tiled. `PRIMEDFRAME_EYE` (default 2160) is the eye image size asked of SteamVR.
+- `frame/install.sh --dev build-linux` copies `Binaries/dolphin-nogui` as `primedframe`, plus
+  `Sys/` and `assets/` (links followed) into `~/Games/PrimedFrame/app-dev` and adds the shortcut
+  "PrimedFrame (dev)". Without `--dev` it takes a release tarball or an unpacked release.
+  `PRIMEDFRAME_STEAM_DIR=<copy of a Steam folder>` edits the copy's `shortcuts.vdf` instead of the live
+  Steam; `PRIMEDFRAME_SKIP_STEAM=1` skips Steam. The user folder is seeded from `frame/seed/user`
   only where files are missing. The library art in `frame/art/` (grid, portrait, hero, logo, icon) is
   always written for the shortcut's appid into Steam's `grid` folder (uninstall removes it).
 - `Config/PrimedGun.ini` holds the in-VR menu settings: section `[primedgun]`, the key names of the Qt
@@ -190,8 +190,8 @@ set from the kernel's DRM fdinfo. `frame/tools/session-report.py` reads the fiel
   are dropped, unknown keys and sections kept).
 - `frame/test-installer.sh` runs all of it in a scratch HOME (`~/.cache/pf-laneD/test-installer`)
   with a fake `vrcmd`, fake game and fake build tree; it must print "all passed".
-- `frame/release.sh` makes `primeframe-1.0.0-linux-arm64.tar.gz` (flat layout; `install.sh`,
-  `primeframe.sh`, `tools/`, `seed/` sit beside the binary, `Sys/` and `assets/`) and runs the
+- `frame/release.sh` makes `primedframe-1.0.0-linux-arm64.tar.gz` (flat layout; `install.sh`,
+  `primedframe.sh`, `tools/`, `seed/` sit beside the binary, `Sys/` and `assets/`) and runs the
   privacy check on it. The tarball check skips upstream's `Sys/` by path.
 - `frame/tools/privacy-check.sh`: default scope is our own additions (changed against `main`,
   which is upstream v1.1.7, plus `frame/` and our three docs); `--history` covers the commits after
@@ -207,8 +207,8 @@ frame/install.sh --dev build-linux --import-podman      # source: ~/PrimedGun-po
 Copies (never moves, never writes into the source) `GC/MemoryCardA.USA.raw`, `GC/SRAM.raw`,
 `StateSaves/`, the `[primedgun]` section of `Config/Qt.ini` (into `Config/PrimedGun.ini`), and only the `[VR]` section of `Config/GFX.ini`, `[Video_Settings]` of
 `GameSettings/GM8E01.ini` and `[VR]` of `Config/Dolphin.ini` into
-`~/.local/share/PrimeFrame/user`. An existing destination file is kept (with a message) unless
-`--force`, which first copies it to `~/.local/share/PrimeFrame/backup-<date-time>/`. An ini file you have
+`~/.local/share/PrimedFrame/user`. An existing destination file is kept (with a message) unless
+`--force`, which first copies it to `~/.local/share/PrimedFrame/backup-<date-time>/`. An ini file you have
 edited since the seed is also kept unless `--force`. The Analytics ID and the keyboard controller
 mapping (`GCPadNew.ini`) are not carried over: PrimedGun applies its OpenXR bindings itself.
 
@@ -217,7 +217,7 @@ mapping (`GCPadNew.ini`) are not carried over: PrimedGun applies its OpenXR bind
 frame/PACING.md has the whole account (the loops, the mock's cadence model, the tables, the headset
 sessions). In short:
 
-- `PRIMEFRAME_PACING=cycle` (default) | `pipelined` | `drain` | `inline`; `PRIMEDGUN_XR_WAIT_GPU=1` alone
+- `PRIMEDFRAME_PACING=cycle` (default) | `pipelined` | `drain` | `inline`; `PRIMEDGUN_XR_WAIT_GPU=1` alone
   still means `drain`. Cycle: each game frame in its own `xrWaitFrame` cycle (the drain's order as SteamVR
   sees it), begun at the frame's first draw that reads the head pose, released after its fence and ended
   by a releaser thread, no CPU drain. Pipelined: two eye swapchain sets; a pacing thread ends each set
@@ -228,13 +228,13 @@ sessions). In short:
 - An `XRF` line per ended frame and the per-second XRSTATS fields `end_*`, `age_*`, `lead_avg_ms`,
   `pose_off`, `discards` give the timing against SteamVR's wake-up (PACING.md "Frame log").
 - While the OpenXR session runs the desktop window is neither drawn nor presented
-  (`PRIMEFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
+  (`PRIMEDFRAME_WINDOW_PRESENT=1` keeps it). Under the mock the software WSI waited for the GPU inside that
   present, which hid every early release and cost the heavy room about 40 % of its frame rate.
-- `PRIMEFRAME_PREDICT_EXTRA_MS=<ms>|auto` (off by default; cycle, drain, inline): head views and controller
+- `PRIMEDFRAME_PREDICT_EXTRA_MS=<ms>|auto` (off by default; cycle, drain, inline): head views and controller
   poses located that far past the frame's display time, `auto` one period for each period the frame is
-  expected to be ready past `PRIMEFRAME_PREDICT_ONTIME_MS` (19.5) after SteamVR's wake-up; `xrEndFrame`
+  expected to be ready past `PRIMEDFRAME_PREDICT_ONTIME_MS` (19.5) after SteamVR's wake-up; `xrEndFrame`
   keeps the display time and the drawn poses. PACING.md "Prediction for the real display time".
-- `PRIMEFRAME_NO_GPU_WAIT=1` releases with no wait at all: the negative test, which the mock's release
+- `PRIMEDFRAME_NO_GPU_WAIT=1` releases with no wait at all: the negative test, which the mock's release
   check must fail (`mockrun.sh --nowait`).
 - mockrun: `--pacing M`, `--nowait`, `--window`, `--stamp`, `--head DPS`; it sets `MOCK_XR_SKIP=late` (a
   late xrWaitFrame returns at once, as SteamVR does), passes `MOCK_XR_THROTTLE` (SteamVR's
@@ -245,13 +245,13 @@ sessions). In short:
   `xrmock: latency` summary lines.
 - Heavy rooms (lane K, frame/PACING.md "The heavy room"): the cycle loop overlaps the next frame's
   `xrWaitFrame` with the last frame's end (SteamVR sees wait N, begin N, ..., wait N+1, end N, begin N+1;
-  `PRIMEFRAME_CYCLE_OVERLAP=0` off), the video thread hands the GPU its work every 100 draws
-  (`PRIMEFRAME_KICK_DRAWS`, 0 off), the eye blit no longer clears first (`PRIMEFRAME_EYE_CLEAR=1` back), and
+  `PRIMEDFRAME_CYCLE_OVERLAP=0` off), the video thread hands the GPU its work every 100 draws
+  (`PRIMEDFRAME_KICK_DRAWS`, 0 off), the eye blit no longer clears first (`PRIMEDFRAME_EYE_CLEAR=1` back), and
   each frame lands on the refresh right after the last frame's, whatever SteamVR hands it (lane M, the landing
-  plan, `PRIMEFRAME_CYCLE_END=plan`, the default; frame/PACING.md "One landing"): a frame handed an earlier
+  plan, `PRIMEDFRAME_CYCLE_END=plan`, the default; frame/PACING.md "One landing"): a frame handed an earlier
   refresh is held past the limit before its landing and its poses located for that refresh; it lands later only
   when it cannot make it; a catch-up (one frame dropped) only within 40 s of the start or a load.
-  `PRIMEFRAME_CYCLE_END=asap` is lane L's asap mode for comparison. SteamVR's wake-up comes from its exact lead
-  on its own clock (`PRIMEFRAME_XR_CLOCK`). `PRIMEFRAME_HUD_TEST=1` draws a white test ring in a head-locked
+  `PRIMEDFRAME_CYCLE_END=asap` is lane L's asap mode for comparison. SteamVR's wake-up comes from its exact lead
+  on its own clock (`PRIMEDFRAME_XR_CLOCK`). `PRIMEDFRAME_HUD_TEST=1` draws a white test ring in a head-locked
   (VIEW space) quad layer. mockrun `--frame` sets the whole Frame-like mock (`MOCK_XR_EARLY=3`, SteamVR's
   hand-out as the sessions showed it; `--phase` sets where the game's call falls after a wake-up). Per-frame timing: the `XRC` log line.

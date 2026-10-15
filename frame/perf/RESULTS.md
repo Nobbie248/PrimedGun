@@ -14,7 +14,7 @@ per refresh at 120 Hz (1.6 ms per 60 Hz game frame), which is the margin kept be
   zone is below C degrees).
 - `frame/perf/matrix.sh` runs the table, `summary.py` makes its rows, `timeline.py` lines up game fps, GPU
   time, GPU clock, temperatures and the culled draw count, `hitches.py` reads the per frame log
-  (`PRIMEFRAME_FRAMELOG=<file>`, one line per presented frame), `gputrace.py` and `passes.py` read Turnip's
+  (`PRIMEDFRAME_FRAMELOG=<file>`, one line per presented frame), `gputrace.py` and `passes.py` read Turnip's
   own GPU trace (`MESA_GPU_TRACES=print`) and give the GPU time per render pass.
 - "GPU ms" is the busy time per eye set from the kernel (XRSTATS `gpu_ms`). The GPU governor
   (`simple_ondemand`) lowers the clock when the GPU is not saturated, which makes the busy time of a light
@@ -64,7 +64,7 @@ Turnip's trace, 1.5 s of the heavy room, per game frame:
   `TU_DEBUG=gmem` would only move the small passes (0.3 ms); not run.
 - The EFB copies the game makes (bloom, visor) cost 0.03 ms on the GPU and nothing on the CPU: with
   `EFBToTextureEnable = True` they stay on the GPU; in 5 minutes not one EFB copy was read back to RAM
-  (`PRIMEFRAME_FRAMELOG` counts them). `EFBToTextureEnable`, `DeferEFBCopies` (only matters for copies to RAM)
+  (`PRIMEDFRAME_FRAMELOG` counts them). `EFBToTextureEnable`, `DeferEFBCopies` (only matters for copies to RAM)
   and `EFBScaledCopy` (scaled copies are 0.03 ms) have nothing to win; left as they are.
 - The eye clears are pure waste: the blit covers the whole image. 0.55 to 0.63 ms per frame at 1728, more at
   2160 (the 1728 to 2160 step costs 0.85 ms per frame in total). The clear is in `Present.cpp`
@@ -140,9 +140,9 @@ read back to RAM in any run; disc reads (176 per session) all fall in the openin
 long frame. Before the shader cache fix every session compiled its shaders again; with
 `ShaderCompilationMode = 3` that shows as objects skipped for a few frames, not as stalls.
 
-## Defaults (seed `Config/GFX.ini`, `GameSettings/GM8E01.ini`, `primeframe.sh`)
+## Defaults (seed `Config/GFX.ini`, `GameSettings/GM8E01.ini`, `primedframe.sh`)
 
-- **Turnip direct rendering on** (`TU_DEBUG=sysmem` set by the wrapper; `PRIMEFRAME_SYSMEM=0` turns it off,
+- **Turnip direct rendering on** (`TU_DEBUG=sysmem` set by the wrapper; `PRIMEDFRAME_SYSMEM=0` turns it off,
   `TU_DEBUG` flags from a `session.env` are kept). It cuts the heavy room's GPU time by two thirds with an
   identical picture, and is what makes anything above today's quality possible.
 - **InternalResolution 3** (was 2), with **2160 eye images** (the panel's size; set by SteamVR's per-app

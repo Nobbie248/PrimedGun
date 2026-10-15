@@ -1203,11 +1203,11 @@ void Presenter::PrepareNextOpenXRFrame()
 #ifdef ENABLE_VR
 // The eye blit covers the whole eye image (cinema screen too: one full-size blit into eye 0), so
 // clearing it first only costs GPU time (0.55 to 0.63 ms a frame at 1728, more at 2160).
-// PRIMEFRAME_EYE_CLEAR=1 brings the clear back.
+// PRIMEDFRAME_EYE_CLEAR=1 brings the clear back.
 static bool EyeClearWanted()
 {
   static const bool s_clear = [] {
-    const char* env = std::getenv("PRIMEFRAME_EYE_CLEAR");
+    const char* env = std::getenv("PRIMEDFRAME_EYE_CLEAR");
     return env && std::string_view(env) == "1";
   }();
   return s_clear;
@@ -1322,7 +1322,7 @@ void Presenter::Present(PresentInfo* present_info)
   const bool vr_pacing_active =
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
       VR::g_openxr->IsFrameThreadActive();
-  // PrimeFrame pipelined pacing (Vulkan): the backend's pacing thread owns the OpenXR frame
+  // PrimedFrame pipelined pacing (Vulkan): the backend's pacing thread owns the OpenXR frame
   // protocol; this thread renders the eyes, hands them over and locates the next pose.
   VR::IOpenXRSwapchain* const vr_swapchain =
       g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr ?
@@ -1345,7 +1345,7 @@ void Presenter::Present(PresentInfo* present_info)
     m_openxr_frame_prepared = vr_frame_started;
   }
   // Nobody sees the desktop window in the headset: while the session runs the eyes are the only
-  // output (no mirror blits, no window present; PRIMEFRAME_WINDOW_PRESENT=1 keeps it).
+  // output (no mirror blits, no window present; PRIMEDFRAME_WINDOW_PRESENT=1 keeps it).
   const bool vr_skip_window =
       vr_frame_started && !vr_pacing_active && vr_swapchain && vr_swapchain->SkipsWindowPresent();
   s_vr_eyes_this_present = vr_frame_started;

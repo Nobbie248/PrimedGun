@@ -1,8 +1,8 @@
-# PrimeFrame
+# PrimedFrame
 
 Metroid Prime in VR, running natively on the Valve Steam Frame.
 
-PrimeFrame is a fork of Nobbie248's [PrimedGun](https://github.com/Nobbie248/PrimedGun), the Dolphin based build that plays Metroid Prime in VR. PrimedGun has no Linux Arm64 build, so before this I ran its PC build on the Frame inside a Linux container with the Frame's graphics driver mounted in. PrimeFrame is the same game code built as a plain Linux Arm64 program with no window of its own, tuned to run in the Frame's own SteamVR. You do not need a container, Lepton, an APK or a PC.
+PrimedFrame is a fork of Nobbie248's [PrimedGun](https://github.com/Nobbie248/PrimedGun), the Dolphin based build that plays Metroid Prime in VR. PrimedGun has no Linux Arm64 build, so before this I ran its PC build on the Frame inside a Linux container with the Frame's graphics driver mounted in. PrimedFrame is the same game code built as a plain Linux Arm64 program with no window of its own, tuned to run in the Frame's own SteamVR. You do not need a container, Lepton, an APK or a PC.
 
 You need your own Metroid Prime disc image. No game data is in this repository or its releases.
 
@@ -16,11 +16,11 @@ What it does:
 
 ## What this adds to PrimedGun
 
-PrimedGun runs on Windows and on the Meta Quest. PrimeFrame changes the platform side and the frame pacing, and leaves the game side as it is.
+PrimedGun runs on Windows and on the Meta Quest. PrimedFrame changes the platform side and the frame pacing, and leaves the game side as it is.
 
 Against the container setup I ran before:
 
-| | Container setup | PrimeFrame |
+| | Container setup | PrimedFrame |
 |---|---|---|
 | How it runs | PC build in a Linux container with the Frame's graphics driver mounted in | native Linux Arm64 build, started from the Steam library |
 | Internal resolution | 2x (1280x1056 per eye) | 3x (1920x1584 per eye) |
@@ -75,32 +75,32 @@ Known:
 
 ## Install
 
-1. Download `primeframe-1.0.0-linux-arm64.tar.gz` and `SHA256SUMS` from the [Releases](https://github.com/simplysanatori/PrimeFrame/releases) page, onto the Frame.
+1. Download `primedframe-1.0.0-linux-arm64.tar.gz` and `SHA256SUMS` from the [Releases](https://github.com/simplysanatori/PrimedFrame/releases) page, onto the Frame.
 2. In a terminal, in the folder you downloaded them to:
 
    ```sh
    sha256sum -c --ignore-missing SHA256SUMS
-   mkdir -p ~/Downloads/primeframe && tar xf primeframe-1.0.0-linux-arm64.tar.gz -C ~/Downloads/primeframe
-   ~/Downloads/primeframe/install.sh --rom "/path/to/Metroid Prime (USA).rvz"
+   mkdir -p ~/Downloads/primedframe && tar xf primedframe-1.0.0-linux-arm64.tar.gz -C ~/Downloads/primedframe
+   ~/Downloads/primedframe/install.sh --rom "/path/to/Metroid Prime (USA).rvz"
    ```
 
    Leave out `--rom` when the image is in `~/Documents/Roms/gc`.
 
-3. Put the headset on and launch **PrimeFrame** from your Steam library. The first launch stutters while the shaders compile; later launches do not.
+3. Put the headset on and launch **PrimedFrame** from your Steam library. The first launch stutters while the shaders compile; later launches do not.
 
-The installer copies the program to `~/Games/PrimeFrame/app`, puts default settings in `~/.local/share/PrimeFrame` where files are missing, remembers the path of your disc image, adds **PrimeFrame** to your Steam library as a VR shortcut with its library art (capsule, cover, hero, logo and icon), or updates the entry if it is there, and sets SteamVR's per-app settings for it. It talks to Steam through its local debugging port, which SteamOS has on by default. It changes nothing outside the folders under [Files](#files), the shortcut and those settings. It never writes into a SteamVR file; the launcher sets the per-app settings through SteamVR's own `vrcmd`.
+The installer copies the program to `~/Games/PrimedFrame/app`, puts default settings in `~/.local/share/PrimedFrame` where files are missing, remembers the path of your disc image, adds **PrimedFrame** to your Steam library as a VR shortcut with its library art (capsule, cover, hero, logo and icon), or updates the entry if it is there, and sets SteamVR's per-app settings for it. It talks to Steam through its local debugging port, which SteamOS has on by default. It changes nothing outside the folders under [Files](#files), the shortcut and those settings. It never writes into a SteamVR file; the launcher sets the per-app settings through SteamVR's own `vrcmd`.
 
-To update, download the new tarball and run `install.sh` again. Your settings, memory card and save states stay where they are; the installer only adds files that are missing. To change the disc image later, run `install.sh --rom PATH` again, or edit the one line in `~/.local/share/PrimeFrame/rom`.
+To update, download the new tarball and run `install.sh` again. Your settings, memory card and save states stay where they are; the installer only adds files that are missing. To change the disc image later, run `install.sh --rom PATH` again, or edit the one line in `~/.local/share/PrimedFrame/rom`.
 
-To bring over an existing save, copy your memory card and save states into `~/.local/share/PrimeFrame/user` (`GC/` and `StateSaves/`) from a PC Dolphin or PrimedGun install, before the first launch. PrimedGun advises against carrying save states from one build to another.
+To bring over an existing save, copy your memory card and save states into `~/.local/share/PrimedFrame/user` (`GC/` and `StateSaves/`) from a PC Dolphin or PrimedGun install, before the first launch. PrimedGun advises against carrying save states from one build to another.
 
 ## First run
 
-There is no desktop window. The game starts straight into the headset, on the title screen. If it does not start, open `~/.local/share/PrimeFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimeFrame/rom` does not exist.
+There is no desktop window. The game starts straight into the headset, on the title screen. If it does not start, open `~/.local/share/PrimedFrame/sessions/latest/launch.log`: it says what the launcher did and why it refused to start, for example when the disc image named in `~/.local/share/PrimedFrame/rom` does not exist.
 
 PrimedGun's own notes say: click the right stick to set your height, click the left thumbstick to open or close the in-headset settings menu, stay in the centre of your play space and face forward, and use Exit Game at the top right of the menu (press it twice) to leave the game cleanly, which also writes the shader caches.
 
-Save in the game as usual. The save goes to the memory card in `~/.local/share/PrimeFrame/user/GC`.
+Save in the game as usual. The save goes to the memory card in `~/.local/share/PrimedFrame/user/GC`.
 
 ## Controls
 
@@ -108,7 +108,7 @@ The controls are PrimedGun's, unchanged. It reads the controllers through OpenXR
 
 ## Settings
 
-Settings are the ini files in `~/.local/share/PrimeFrame/user`, and PrimedGun's in-VR menu (click the left thumbstick):
+Settings are the ini files in `~/.local/share/PrimedFrame/user`, and PrimedGun's in-VR menu (click the left thumbstick):
 
 - `Config/GFX.ini`: graphics, and the `[VR]` section with the PrimedGun options.
 - `GameSettings/GM8E01.ini`: overrides for this game: `InternalResolution = 3`, background shader compilation, and `EnableGPUTextureDecoding = False`. Leave that last one off: with it on, the Frame's GPU reads bad memory and takes SteamVR down.
@@ -129,29 +129,29 @@ Everything the pacing does is in the list above; the account of how I got there 
 
 | What | Where |
 |---|---|
-| Program | `~/Games/PrimeFrame/app` |
-| Settings, memory card, save states | `~/.local/share/PrimeFrame/user` (`Config/`, `GameSettings/`, `GC/`, `StateSaves/`) |
-| Path of your disc image | `~/.local/share/PrimeFrame/rom` (a text file, one line) |
-| Logs | `~/.local/share/PrimeFrame/sessions/latest/` (`launch.log`, `dolphin.log`, `vrtiming.log`, `report.txt`, `stdout.log`) |
-| One launch of test settings | `~/.local/share/PrimeFrame/session.env`, `NAME=value` lines, used for the next launch only |
+| Program | `~/Games/PrimedFrame/app` |
+| Settings, memory card, save states | `~/.local/share/PrimedFrame/user` (`Config/`, `GameSettings/`, `GC/`, `StateSaves/`) |
+| Path of your disc image | `~/.local/share/PrimedFrame/rom` (a text file, one line) |
+| Logs | `~/.local/share/PrimedFrame/sessions/latest/` (`launch.log`, `dolphin.log`, `vrtiming.log`, `report.txt`, `stdout.log`) |
+| One launch of test settings | `~/.local/share/PrimedFrame/session.env`, `NAME=value` lines, used for the next launch only |
 
 Your memory card is `user/GC/MemoryCardA.USA.raw`. Save normally in the game.
 
 ## Troubleshooting
 
-- **`install.sh` says Steam's debugging port is not reachable.** Start Steam and run it again. With `PRIMEFRAME_SKIP_STEAM=1` it installs without the library entry.
+- **`install.sh` says Steam's debugging port is not reachable.** Start Steam and run it again. With `PRIMEDFRAME_SKIP_STEAM=1` it installs without the library entry.
 - **The game closes at once.** Read `sessions/latest/launch.log`. A missing disc image gives `REFUSING TO START` and exit status 66. Fix it with `install.sh --rom PATH`.
 - **Motion is uneven, or the picture ghosts when you turn your head.** Check `launch.log` for the read-back line: the per-app SteamVR settings should be as asked. The report shows what the game and SteamVR's compositor did.
-- **Doubled images or uneven timing in a room.** Put `PRIMEFRAME_PACING=drain` in `~/.local/share/PrimeFrame/session.env` for one launch. That is the older loop that drains the GPU every frame; it is slower but a useful comparison.
-- **Slow or glitchy on direct rendering.** Put `PRIMEFRAME_SYSMEM=0` in `session.env` for one launch to leave the driver tiled.
-- **Resolution.** `PRIMEFRAME_EYE=1728` in `session.env` asks SteamVR for 1728 pixels per eye for one launch, and `InternalResolution` in `GameSettings/GM8E01.ini` sets the internal resolution.
-- **`PRIMEFRAME_THROTTLE`** sets SteamVR's frames to throttle for the game; the default makes SteamVR pace the game at 60.
+- **Doubled images or uneven timing in a room.** Put `PRIMEDFRAME_PACING=drain` in `~/.local/share/PrimedFrame/session.env` for one launch. That is the older loop that drains the GPU every frame; it is slower but a useful comparison.
+- **Slow or glitchy on direct rendering.** Put `PRIMEDFRAME_SYSMEM=0` in `session.env` for one launch to leave the driver tiled.
+- **Resolution.** `PRIMEDFRAME_EYE=1728` in `session.env` asks SteamVR for 1728 pixels per eye for one launch, and `InternalResolution` in `GameSettings/GM8E01.ini` sets the internal resolution.
+- **`PRIMEDFRAME_THROTTLE`** sets SteamVR's frames to throttle for the game; the default makes SteamVR pace the game at 60.
 - **The game froze.** If it wrote `PrimedGunFrameStall.txt`, the session folder has a copy.
 - **A bad mapping on the Frame controllers.** Tell me which button and what it did; see below.
 
 ## Reporting a problem
 
-Run `~/Games/PrimeFrame/app/tools/collect-logs.sh`. It writes an archive of the latest session with addresses, user names and IDs masked. Read it before you attach it to an [issue](https://github.com/simplysanatori/PrimeFrame/issues) of the PrimeFrame repository, together with what you did, what you expected and what happened. Masking is best effort.
+Run `~/Games/PrimedFrame/app/tools/collect-logs.sh`. It writes an archive of the latest session with addresses, user names and IDs masked. Read it before you attach it to an [issue](https://github.com/simplysanatori/PrimedFrame/issues) of the PrimedFrame repository, together with what you did, what you expected and what happened. Masking is best effort.
 
 ## Build from source
 
@@ -159,7 +159,7 @@ See the [technical notes](docs/TECHNICAL_NOTES.md) and [frame/DEV.md](frame/DEV.
 
 ## Support
 
-PrimeFrame exists because of the people who made PrimedGun and the VR builds of Dolphin it grew from. If you want to support someone, support them first:
+PrimedFrame exists because of the people who made PrimedGun and the VR builds of Dolphin it grew from. If you want to support someone, support them first:
 
 - Nobbie made [PrimedGun](https://github.com/Nobbie248/PrimedGun). I could not find a donation page, so star and follow the project, report what you find there, and send improvements upstream.
 - iChris4 made Dolphin ReduX, the VR build of Dolphin that PrimedGun is based on, and ported PrimedGun to the Quest. You can [sponsor iChris4 on GitHub](https://github.com/sponsors/iChris4).

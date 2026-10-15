@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for install.sh, uninstall.sh, primeframe.sh, collect-logs.sh and session-report.py. Touches
+# Tests for install.sh, uninstall.sh, primedframe.sh, collect-logs.sh and session-report.py. Touches
 # nothing real: HOME is a scratch folder, Steam is a scratch copy (a copy of the real shortcuts.vdf
 # if there is one, read only), vrcmd and the game are fakes. Nothing is run that talks to SteamVR.
 #   frame/test-installer.sh [SCRATCH_DIR]      (default ~/.cache/pf-laneD/test-installer, emptied first)
@@ -14,7 +14,7 @@ bad() { echo "FAIL $*"; fails=$((fails + 1)); }
 check() { local d=$1; shift; if "$@"; then ok "$d"; else bad "$d"; fi; }
 not() { ! "$@"; }
 has() { grep -q -- "$2" "$1"; }
-export PRIMEFRAME_SKIP_STEAM= HOME=$T/home XDG_DATA_HOME=$T/home/xdg
+export PRIMEDFRAME_SKIP_STEAM= HOME=$T/home XDG_DATA_HOME=$T/home/xdg
 mkdir -p "$HOME"
 
 # ---- scratch Steam folder, with the owner's old shortcut and its art ----
@@ -22,10 +22,10 @@ STEAM=$T/steam; mkdir -p "$STEAM/userdata/1/config/grid"
 REAL=$(ls "$REALHOME"/.local/share/Steam/userdata/*/config/shortcuts.vdf 2> /dev/null | head -1)   # read only, copied
 [ -n "$REAL" ] && cp "$REAL" "$STEAM/userdata/1/config/shortcuts.vdf"
 VDF=$STEAM/userdata/1/config/shortcuts.vdf
-# The real list may already hold PrimeFrame entries (a real install): the copy starts without them.
+# The real list may already hold PrimedFrame entries (a real install): the copy starts without them.
 [ -f "$VDF" ] && python3 -I -B -c 'import importlib.util as u, sys
 s = u.spec_from_file_location("cef", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m)
-for n in ("PrimeFrame", "PrimeFrame (dev)"): m.vdf_remove(sys.argv[2], n)' "$HERE/steam-cef.py" "$VDF"
+for n in ("PrimedFrame", "PrimedFrame (dev)"): m.vdf_remove(sys.argv[2], n)' "$HERE/steam-cef.py" "$VDF"
 py() { python3 -I -B -c '
 import importlib.util, sys
 s = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
@@ -59,23 +59,23 @@ printf '[General]\nx = 1\n[primedgun]\nmetroid_hud_distance=2.5\nrumble_enabled=
 PODSUM=$(cd "$POD" && find . -type f -exec sha256sum {} + | sort | sha256sum)
 mkdir -p "$HOME/Documents/Roms/gc"
 
-export PRIMEFRAME_APP=$T/app-dev PRIMEFRAME_HOME=$T/pfhome PRIMEFRAME_STEAM_DIR=$STEAM
-P=$PRIMEFRAME_HOME
+export PRIMEDFRAME_APP=$T/app-dev PRIMEDFRAME_HOME=$T/pfhome PRIMEDFRAME_STEAM_DIR=$STEAM
+P=$PRIMEDFRAME_HOME
 "$HERE/install.sh" --dev "$BUILD" > "$T/install1.log" 2>&1; check "install.sh --dev exits 0" test $? -eq 0
 A=$T/app-dev
-check "binary, Sys and assets copied (links followed)" test -x "$A/primeframe" -a -f "$A/Sys/Shaders/a" -a -f "$A/assets/PrimedGun.png" -a ! -L "$A/Sys"
-check "wrapper, tools, uninstall installed" test -x "$A/primeframe.sh" -a -f "$A/tools/vrtiming.py" -a -f "$A/tools/session-report.py" -a -x "$A/tools/uninstall.sh" -a -x "$A/tools/collect-logs.sh" -a ! -e "$A/dolphin-nogui"
+check "binary, Sys and assets copied (links followed)" test -x "$A/primedframe" -a -f "$A/Sys/Shaders/a" -a -f "$A/assets/PrimedGun.png" -a ! -L "$A/Sys"
+check "wrapper, tools, uninstall installed" test -x "$A/primedframe.sh" -a -f "$A/tools/vrtiming.py" -a -f "$A/tools/session-report.py" -a -x "$A/tools/uninstall.sh" -a -x "$A/tools/collect-logs.sh" -a ! -e "$A/dolphin-nogui"
 check "user folder seeded" test -f "$P/user/Config/Dolphin.ini" -a -f "$P/user/Config/GFX.ini" -a -f "$P/user/GameSettings/GM8E01.ini" -a -f "$P/user/Config/Logger.ini"
 check "seed keeps GPU texture decoding off" has "$P/user/GameSettings/GM8E01.ini" "^EnableGPUTextureDecoding = False"
 check "seed has the VR section and no analytics id" has "$P/user/Config/GFX.ini" "^EnableOpenXR = True" && not grep -q "^ID = " "$P/user/Config/Dolphin.ini"
 check "no rom yet: no rom file" test ! -s "$P/rom"
-check "shortcut added once" test "$(count 'PrimeFrame (dev)')" = 1
+check "shortcut added once" test "$(count 'PrimedFrame (dev)')" = 1
 check "shortcut count grew by one" test "$(count)" = $((BEFORE + 1))
-check "launch options run the wrapper" test "$(field 'PrimeFrame (dev)' LaunchOptions)" = "\"$A/primeframe.sh\" %command%"
-check "exe is the installed binary" test "$(field 'PrimeFrame (dev)' Exe)" = "\"$A/primeframe\""
-NEWID=$(( $(field 'PrimeFrame (dev)' appid) & 0xffffffff ))
+check "launch options run the wrapper" test "$(field 'PrimedFrame (dev)' LaunchOptions)" = "\"$A/primedframe.sh\" %command%"
+check "exe is the installed binary" test "$(field 'PrimedFrame (dev)' Exe)" = "\"$A/primedframe\""
+NEWID=$(( $(field 'PrimedFrame (dev)' appid) & 0xffffffff ))
 check "the five library images land under the new appid, bytes as shipped" test "$(cmp "$G/$NEWID.png" "$HERE/art/grid.png" && cmp "$G/${NEWID}p.png" "$HERE/art/grid_p.png" && cmp "$G/${NEWID}_hero.png" "$HERE/art/hero.png" && cmp "$G/${NEWID}_logo.png" "$HERE/art/logo.png" && cmp "$G/${NEWID}_icon.ico" "$HERE/art/icon.ico" && echo same)" = same
-check "the shortcut's icon field points at the icon" test "$(field 'PrimeFrame (dev)' icon)" = "$G/${NEWID}_icon.ico"
+check "the shortcut's icon field points at the icon" test "$(field 'PrimedFrame (dev)' icon)" = "$G/${NEWID}_icon.ico"
 check "seed has the HUD placement in Config/PrimedGun.ini" has "$P/user/Config/PrimedGun.ini" "^metroid_hud_distance = 1.15"
 echo stale > "$G/$NEWID.png"
 check "old shortcut and its art untouched" test "$(count "$OLD")" = 1 -a -f "$G/${OLDID}p.png"
@@ -84,7 +84,7 @@ echo mine >> "$P/user/Config/GFX.ini"; echo m > "$P/user/GC.keep"; echo mine >> 
 check "second install: art written again over an earlier copy" cmp -s "$G/$NEWID.png" "$HERE/art/grid.png"
 check "second install: PrimedGun.ini edits kept" has "$P/user/Config/PrimedGun.ini" "^mine"
 cp "$HERE/seed/user/Config/PrimedGun.ini" "$P/user/Config/PrimedGun.ini"   # back to the seed for the import test
-check "second install: no duplicate, user edits kept" test "$(count 'PrimeFrame (dev)')" = 1 && has "$P/user/Config/GFX.ini" "^mine"
+check "second install: no duplicate, user edits kept" test "$(count 'PrimedFrame (dev)')" = 1 && has "$P/user/Config/GFX.ini" "^mine"
 
 # disc image: one candidate, then several (no terminal: not chosen), then --rom
 echo x > "$HOME/Documents/Roms/gc/Metroid Prime (USA).rvz"; echo x > "$HOME/Documents/Roms/gc/Metroid Prime 2 Echoes.rvz"
@@ -122,34 +122,34 @@ check "--force merged [VR] into GFX.ini, kept the rest" has "$P/user/Config/GFX.
 check "the source still unchanged" test "$(cd "$POD" && find . -type f -exec sha256sum {} + | sort | sha256sum)" = "$PODSUM"
 
 # release layout: a flat tarball with the binary, Sys/, assets/ and the scripts
-R=$T/rel; mkdir -p "$R/tools"; cp "$BUILD/Binaries/dolphin-nogui" "$R/primeframe"; cp -rL "$T/src-sys" "$R/Sys"; cp -rL "$T/src-assets" "$R/assets"
-cp "$HERE"/{primeframe.sh,install.sh,uninstall.sh,collect-logs.sh,steam-cef.py} "$R/"; cp "$HERE"/tools/{vrtiming.py,session-report.py} "$R/tools/"; cp -r "$HERE/seed" "$R/seed"; cp -r "$HERE/art" "$R/art"
+R=$T/rel; mkdir -p "$R/tools"; cp "$BUILD/Binaries/dolphin-nogui" "$R/primedframe"; cp -rL "$T/src-sys" "$R/Sys"; cp -rL "$T/src-assets" "$R/assets"
+cp "$HERE"/{primedframe.sh,install.sh,uninstall.sh,collect-logs.sh,steam-cef.py} "$R/"; cp "$HERE"/tools/{vrtiming.py,session-report.py} "$R/tools/"; cp -r "$HERE/seed" "$R/seed"; cp -r "$HERE/art" "$R/art"
 tar -czf "$T/rel.tar.gz" -C "$R" .
-PRIMEFRAME_APP=$T/app "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install5.log" 2>&1
-check "tarball install into the app folder" test -x "$T/app/primeframe" -a -f "$T/app/Sys/Shaders/a" -a "$(count PrimeFrame)" = 1 -a "$(field PrimeFrame Exe)" = "\"$T/app/primeframe\""
-RELID=$(( $(field PrimeFrame appid) & 0xffffffff ))
+PRIMEDFRAME_APP=$T/app "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install5.log" 2>&1
+check "tarball install into the app folder" test -x "$T/app/primedframe" -a -f "$T/app/Sys/Shaders/a" -a "$(count PrimedFrame)" = 1 -a "$(field PrimedFrame Exe)" = "\"$T/app/primedframe\""
+RELID=$(( $(field PrimedFrame appid) & 0xffffffff ))
 check "tarball install: the art lands under its appid" test -f "$G/$RELID.png" -a -f "$G/${RELID}p.png" -a -f "$G/${RELID}_hero.png" -a -f "$G/${RELID}_logo.png" -a -f "$G/${RELID}_icon.ico"
-PRIMEFRAME_APP=$T/app "$R/install.sh" > "$T/install6.log" 2>&1
-check "install.sh run from an unpacked release" test $? -eq 0 -a "$(count PrimeFrame)" = 1
-PRIMEFRAME_APP=$T/app PRIMEFRAME_STEAM_DIR= PRIMEFRAME_SKIP_STEAM=1 "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install7.log" 2>&1
-check "PRIMEFRAME_SKIP_STEAM=1 installs without Steam" test $? -eq 0 && has "$T/install7.log" "no Steam shortcut"
+PRIMEDFRAME_APP=$T/app "$R/install.sh" > "$T/install6.log" 2>&1
+check "install.sh run from an unpacked release" test $? -eq 0 -a "$(count PrimedFrame)" = 1
+PRIMEDFRAME_APP=$T/app PRIMEDFRAME_STEAM_DIR= PRIMEDFRAME_SKIP_STEAM=1 "$HERE/install.sh" "$T/rel.tar.gz" > "$T/install7.log" 2>&1
+check "PRIMEDFRAME_SKIP_STEAM=1 installs without Steam" test $? -eq 0 && has "$T/install7.log" "no Steam shortcut"
 echo "mine" > "$P/user/StateSaves/keepme"; mkdir -p "$HOME/.local/share/other"; echo mine > "$HOME/.local/share/other/x"
 
 # ---- uninstall ----
-PRIMEFRAME_APP=$T/app "$HERE/uninstall.sh" > "$T/un1.log" 2>&1
+PRIMEDFRAME_APP=$T/app "$HERE/uninstall.sh" > "$T/un1.log" 2>&1
 check "uninstall removes the art of that shortcut, not the dev one's" test ! -e "$G/$RELID.png" -a ! -e "$G/${RELID}_icon.ico" -a ! -e "$G/${RELID}_hero.png" -a -f "$G/$NEWID.png"
-check "uninstall removes the shortcut and app, keeps the dev one" test "$(count PrimeFrame)" = 0 -a ! -d "$T/app" -a "$(count 'PrimeFrame (dev)')" = 1
+check "uninstall removes the shortcut and app, keeps the dev one" test "$(count PrimedFrame)" = 0 -a ! -d "$T/app" -a "$(count 'PrimedFrame (dev)')" = 1
 "$HERE/uninstall.sh" --dev > "$T/un2.log" 2>&1
-check "uninstall --dev removes it; the user folder stays" test "$(count 'PrimeFrame (dev)')" = 0 -a ! -d "$A" -a -f "$P/user/StateSaves/keepme" -a "$(count)" = "$BEFORE"
+check "uninstall --dev removes it; the user folder stays" test "$(count 'PrimedFrame (dev)')" = 0 -a ! -d "$A" -a -f "$P/user/StateSaves/keepme" -a "$(count)" = "$BEFORE"
 check "uninstall --dev removes its art" test ! -e "$G/$NEWID.png" -a ! -e "$G/${NEWID}_logo.png" -a ! -e "$G/${NEWID}_icon.ico"
 check "the old shortcut is still there, with its art" test "$(count "$OLD")" = 1 -a -f "$G/${OLDID}p.png"
 
-# ---- primeframe.sh with a fake vrcmd, fake vrtiming and a fake game ----
-unset PRIMEFRAME_STEAM_DIR
+# ---- primedframe.sh with a fake vrcmd, fake vrtiming and a fake game ----
+unset PRIMEDFRAME_STEAM_DIR
 W=$T/w; mkdir -p "$W/bin" "$W/app/tools" "$W/svr" "$W/home/user/Logs"
-export PRIMEFRAME_HOME=$W/home PRIMEFRAME_STEAMVR_DIR=$W/svr PRIMEFRAME_VRSETTINGS=$W/vrsettings.json
+export PRIMEDFRAME_HOME=$W/home PRIMEDFRAME_STEAMVR_DIR=$W/svr PRIMEDFRAME_VRSETTINGS=$W/vrsettings.json
 touch "$W/svr/libopenvr_api.so"
-cp "$HERE/primeframe.sh" "$W/app/"; cp "$HERE/tools/session-report.py" "$W/app/tools/"
+cp "$HERE/primedframe.sh" "$W/app/"; cp "$HERE/tools/session-report.py" "$W/app/tools/"
 cat > "$W/app/tools/vrtiming.py" << 'PY'
 import sys, time
 open(sys.argv[2], "w").write("fake vrtiming\n"); time.sleep(60)
@@ -167,13 +167,13 @@ d.setdefault(sec, {})[name] = int(val)
 json.dump(d, open(path, "w"))
 PY
 SH
-cat > "$W/app/primeframe" << 'SH'
+cat > "$W/app/primedframe" << 'SH'
 #!/bin/bash
 # a fake game: writes what it was given where the real one writes its log
 U=; while [ $# -gt 0 ]; do [ "$1" = -u ] && U=$2; shift; done
 set -- "$@"
 mkdir -p "$U/Logs"
-{ echo "env FDM=$DISABLE_VULKAN_FDM_INJECTION_LAYER TU=$TU_DEBUG PACING=$PRIMEFRAME_PACING USERPATH=${DOLPHIN_EMU_USERPATH:-unset}"
+{ echo "env FDM=$DISABLE_VULKAN_FDM_INJECTION_LAYER TU=$TU_DEBUG PACING=$PRIMEDFRAME_PACING USERPATH=${DOLPHIN_EMU_USERPATH:-unset}"
   echo "XRSTATS submitted=60 drain_avg_ms=0.10 drain_max_ms=1.0 eye=1728x1728 game_fps=59.9 game_vps=59.9"
   echo "XRSTATS submitted=59 drain_avg_ms=0.20 drain_max_ms=2.0 eye=1728x1728 game_fps=59.0 game_vps=59.9"; } > "$U/Logs/dolphin.log"
 [ -n "$FAKE_STALL" ] && echo stalled > "$U/Logs/PrimedGunFrameStall.txt"
@@ -181,9 +181,9 @@ echo "args: $FAKE_ARGS_MARK"; echo "game stdout"; sleep 2
 exit ${FAKE_RC:-0}
 SH
 # the fake game also records its own arguments
-sed -i 's|^echo "args: \$FAKE_ARGS_MARK"; ||' "$W/app/primeframe"
-sed -i '2i echo "$*" > "$(dirname "$0")/../args.txt"' "$W/app/primeframe"
-chmod +x "$W/bin/vrcmd" "$W/app/primeframe" "$W/app/primeframe.sh"
+sed -i 's|^echo "args: \$FAKE_ARGS_MARK"; ||' "$W/app/primedframe"
+sed -i '2i echo "$*" > "$(dirname "$0")/../args.txt"' "$W/app/primedframe"
+chmod +x "$W/bin/vrcmd" "$W/app/primedframe" "$W/app/primedframe.sh"
 # Steam's %command% on the Frame: steam-launch-wrapper [its options] -- reaper SteamLaunch AppId=N -- <game>.
 # The fakes behave like the real ones: the launch wrapper refuses options it does not know before "--".
 cat > "$W/bin/steam-launch-wrapper" << 'SH'
@@ -196,28 +196,28 @@ cat > "$W/bin/reaper" << 'SH'
 while [ "$1" != -- ]; do shift; done; shift; exec "$@"
 SH
 chmod +x "$W/bin/steam-launch-wrapper" "$W/bin/reaper"
-export FAKE_VRCMD_LOG=$W/vrcmd.log FAKE_VRSETTINGS=$PRIMEFRAME_VRSETTINGS
-run() { env PATH="$W/bin:$PATH" SteamAppId=4242 "$@" "$W/app/primeframe.sh" "$W/bin/steam-launch-wrapper" --oom-score-adjust 900 -- "$W/bin/reaper" SteamLaunch AppId=4242 -- "$W/app/primeframe" > "$W/out.txt" 2>&1; echo $? > "$W/rc"; }
+export FAKE_VRCMD_LOG=$W/vrcmd.log FAKE_VRSETTINGS=$PRIMEDFRAME_VRSETTINGS
+run() { env PATH="$W/bin:$PATH" SteamAppId=4242 "$@" "$W/app/primedframe.sh" "$W/bin/steam-launch-wrapper" --oom-score-adjust 900 -- "$W/bin/reaper" SteamLaunch AppId=4242 -- "$W/app/primedframe" > "$W/out.txt" 2>&1; echo $? > "$W/rc"; }
 run
-S=$PRIMEFRAME_HOME/sessions/latest
+S=$PRIMEDFRAME_HOME/sessions/latest
 check "no rom file: refuses to start (exit 66) with a clear line" test "$(cat "$W/rc")" = 66 && has "$S/launch.log" "REFUSING TO START"
 sleep 1
-echo "$W/nodisc.rvz" > "$PRIMEFRAME_HOME/rom"; run
+echo "$W/nodisc.rvz" > "$PRIMEDFRAME_HOME/rom"; run
 check "rom path that does not exist: refuses (exit 66)" test "$(cat "$W/rc")" = 66 && has "$S/launch.log" "does not exist"
 sleep 1
-echo x > "$W/disc.rvz"; echo "$W/disc.rvz" > "$PRIMEFRAME_HOME/rom"
+echo x > "$W/disc.rvz"; echo "$W/disc.rvz" > "$PRIMEDFRAME_HOME/rom"
 DOLPHIN_EMU_USERPATH=/elsewhere run
 check "wrapper exits with the game's status" test "$(cat "$W/rc")" = 0
-check "Steam's launch chain runs; the game gets its options at the end" grep -q -- "^-u $PRIMEFRAME_HOME/user -p x11 -v Vulkan -e $W/disc.rvz\$" "$W/args.txt"
-mkdir -p "$PRIMEFRAME_HOME/user/StateSaves"; echo s > "$PRIMEFRAME_HOME/user/StateSaves/GM8E01.s02"; sleep 1
-printf 'PRIMEFRAME_STATE=2\n' > "$PRIMEFRAME_HOME/session.env"; run
-check "PRIMEFRAME_STATE=2 starts from slot 2" grep -q -- "-e $W/disc.rvz -s $PRIMEFRAME_HOME/user/StateSaves/GM8E01.s02\$" "$W/args.txt"
-rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
-printf 'PRIMEFRAME_STATE=2\n' > "$PRIMEFRAME_HOME/session.env"; printf 'PRIMEFRAME_PACING=drain\n' > "$PRIMEFRAME_HOME/session.env.next"; run
-check "session.env.next becomes the next launch's session.env" test ! -f "$PRIMEFRAME_HOME/session.env.next" -a -f "$PRIMEFRAME_HOME/session.env" && has "$PRIMEFRAME_HOME/session.env" "PACING=drain"
+check "Steam's launch chain runs; the game gets its options at the end" grep -q -- "^-u $PRIMEDFRAME_HOME/user -p x11 -v Vulkan -e $W/disc.rvz\$" "$W/args.txt"
+mkdir -p "$PRIMEDFRAME_HOME/user/StateSaves"; echo s > "$PRIMEDFRAME_HOME/user/StateSaves/GM8E01.s02"; sleep 1
+printf 'PRIMEDFRAME_STATE=2\n' > "$PRIMEDFRAME_HOME/session.env"; run
+check "PRIMEDFRAME_STATE=2 starts from slot 2" grep -q -- "-e $W/disc.rvz -s $PRIMEDFRAME_HOME/user/StateSaves/GM8E01.s02\$" "$W/args.txt"
+rm -f "$PRIMEDFRAME_HOME/session.env.used"; sleep 1
+printf 'PRIMEDFRAME_STATE=2\n' > "$PRIMEDFRAME_HOME/session.env"; printf 'PRIMEDFRAME_PACING=drain\n' > "$PRIMEDFRAME_HOME/session.env.next"; run
+check "session.env.next becomes the next launch's session.env" test ! -f "$PRIMEDFRAME_HOME/session.env.next" -a -f "$PRIMEDFRAME_HOME/session.env" && has "$PRIMEDFRAME_HOME/session.env" "PACING=drain"
 sleep 1; run
-check "the second launch uses it, then nothing is left" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "PACING=drain" && test ! -f "$PRIMEFRAME_HOME/session.env"
-rm -f "$PRIMEFRAME_HOME/session.env.used"; sleep 1
+check "the second launch uses it, then nothing is left" has "$PRIMEDFRAME_HOME/sessions/latest/dolphin.log" "PACING=drain" && test ! -f "$PRIMEDFRAME_HOME/session.env"
+rm -f "$PRIMEDFRAME_HOME/session.env.used"; sleep 1
 for k in preferredRefreshRate=120 framesToThrottle=1 additionalFramesToPredict=0 motionSmoothingOverride=2 resolutionOverride=2160; do
     check "vrcmd --set-settings-int steam.app.4242.${k%=*} ${k#*=}" has "$W/vrcmd.log" "^--set-settings-int steam.app.4242.${k%=*} ${k#*=}\$"
 done
@@ -233,33 +233,33 @@ check "defaults: sysmem on, no other switches" has "$S/dolphin.log" "env FDM= TU
 sleep 1
 FAKE_STALL=1 FAKE_RC=3 run
 check "the game's exit status is passed on" test "$(cat "$W/rc")" = 3
-check "a stall file is copied into the session" has "$PRIMEFRAME_HOME/sessions/latest/PrimedGunFrameStall.txt" stalled
+check "a stall file is copied into the session" has "$PRIMEDFRAME_HOME/sessions/latest/PrimedGunFrameStall.txt" stalled
 sleep 1
-echo '{"steam.app.4242": {"preferredRefreshRate": 72, "framesToThrottle": 1}}' > "$PRIMEFRAME_VRSETTINGS"; run FAKE_VRCMD_NOWRITE=1
-check "mismatch logged when SteamVR dropped the settings" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "MISMATCH steam.app.4242.preferredRefreshRate"
-check "missing settings counted as mismatches" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "read-back: 1 of 5"
+echo '{"steam.app.4242": {"preferredRefreshRate": 72, "framesToThrottle": 1}}' > "$PRIMEDFRAME_VRSETTINGS"; run FAKE_VRCMD_NOWRITE=1
+check "mismatch logged when SteamVR dropped the settings" has "$PRIMEDFRAME_HOME/sessions/latest/launch.log" "MISMATCH steam.app.4242.preferredRefreshRate"
+check "missing settings counted as mismatches" has "$PRIMEDFRAME_HOME/sessions/latest/launch.log" "read-back: 1 of 5"
 sleep 1
-printf 'PRIMEFRAME_SYSMEM=0\n' > "$PRIMEFRAME_HOME/session.env"
-run PRIMEFRAME_FDM_LAYER=0 PRIMEFRAME_PACING=pipelined PRIMEFRAME_REFRESH_HZ=90
-S=$PRIMEFRAME_HOME/sessions/latest
+printf 'PRIMEDFRAME_SYSMEM=0\n' > "$PRIMEDFRAME_HOME/session.env"
+run PRIMEDFRAME_FDM_LAYER=0 PRIMEDFRAME_PACING=pipelined PRIMEDFRAME_REFRESH_HZ=90
+S=$PRIMEDFRAME_HOME/sessions/latest
 check "switches and session.env reach the game" has "$S/dolphin.log" "env FDM=1 TU= PACING=pipelined"
 check "90 Hz choice applied" has "$W/vrcmd.log" "preferredRefreshRate 90"
-check "session.env renamed after one launch, copy in the session" test ! -f "$PRIMEFRAME_HOME/session.env" -a -f "$PRIMEFRAME_HOME/session.env.used" -a -f "$S/session.env"
+check "session.env renamed after one launch, copy in the session" test ! -f "$PRIMEDFRAME_HOME/session.env" -a -f "$PRIMEDFRAME_HOME/session.env.used" -a -f "$S/session.env"
 sleep 1
 run
-check "next launch: session.env gone, sysmem on again" has "$PRIMEFRAME_HOME/sessions/latest/dolphin.log" "TU=sysmem PACING="
+check "next launch: session.env gone, sysmem on again" has "$PRIMEDFRAME_HOME/sessions/latest/dolphin.log" "TU=sysmem PACING="
 sleep 1
-run SteamAppId=; check "no SteamAppId: settings skipped, game still runs" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "no SteamAppId"
+run SteamAppId=; check "no SteamAppId: settings skipped, game still runs" has "$PRIMEDFRAME_HOME/sessions/latest/launch.log" "no SteamAppId"
 sleep 1
-PATH="$W/bin:$PATH" SteamAppId=4242 "$W/app/primeframe.sh" > "$W/out.txt" 2>&1
-check "run directly (no %command%): the app's own binary" has "$PRIMEFRAME_HOME/sessions/latest/launch.log" "starting $W/app/primeframe"
+PATH="$W/bin:$PATH" SteamAppId=4242 "$W/app/primedframe.sh" > "$W/out.txt" 2>&1
+check "run directly (no %command%): the app's own binary" has "$PRIMEDFRAME_HOME/sessions/latest/launch.log" "starting $W/app/primedframe"
 
 # ---- collect-logs.sh masks what it should ----
-mkdir -p "$W/logs"; export PRIMEFRAME_LOG_DIR=$W/logs
-printf 'host user /home/someone/x 192.0.2.20 aa:bb:cc:dd:ee:01 me@example.org\n' >> "$PRIMEFRAME_HOME/sessions/latest/launch.log"
-mkdir -p "$PRIMEFRAME_HOME/user/Config"; printf '[Analytics]\nID = 0123456789abcdef0123456789abcdef\n' > "$PRIMEFRAME_HOME/user/Config/Dolphin.ini"
+mkdir -p "$W/logs"; export PRIMEDFRAME_LOG_DIR=$W/logs
+printf 'host user /home/someone/x 192.0.2.20 aa:bb:cc:dd:ee:01 me@example.org\n' >> "$PRIMEDFRAME_HOME/sessions/latest/launch.log"
+mkdir -p "$PRIMEDFRAME_HOME/user/Config"; printf '[Analytics]\nID = 0123456789abcdef0123456789abcdef\n' > "$PRIMEDFRAME_HOME/user/Config/Dolphin.ini"
 "$HERE/collect-logs.sh" > "$W/collect.out" 2>&1
-TB=$(ls "$W/logs"/primeframe-logs-*.tar.gz 2> /dev/null | head -1)
+TB=$(ls "$W/logs"/primedframe-logs-*.tar.gz 2> /dev/null | head -1)
 check "collect-logs.sh writes an archive" test -n "$TB"
 mkdir -p "$W/cl"; [ -n "$TB" ] && tar -xzf "$TB" -C "$W/cl"
 check "addresses, home user and analytics id masked" not grep -rqE '192\.168\.1\.20|/home/someone|0123456789abcdef|me@example' "$W/cl"

@@ -162,7 +162,7 @@ public:
   bool SubmitFrame() override;
   bool SupportsDetachedFrameLoop() const override { return false; }
 
-  // PrimeFrame pacing (PRIMEFRAME_PACING=pipelined|inline|drain, see frame/PACING.md).
+  // PrimedFrame pacing (PRIMEDFRAME_PACING=pipelined|inline|drain, see frame/PACING.md).
   bool UsesPipelinedPacing() const override { return m_pacing == Pacing::Pipelined; }
   bool UsesLazyFrameStart() const override { return m_pacing == Pacing::Cycle && m_lazy_start; }
   bool UsesCycleOverlap() const override { return m_pacing == Pacing::Cycle && m_cycle_overlap; }
@@ -199,7 +199,7 @@ private:
     uint32_t set = 0;
     XrTime target = 0;  // the display time its pose was located for
     std::array<bool, 2> eye_acquired{};
-    bool released = false;  // PRIMEFRAME_NO_GPU_WAIT: released by the video thread at once
+    bool released = false;  // PRIMEDFRAME_NO_GPU_WAIT: released by the video thread at once
     bool views_valid = false;
     bool cinematic = false;
     XrCompositionLayerFlags layer_flags = 0;
@@ -285,21 +285,21 @@ private:
   Pacing m_pacing = Pacing::Pipelined;
   bool m_no_gpu_wait = false;
   bool m_skip_window_present = true;
-  // PRIMEFRAME_REPEATS=1: end a frame every refresh, repeating the last eye set between new ones.
+  // PRIMEDFRAME_REPEATS=1: end a frame every refresh, repeating the last eye set between new ones.
   bool m_repeat_layers = false;
-  // Cycle: PRIMEFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
+  // Cycle: PRIMEDFRAME_CYCLE_LAZY=0 begins the frame at the end of the last present (as the drain).
   bool m_lazy_start = true;
   bool m_cycle_busy = false;  // the releaser thread is ending a frame (under m_pacer_mutex)
   // The video thread waits at the eye acquire for the frame the releaser holds: the hold ends now
   // (under m_pacer_mutex); holds cut short, for XRSTATS (releaser thread).
   bool m_cycle_hurry = false;
   std::atomic<uint32_t> m_cycle_hold_cuts{0};
-  // Cycle overlap (default; PRIMEFRAME_CYCLE_OVERLAP=0 turns it off): the next frame's
+  // Cycle overlap (default; PRIMEDFRAME_CYCLE_OVERLAP=0 turns it off): the next frame's
   // xrWaitFrame does not wait for the last frame's end; the releaser thread begins the waited
   // frame right after that end (m_cycle_begin_pending, under m_pacer_mutex).
   bool m_cycle_overlap = false;
   bool m_cycle_begin_pending = false;
-  // Cycle end (PRIMEFRAME_CYCLE_END=plan|asap, with the overlap; releaser thread only): plan
+  // Cycle end (PRIMEDFRAME_CYCLE_END=plan|asap, with the overlap; releaser thread only): plan
   // (default): every frame lands on the refresh after the last frame's (OpenXRManager::WaitFrame
   // plans it), a frame planned after its display time is held past the on-time limit; asap (lane
   // L's A/B): the next xrWaitFrame waits for the last frame's end. See CycleEndHold.
@@ -313,8 +313,8 @@ private:
   int64_t m_cycle_last_cpu_ns = 0;
   uint64_t m_cycle_last_fence_wait_us = 0;
   // Pipelined: release a set's images as soon as its fence signalled, before its refresh
-  // (PRIMEFRAME_EARLY_RELEASE=0: at its refresh); the margin the pose target leaves before the
-  // runtime's wake-up for it (PRIMEFRAME_PACE_MARGIN_MS, default 3).
+  // (PRIMEDFRAME_EARLY_RELEASE=0: at its refresh); the margin the pose target leaves before the
+  // runtime's wake-up for it (PRIMEDFRAME_PACE_MARGIN_MS, default 3).
   bool m_early_release = true;
   double m_pace_margin_ms = 3.0;
 
@@ -358,7 +358,7 @@ private:
   XRVkLayeredSwapchain m_layered_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_overlay_swapchain{};
   XRPrimedGunVkOverlaySwapchain m_primedgun_position_marker_swapchain{};
-  // PRIMEFRAME_HUD_TEST=1: a small ring in a head-locked (VIEW space) quad layer, to see in the
+  // PRIMEDFRAME_HUD_TEST=1: a small ring in a head-locked (VIEW space) quad layer, to see in the
   // headset whether SteamVR keeps such a layer still while the projection layer's HUD moves.
   XRPrimedGunVkOverlaySwapchain m_hud_test_swapchain{};
   bool AppendHudTestLayer(std::vector<XrCompositionLayerBaseHeader*>* layers);

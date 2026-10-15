@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Game frame time histogram and the worst frames: python3 -I frame/perf/hitches.py FRAMELOG [SKIP_S] [SECONDS]
 
-FRAMELOG is the file PRIMEFRAME_FRAMELOG=<file> wrote (one line per presented frame: wall clock us,
+FRAMELOG is the file PRIMEDFRAME_FRAMELOG=<file> wrote (one line per presented frame: wall clock us,
 frame time us, shaders created, textures uploaded, EFB copies read back to RAM, us waited for them,
 disc reads in that frame). SKIP_S seconds after the first frame are left out (state load), then
 SECONDS are counted (default all).

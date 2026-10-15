@@ -1289,7 +1289,7 @@ XrSpace OpenXRManager::GetViewSpace()
     if (XR_FAILED(result))
     {
       m_view_space = XR_NULL_HANDLE;
-      WARN_LOG_FMT(OPENXR, "PrimeFrame: no VIEW reference space ({}).", static_cast<int>(result));
+      WARN_LOG_FMT(OPENXR, "PrimedFrame: no VIEW reference space ({}).", static_cast<int>(result));
     }
   }
   return m_view_space;
@@ -1370,9 +1370,9 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
   }
 }
 
-// PRIMEFRAME_PREDICT_EXTRA_MS (frame/PACING.md "Prediction for the real display time"): unset or 0
+// PRIMEDFRAME_PREDICT_EXTRA_MS (frame/PACING.md "Prediction for the real display time"): unset or 0
 // off; <ms> a fixed extra; auto: one display period for every period the frame is expected to
-// end past PRIMEFRAME_PREDICT_ONTIME_MS (19.5) after the runtime's wake-up for it (SteamVR on the
+// end past PRIMEDFRAME_PREDICT_ONTIME_MS (19.5) after the runtime's wake-up for it (SteamVR on the
 // Frame at framesToThrottle 1 showed frames ended later than that a whole period after their
 // predicted display time). Expected end: how late the xrWaitFrame call returned after the wake-up
 // plus the average xrWaitFrame return to xrEndFrame time.
@@ -1388,7 +1388,7 @@ const PredictConfig& GetPredictConfig()
 {
   static const PredictConfig s_config = [] {
     PredictConfig c;
-    const char* extra = std::getenv("PRIMEFRAME_PREDICT_EXTRA_MS");
+    const char* extra = std::getenv("PRIMEDFRAME_PREDICT_EXTRA_MS");
     if (extra && std::string_view(extra) == "auto")
       c.mode = 2;
     else if (extra && std::atof(extra) > 0.0)
@@ -1396,9 +1396,9 @@ const PredictConfig& GetPredictConfig()
       c.mode = 1;
       c.fixed_ns = static_cast<int64_t>(std::min(std::atof(extra), 100.0) * 1e6);
     }
-    if (const char* ontime = std::getenv("PRIMEFRAME_PREDICT_ONTIME_MS"))
+    if (const char* ontime = std::getenv("PRIMEDFRAME_PREDICT_ONTIME_MS"))
       c.ontime_ms = std::atof(ontime);
-    INFO_LOG_FMT(OPENXR, "PrimeFrame predict extra: {} (on time within {:.1f} ms of the wake-up)",
+    INFO_LOG_FMT(OPENXR, "PrimedFrame predict extra: {} (on time within {:.1f} ms of the wake-up)",
                  c.mode == 2 ? std::string("auto") :
                  c.mode == 1 ? fmt::format("{:.2f} ms", c.fixed_ns / 1e6) :
                                std::string("off"),
@@ -1425,11 +1425,11 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   if (m_xr_clock == 0 && m_clock.display_time > 0)
   {
     // The clock whose lead is plausible (0 to 500 ms); raw when both are (shortly after a boot
-    // they differ by little). PRIMEFRAME_XR_CLOCK=raw|steady forces one.
+    // they differ by little). PRIMEDFRAME_XR_CLOCK=raw|steady forces one.
     const auto plausible = [](int64_t lead) { return lead > 0 && lead < 500'000'000LL; };
     const int64_t lead_raw = m_clock.display_time - (m_clock.wake_ns + raw_offset);
     const int64_t lead_steady = m_clock.display_time - m_clock.wake_ns;
-    const char* force = std::getenv("PRIMEFRAME_XR_CLOCK");
+    const char* force = std::getenv("PRIMEDFRAME_XR_CLOCK");
     if (force && std::string_view(force) == "raw")
       m_xr_clock = 1;
     else if (force && std::string_view(force) == "steady")
@@ -1441,7 +1441,7 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
     if (m_xr_clock != 0)
     {
       INFO_LOG_FMT(OPENXR,
-                   "PrimeFrame XrTime clock: {} (first lead {:.2f} ms; with the other clock it "
+                   "PrimedFrame XrTime clock: {} (first lead {:.2f} ms; with the other clock it "
                    "would read {:.2f} ms)",
                    m_xr_clock == 1 ? "CLOCK_MONOTONIC_RAW" : "steady (CLOCK_MONOTONIC)",
                    (m_xr_clock == 1 ? lead_raw : lead_steady) / 1e6,
@@ -1463,7 +1463,7 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
     {
       if (!m_wake_lead_exact || lead > m_wake_lead_ns + 1'000'000)
       {
-        INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms{})",
+        INFO_LOG_FMT(OPENXR, "PrimedFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms{})",
                      lead / 1e6, waited_us / 1e3, m_wake_lead_exact ? "; was shorter" : "");
       }
       m_wake_lead_ns = lead;
@@ -1480,7 +1480,7 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   {
     if (m_lead_window_n >= 3 && m_lead_window_max_ns < m_wake_lead_ns - 1'000'000)
     {
-      INFO_LOG_FMT(OPENXR, "PrimeFrame wake-up lead: {:.2f} ms (was {:.2f} ms; {} calls that blocked)",
+      INFO_LOG_FMT(OPENXR, "PrimedFrame wake-up lead: {:.2f} ms (was {:.2f} ms; {} calls that blocked)",
                    m_lead_window_max_ns / 1e6, m_wake_lead_ns / 1e6, m_lead_window_n);
       m_wake_lead_ns = m_lead_window_max_ns;
     }
@@ -1532,7 +1532,7 @@ void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
   {
     if (m_slot_ns == 0 || best < m_slot_ns - 500'000)
     {
-      INFO_LOG_FMT(OPENXR, "PrimeFrame refresh step: {:.2f} ms{}", best / 1e6,
+      INFO_LOG_FMT(OPENXR, "PrimedFrame refresh step: {:.2f} ms{}", best / 1e6,
                    m_slot_ns ? fmt::format(" (was {:.2f} ms)", m_slot_ns / 1e6) : "");
     }
     m_slot_ns = best;
@@ -1645,7 +1645,7 @@ bool OpenXRManager::WaitFrame()
                        (slot_ns > 0 && m_wait_call_ns - prev_call_ns > slot_ns * 3 / 2);
 
     // The landing plan (frame/PACING.md "One landing"; cycle with the overlap, on unless
-    // PRIMEFRAME_CYCLE_END=asap). Whatever refresh SteamVR handed out (the next one early, the
+    // PRIMEDFRAME_CYCLE_END=asap). Whatever refresh SteamVR handed out (the next one early, the
     // running one, the same one again, one further), the frame lands on the refresh after the last
     // frame's landing: a frame handed a refresh before that is held past the on-time limit and its
     // poses are located for the landing refresh. Only a frame expected to miss that refresh (95th
@@ -1704,7 +1704,7 @@ bool OpenXRManager::WaitFrame()
           {
             m_plan_log_ns = m_wait_return_ns;
             INFO_LOG_FMT(OPENXR,
-                         "PrimeFrame cycle landing: {} refresh earlier (a hold to {:.1f} ms after "
+                         "PrimedFrame cycle landing: {} refresh earlier (a hold to {:.1f} ms after "
                          "the wake-up would reach the next frame's present at {:.1f}); the last "
                          "frame is not shown",
                          k_cont - k, hold_end_ms(k_cont), next_present_ms);
@@ -1729,7 +1729,7 @@ bool OpenXRManager::WaitFrame()
             m_plan_catchups_total++;
             m_frame_timing.plan_catchups++;
             INFO_LOG_FMT(OPENXR,
-                         "PrimeFrame cycle landing: one refresh earlier ({}; every frame of the last "
+                         "PrimedFrame cycle landing: one refresh earlier ({}; every frame of the last "
                          "{:.1f} s had at least {:.1f} ms to spare a refresh before its landing); "
                          "the last frame is not shown",
                          m_plan_catchups_total, m_catchup_need_frames / 60.0, min_slack - slot_ms);
@@ -1746,7 +1746,7 @@ bool OpenXRManager::WaitFrame()
           {
             m_plan_log_ns = m_wait_return_ns;
             INFO_LOG_FMT(OPENXR,
-                         "PrimeFrame cycle landing: {} refresh later ({}; expected ready {:.2f} ms "
+                         "PrimedFrame cycle landing: {} refresh later ({}; expected ready {:.2f} ms "
                          "after the wake-up of the refresh after the last frame's, limit {:.1f}); the "
                          "last image is shown twice",
                          k - k_cont, m_plan_breaks_total, ready95 - k_cont * slot_ms,
@@ -1898,7 +1898,7 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
 static bool FrameLogEnabled()
 {
   static const bool s_enabled = [] {
-    const char* env = std::getenv("PRIMEFRAME_FRAME_LOG");
+    const char* env = std::getenv("PRIMEDFRAME_FRAME_LOG");
     return !env || std::string_view(env) != "0";
   }();
   return s_enabled;
@@ -1907,7 +1907,7 @@ static bool FrameLogEnabled()
 static double OnTimeMs()
 {
   static const double s_ms = [] {
-    const char* env = std::getenv("PRIMEFRAME_ONTIME_MS");
+    const char* env = std::getenv("PRIMEDFRAME_ONTIME_MS");
     return env ? std::atof(env) : 2.5;
   }();
   return s_ms;
@@ -2089,7 +2089,7 @@ bool OpenXRManager::StartCycleFrame(bool locate_views)
       if (!WaitFrame())
         return false;
     }
-    INFO_LOG_FMT(OPENXR, "PrimeFrame lead calibration {}: the frame's xrWaitFrame {}",
+    INFO_LOG_FMT(OPENXR, "PrimedFrame lead calibration {}: the frame's xrWaitFrame {}",
                  m_calib_attempts, m_last_wait_blocked ? "blocked" : "did not block");
     if (!BeginFrame())
       return false;
@@ -2102,7 +2102,7 @@ bool OpenXRManager::StartCycleFrame(bool locate_views)
     // located that much earlier for the same refresh (a longer prediction). A room whose frames
     // finish in time does not need the overlap; the late mode (heavy rooms) keeps it.
     static const bool s_asap_wait = [] {
-      const char* env = std::getenv("PRIMEFRAME_CYCLE_ASAP_WAIT");
+      const char* env = std::getenv("PRIMEDFRAME_CYCLE_ASAP_WAIT");
       return !(env && std::string_view(env) == "0");
     }();
     if (s_asap_wait && !m_cycle_end_late.load(std::memory_order_relaxed) &&

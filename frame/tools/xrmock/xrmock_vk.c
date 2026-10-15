@@ -541,7 +541,7 @@ static int dumpImage(void* images, int index, int width, int height, int64_t for
     return ok;
 }
 
-// MOCK_XR_STAMP: the app's stamp block (PRIMEFRAME_FRAME_STAMP in VulkanOpenXR.cpp), 256x20 pixels
+// MOCK_XR_STAMP: the app's stamp block (PRIMEDFRAME_FRAME_STAMP in VulkanOpenXR.cpp), 256x20 pixels
 // in the top left corner, copied at the release into one of STAMP_SLOTS host-visible slots. Releases
 // come from two app threads (eyes on the pacing thread, overlay quads on the video thread).
 #define STAMP_W 256

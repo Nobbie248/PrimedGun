@@ -1,12 +1,12 @@
-# PrimeFrame 1.0.0
+# PrimedFrame 1.0.0
 
-Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a fork of Nobbie248's PrimedGun built as a native Linux Arm64 program with frame pacing written for SteamVR. It replaces running PrimedGun's PC build in a Linux container with the Frame's graphics driver mounted in. You need your own Metroid Prime disc image; no game data is included.
+Metroid Prime in VR, running natively on the Valve Steam Frame. PrimedFrame is a fork of Nobbie248's PrimedGun built as a native Linux Arm64 program with frame pacing written for SteamVR. It replaces running PrimedGun's PC build in a Linux container with the Frame's graphics driver mounted in. You need your own Metroid Prime disc image; no game data is included.
 
 ### The game on the Frame
 
 - A native Linux Arm64 build, launched from the Steam library into the Frame's own SteamVR. No container, no PC.
 - PrimedGun's game code, controls and in-VR menu as they are. No desktop window; settings are the ini files and the menu.
-- Settings, memory card and save states in plain folders under `~/.local/share/PrimeFrame`.
+- Settings, memory card and save states in plain folders under `~/.local/share/PrimedFrame`.
 
 ### Resolution and frame rate
 
@@ -35,12 +35,12 @@ Metroid Prime in VR, running natively on the Valve Steam Frame. PrimeFrame is a 
 
 ## Download
 
-- `primeframe-1.0.0-linux-arm64.tar.gz`
+- `primedframe-1.0.0-linux-arm64.tar.gz`
 - `SHA256SUMS`
 
 ## Install
 
-Unpack the tarball on the Frame and run its `install.sh --rom <your disc image>`. The [README](https://github.com/simplysanatori/PrimeFrame/blob/native/README.md) has the full steps, the settings and the troubleshooting.
+Unpack the tarball on the Frame and run its `install.sh --rom <your disc image>`. The [README](https://github.com/simplysanatori/PrimedFrame/blob/native/README.md) has the full steps, the settings and the troubleshooting.
 
 ## Known
 
@@ -52,7 +52,7 @@ Unpack the tarball on the Frame and run its `install.sh --rom <your disc image>`
 
 ## Reporting problems
 
-Open an issue with what you did, what you expected and what happened, and the archive from `~/Games/PrimeFrame/app/tools/collect-logs.sh`.
+Open an issue with what you did, what you expected and what happened, and the archive from `~/Games/PrimedFrame/app/tools/collect-logs.sh`.
 
 ## Credits
 

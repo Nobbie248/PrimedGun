@@ -518,7 +518,7 @@ bool VulkanOpenXR::WaitForPendingFrameFinalization(std::string_view reason)
     m_cycle_hurry = false;
     if (!ended)
     {
-      ERROR_LOG_FMT(OPENXR, "PrimeFrame cycle: the last frame was not ended within 2 s ({}).",
+      ERROR_LOG_FMT(OPENXR, "PrimedFrame cycle: the last frame was not ended within 2 s ({}).",
                     reason);
       return false;
     }
@@ -542,7 +542,7 @@ bool VulkanOpenXR::CycleBeforeWait()
         return !m_cycle_begin_pending || m_pacer_exit.load();
       }))
   {
-    ERROR_LOG_FMT(OPENXR, "PrimeFrame cycle: the waited frame was not begun within 2 s.");
+    ERROR_LOG_FMT(OPENXR, "PrimedFrame cycle: the waited frame was not begun within 2 s.");
     return false;
   }
   m_cycle_video_wait_ns += SteadyNs() - wait_start;
@@ -829,34 +829,34 @@ bool VulkanOpenXR::Initialize()
   }
 
 #if !defined(ANDROID)
-  // PrimeFrame pacing (frame/PACING.md). PRIMEDGUN_XR_WAIT_GPU=1 keeps meaning the drain.
+  // PrimedFrame pacing (frame/PACING.md). PRIMEDGUN_XR_WAIT_GPU=1 keeps meaning the drain.
   m_pacing = Pacing::Cycle;
-  if (EnvIs("PRIMEFRAME_PACING", "pipelined"))
+  if (EnvIs("PRIMEDFRAME_PACING", "pipelined"))
     m_pacing = Pacing::Pipelined;
-  else if (EnvIs("PRIMEFRAME_PACING", "inline"))
+  else if (EnvIs("PRIMEDFRAME_PACING", "inline"))
     m_pacing = Pacing::Inline;
-  else if (EnvIs("PRIMEFRAME_PACING", "drain") ||
-           (!std::getenv("PRIMEFRAME_PACING") && EnvIs("PRIMEDGUN_XR_WAIT_GPU", "1")))
+  else if (EnvIs("PRIMEDFRAME_PACING", "drain") ||
+           (!std::getenv("PRIMEDFRAME_PACING") && EnvIs("PRIMEDGUN_XR_WAIT_GPU", "1")))
     m_pacing = Pacing::Drain;
-  m_no_gpu_wait = EnvIs("PRIMEFRAME_NO_GPU_WAIT", "1");
-  m_skip_window_present = !EnvIs("PRIMEFRAME_WINDOW_PRESENT", "1");
-  m_repeat_layers = EnvIs("PRIMEFRAME_REPEATS", "1");
-  m_lazy_start = !EnvIs("PRIMEFRAME_CYCLE_LAZY", "0");
-  m_cycle_overlap = !EnvIs("PRIMEFRAME_CYCLE_OVERLAP", "0");
-  m_end_plan = !EnvIs("PRIMEFRAME_CYCLE_END", "asap");
+  m_no_gpu_wait = EnvIs("PRIMEDFRAME_NO_GPU_WAIT", "1");
+  m_skip_window_present = !EnvIs("PRIMEDFRAME_WINDOW_PRESENT", "1");
+  m_repeat_layers = EnvIs("PRIMEDFRAME_REPEATS", "1");
+  m_lazy_start = !EnvIs("PRIMEDFRAME_CYCLE_LAZY", "0");
+  m_cycle_overlap = !EnvIs("PRIMEDFRAME_CYCLE_OVERLAP", "0");
+  m_end_plan = !EnvIs("PRIMEDFRAME_CYCLE_END", "asap");
   VR::g_openxr->SetCycleEndLate(m_end_plan && m_pacing == Pacing::Cycle && m_cycle_overlap);
-  if (const char* ontime = std::getenv("PRIMEFRAME_PREDICT_ONTIME_MS"))
+  if (const char* ontime = std::getenv("PRIMEDFRAME_PREDICT_ONTIME_MS"))
     m_end_ontime_ms = std::atof(ontime);
-  if (const char* earliest = std::getenv("PRIMEFRAME_CYCLE_EARLIEST_MS"))
+  if (const char* earliest = std::getenv("PRIMEDFRAME_CYCLE_EARLIEST_MS"))
     m_end_earliest_ms = std::atof(earliest);
-  m_early_release = !EnvIs("PRIMEFRAME_EARLY_RELEASE", "0");
-  if (const char* margin = std::getenv("PRIMEFRAME_PACE_MARGIN_MS"))
+  m_early_release = !EnvIs("PRIMEDFRAME_EARLY_RELEASE", "0");
+  if (const char* margin = std::getenv("PRIMEDFRAME_PACE_MARGIN_MS"))
     m_pace_margin_ms = std::clamp(std::atof(margin), 0.0, 20.0);
   m_set_count = m_pacing == Pacing::Pipelined ? 2 : 1;
   // The pipelined loop picks the refresh its poses are shown on itself.
   VR::g_openxr->SetPredictExtraAllowed(m_pacing != Pacing::Pipelined);
   INFO_LOG_FMT(OPENXR,
-               "PrimeFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={} "
+               "PrimedFrame pacing: mode={} eye_sets={} no_gpu_wait={} window_present={} "
                "repeats={} cycle_lazy={} cycle_overlap={} cycle_end={} early_release={} "
                "margin_ms={:.1f}",
                m_pacing == Pacing::Pipelined ? "pipelined" :
@@ -1712,14 +1712,14 @@ bool VulkanOpenXR::EnsurePrimedGunOverlaySwapchain(XRPrimedGunVkOverlaySwapchain
   return true;
 }
 
-// PRIMEFRAME_HUD_TEST=1 (cycle only): a white ring with a cross, 8 cm wide, 1 m ahead and 12 cm
+// PRIMEDFRAME_HUD_TEST=1 (cycle only): a white ring with a cross, 8 cm wide, 1 m ahead and 12 cm
 // below the centre of view, in a quad layer in the VIEW reference space. SteamVR should compose
 // it head-locked without turning it from a predicted pose: while the head turns it should stay
 // perfectly still, where the game's HUD (in the projection layer) moves with every prediction
 // error. If it does, a HUD layer of its own is worth building (frame/PACING.md "The HUD").
 bool VulkanOpenXR::AppendHudTestLayer(std::vector<XrCompositionLayerBaseHeader*>* layers)
 {
-  static const bool s_on = EnvIs("PRIMEFRAME_HUD_TEST", "1");
+  static const bool s_on = EnvIs("PRIMEDFRAME_HUD_TEST", "1");
   if (!s_on || !VR::g_openxr || !layers)
     return false;
   const XrSpace view_space = VR::g_openxr->GetViewSpace();
@@ -2142,7 +2142,7 @@ AbstractFramebuffer* VulkanOpenXR::AcquireLayeredFramebuffer()
 }
 
 #if !defined(ANDROID)
-// PRIMEFRAME_FRAME_STAMP=1 (tests only): each eye image gets a 256x20 pixel block in its top left
+// PRIMEDFRAME_FRAME_STAMP=1 (tests only): each eye image gets a 256x20 pixel block in its top left
 // corner naming the locates (display times, XrTime) whose poses the draws of the XFB shown used:
 // the oldest and the newest. The mock runtime (MOCK_XR_STAMP) reads it back from the image a
 // projection layer submits and compares both with the locate of the layer's poses. Layout, 4x4
@@ -2195,7 +2195,7 @@ void VulkanOpenXR::ReleaseEyeTexture(uint32_t eye_index)
   if (!m_image_acquired[eye_index])
     return;
 #if !defined(ANDROID)
-  static const bool s_frame_stamp = EnvIs("PRIMEFRAME_FRAME_STAMP", "1");
+  static const bool s_frame_stamp = EnvIs("PRIMEDFRAME_FRAME_STAMP", "1");
   if (s_frame_stamp)
     WriteFrameStamp(eye_index);
 #endif
@@ -2374,10 +2374,10 @@ bool VulkanOpenXR::SubmitFrame()
     StateTracker::GetInstance()->EndRenderPass();
 
     // Submit all eye rendering once per frame before releasing OpenXR swapchain images.
-    // Drain (PRIMEFRAME_PACING=drain or PRIMEDGUN_XR_WAIT_GPU=1): the submit waits for the GPU.
+    // Drain (PRIMEDFRAME_PACING=drain or PRIMEDGUN_XR_WAIT_GPU=1): the submit waits for the GPU.
     // Inline: a fence after the submit is waited for right before the release. SteamVR on the
     // Steam Frame shows a released image at once, finished or not (ghosting in the last eye).
-    // PRIMEFRAME_NO_GPU_WAIT=1 skips both (the negative test of the mock's release check).
+    // PRIMEDFRAME_NO_GPU_WAIT=1 skips both (the negative test of the mock's release check).
     // When the window present is skipped this submit also advances Dolphin's frame resources.
     const bool wait_for_completion =
         !m_no_gpu_wait &&
@@ -2913,7 +2913,7 @@ bool VulkanOpenXR::SubmitFrameCycle()
 // end it. Late: ended more than a refresh after its xrWaitFrame returned.
 void VulkanOpenXR::CycleLoop()
 {
-  Common::SetCurrentThreadName("PrimeFrame XR releaser");
+  Common::SetCurrentThreadName("PrimedFrame XR releaser");
   const VkDevice device = g_vulkan_context->GetDevice();
   while (!m_pacer_exit.load())
   {
@@ -2975,8 +2975,8 @@ void VulkanOpenXR::CycleLoop()
         m_cycle_busy = false;
     }
     if (begin_next && !VR::g_openxr->BeginFrame())
-      ERROR_LOG_FMT(OPENXR, "PrimeFrame cycle: xrBeginFrame on the releaser thread failed.");
-    static const bool s_frame_log = !EnvIs("PRIMEFRAME_FRAME_LOG", "0");
+      ERROR_LOG_FMT(OPENXR, "PrimedFrame cycle: xrBeginFrame on the releaser thread failed.");
+    static const bool s_frame_log = !EnvIs("PRIMEDFRAME_FRAME_LOG", "0");
     if (s_frame_log && item.wake_ns != 0)
     {
       // Times in ms from the frame's xrWaitFrame return: sub its submit, gpu its fence seen
@@ -3007,19 +3007,19 @@ void VulkanOpenXR::CycleLoop()
     m_cycle_busy = false;
   }
   m_pacer_cv.notify_all();
-  INFO_LOG_FMT(OPENXR, "PrimeFrame releaser thread exiting.");
+  INFO_LOG_FMT(OPENXR, "PrimedFrame releaser thread exiting.");
 }
 
 // Cycle end (with the overlap), releaser thread, after the frame's fence. SteamVR on the Frame
 // (framesToThrottle 1) shows a frame on its display time when it is ready up to about 19.5 ms
-// (PRIMEFRAME_PREDICT_ONTIME_MS) after the runtime's wake-up for that display time (display time
+// (PRIMEDFRAME_PREDICT_ONTIME_MS) after the runtime's wake-up for that display time (display time
 // minus its lead, OpenXRManager::UpdateWakeGrid), a whole period later when it is ready later.
 // plan (default, frame/PACING.md "One landing"): OpenXRManager::WaitFrame planned the frame's
 // landing refresh (item.plan_slots refreshes after its display time). A frame planned on its
 // display time is kept pending until the next frame's xrWaitFrame returned (SteamVR then hands
 // that frame its refresh at once instead of blocking it; at most until 1 ms inside the limit);
 // a frame planned later is held until 2.5 ms past the limit of the refresh before its landing
-// refresh, so that it lands exactly there. asap: no hold (PRIMEFRAME_CYCLE_EARLIEST_MS: not
+// refresh, so that it lands exactly there. asap: no hold (PRIMEDFRAME_CYCLE_EARLIEST_MS: not
 // before that long after the wake-up). Returns the hold.
 int64_t VulkanOpenXR::CycleEndHold(const XRFrameItem& item, int64_t fence_ns)
 {
@@ -3140,7 +3140,7 @@ void VulkanOpenXR::StartPacer()
     m_pacer = std::thread(&VulkanOpenXR::CycleLoop, this);
   else
     m_pacer = std::thread(&VulkanOpenXR::PacerLoop, this);
-  INFO_LOG_FMT(OPENXR, "PrimeFrame {} thread started.",
+  INFO_LOG_FMT(OPENXR, "PrimedFrame {} thread started.",
                m_pacing == Pacing::Cycle ? "releaser" : "pacing");
 }
 
@@ -3151,7 +3151,7 @@ void VulkanOpenXR::StopPacer()
   m_pacer_exit.store(true);
   m_pacer_cv.notify_all();
   m_pacer.join();
-  INFO_LOG_FMT(OPENXR, "PrimeFrame pacing thread stopped.");
+  INFO_LOG_FMT(OPENXR, "PrimedFrame pacing thread stopped.");
 }
 
 // Pipelined: release the images of finished sets before their slot, in order, so that only
@@ -3215,7 +3215,7 @@ void VulkanOpenXR::ReleaseFinishedEarly(int shown_set)
 // with exactly the poses it was rendered with. Refreshes without a new set repeat the last one.
 void VulkanOpenXR::PacerLoop()
 {
-  Common::SetCurrentThreadName("PrimeFrame XR pacing");
+  Common::SetCurrentThreadName("PrimedFrame XR pacing");
   const VkDevice device = g_vulkan_context->GetDevice();
   XRFrameItem current;
   bool have_current = false;
@@ -3230,7 +3230,7 @@ void VulkanOpenXR::PacerLoop()
       continue;
     }
 
-    // Unless PRIMEFRAME_REPEATS=1, a frame is ended only on a refresh that shows a new eye set,
+    // Unless PRIMEDFRAME_REPEATS=1, a frame is ended only on a refresh that shows a new eye set,
     // and that is the refresh its poses were located for: every layer goes out with the display
     // time of its poses. On the refreshes in between the runtime shows the last frame again
     // itself, reprojected from the pose and the display time it was ended with. (Ending a repeat
@@ -3488,7 +3488,7 @@ void VulkanOpenXR::PacerLoop()
   }
 
   ReleaseCompletedItems(true);
-  INFO_LOG_FMT(OPENXR, "PrimeFrame pacing thread exiting.");
+  INFO_LOG_FMT(OPENXR, "PrimedFrame pacing thread exiting.");
 }
 
 // Video thread, after a game frame was handed over: locate the pose for the refresh the next

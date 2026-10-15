@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the PrimeFrame release tarball from a finished build. It does not build anything.
+# Builds the PrimedFrame release tarball from a finished build. It does not build anything.
 #
 #   release.sh [--build DIR] [--out DIR]
 #
@@ -8,7 +8,7 @@
 #   --out DIR     where the tarball, its .sha256 and SHA256SUMS (the same line, the name the README uses) go
 #                 (default <repo>/release)
 #
-# The tarball has no top level folder: primeframe (the binary), Sys/, assets/, primeframe.sh,
+# The tarball has no top level folder: primedframe (the binary), Sys/, assets/, primedframe.sh,
 # install.sh, uninstall.sh, collect-logs.sh, steam-cef.py, tools/{vrtiming.py,session-report.py},
 # seed/, art/ (the Steam library images), README.md, README.upstream.md, THIRD-PARTY-NOTICES.md, COPYING, LICENSES/,
 # licenses/GPL-3.0.txt, docs/. install.sh unpacks it into the app folder. Nothing from the user folder,
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 VERSION=1.0.0
-NAME=primeframe-$VERSION-linux-arm64
+NAME=primedframe-$VERSION-linux-arm64
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/.." && pwd)
 build=$repo/build-linux out=$repo/release
@@ -36,7 +36,7 @@ bin=$build/Binaries
 [[ -x $bin/dolphin-nogui ]] || fail "no $bin/dolphin-nogui (build with frame/build.sh first)"
 [[ -d $bin/Sys ]] || fail "no $bin/Sys"
 for f in README.md README.upstream.md COPYING THIRD-PARTY-NOTICES.md docs/RELEASE_NOTES_v1.0.0.md docs/CHANGELOG.md docs/TECHNICAL_NOTES.md \
-         frame/primeframe.sh frame/install.sh frame/uninstall.sh frame/collect-logs.sh frame/steam-cef.py frame/LICENSE-GPLv3.txt \
+         frame/primedframe.sh frame/install.sh frame/uninstall.sh frame/collect-logs.sh frame/steam-cef.py frame/LICENSE-GPLv3.txt \
          frame/tools/vrtiming.py frame/tools/session-report.py frame/tools/privacy-check.sh frame/seed/user/Config/GFX.ini \
          frame/seed/user/Config/PrimedGun.ini frame/art/grid.png frame/art/grid_p.png frame/art/hero.png frame/art/logo.png frame/art/icon.ico; do
     [[ -f $repo/$f ]] || fail "missing $f"
@@ -52,14 +52,14 @@ trap 'rm -f "$tarball" "$tarball.sha256"; rm -rf "$stage"' ERR
 trap 'rm -rf "$stage"' EXIT
 
 echo "release: staging"
-install -m 0755 "$bin/dolphin-nogui" "$stage/primeframe"
+install -m 0755 "$bin/dolphin-nogui" "$stage/primedframe"
 cp -rL "$bin/Sys" "$stage/Sys"
 if [[ -d $bin/assets ]]; then
     cp -rL "$bin/assets" "$stage/assets"
     rm -rf "$stage/assets/readme"        # upstream's README pictures, not used at run time
 fi
 mkdir -p "$stage/tools" "$stage/docs" "$stage/licenses"
-for f in primeframe.sh install.sh uninstall.sh collect-logs.sh steam-cef.py; do install -m 0755 "$here/$f" "$stage/$f"; done
+for f in primedframe.sh install.sh uninstall.sh collect-logs.sh steam-cef.py; do install -m 0755 "$here/$f" "$stage/$f"; done
 install -m 0644 "$here/tools/vrtiming.py" "$here/tools/session-report.py" "$stage/tools/"
 cp -r "$here/seed" "$stage/seed"
 cp -r "$here/art" "$stage/art"

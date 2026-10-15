@@ -30,9 +30,9 @@
 #include "DiscIO/Enums.h"
 #include "DiscIO/Volume.h"
 
-namespace PrimeFramePerf
+namespace PrimedFramePerf
 {
-extern std::atomic<u32> dvd_reads;  // VideoCommon/PerformanceMetrics.cpp (PRIMEFRAME_FRAMELOG)
+extern std::atomic<u32> dvd_reads;  // VideoCommon/PerformanceMetrics.cpp (PRIMEDFRAME_FRAMELOG)
 }
 
 namespace DVD
@@ -301,7 +301,7 @@ void DVDThread::FinishRead(u64 id, s64 cycles_late)
 
 void DVDThread::ProcessReadRequest(ReadRequest&& request)
 {
-  ::PrimeFramePerf::dvd_reads.fetch_add(1, std::memory_order_relaxed);
+  ::PrimedFramePerf::dvd_reads.fetch_add(1, std::memory_order_relaxed);
   m_file_logger.Log(*m_disc, request.partition, request.dvd_offset);
 
   std::vector<u8> buffer(request.length);

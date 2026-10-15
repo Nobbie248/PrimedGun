@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One table from PrimeFrame sessions' logs (standard library only).
+"""One table from PrimedFrame sessions' logs (standard library only).
 
   session-report.py DIR [DIR ...]       session folders: dolphin.log and vrtiming.log
   session-report.py LOG [VRTIMING] ...  named logs: the game's log, then its vrtiming.log if any

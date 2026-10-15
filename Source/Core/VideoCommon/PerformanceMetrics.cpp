@@ -16,20 +16,20 @@
 
 PerformanceMetrics g_perf_metrics;
 
-// PrimeFrame: PRIMEFRAME_FRAMELOG=<file> writes one line per presented frame (hitch analysis,
+// PrimedFrame: PRIMEDFRAME_FRAMELOG=<file> writes one line per presented frame (hitch analysis,
 // frame/perf/hitches.py). Counters bumped where the work happens (declared extern there, no header):
 // EFB copies read back to guest RAM (each waits for the GPU) and the time spent waiting, disc reads.
-namespace PrimeFramePerf
+namespace PrimedFramePerf
 {
 std::atomic<u32> efb_ram_reads{0};
 std::atomic<u64> efb_ram_read_us{0};
 std::atomic<u32> dvd_reads{0};
-}  // namespace PrimeFramePerf
+}  // namespace PrimedFramePerf
 
-static void LogPrimeFrameFrame()
+static void LogPrimedFrameFrame()
 {
   static FILE* file = [] {
-    const char* path = std::getenv("PRIMEFRAME_FRAMELOG");
+    const char* path = std::getenv("PRIMEDFRAME_FRAMELOG");
     FILE* f = path && *path ? std::fopen(path, "w") : nullptr;
     if (f)
       std::fputs("# t_us dt_us shaders_created textures_uploaded efb_ram_reads efb_ram_read_us dvd_reads\n", f);
@@ -48,9 +48,9 @@ static void LogPrimeFrameFrame()
   std::fprintf(file, "%lld %lld %d %d %u %llu %u\n",
                us(std::chrono::system_clock::now().time_since_epoch()),
                last == Clock::time_point{} ? 0LL : us(now - last), shaders - last_shaders,
-               textures - last_textures, PrimeFramePerf::efb_ram_reads.exchange(0),
-               static_cast<unsigned long long>(PrimeFramePerf::efb_ram_read_us.exchange(0)),
-               PrimeFramePerf::dvd_reads.exchange(0));
+               textures - last_textures, PrimedFramePerf::efb_ram_reads.exchange(0),
+               static_cast<unsigned long long>(PrimedFramePerf::efb_ram_read_us.exchange(0)),
+               PrimedFramePerf::dvd_reads.exchange(0));
   last = now;
   last_shaders = shaders;
   last_textures = textures;
@@ -73,7 +73,7 @@ void PerformanceMetrics::Reset()
 void PerformanceMetrics::CountFrame()
 {
   m_fps_counter.Count();
-  LogPrimeFrameFrame();
+  LogPrimedFrameFrame();
 }
 
 void PerformanceMetrics::CountVBlank()
