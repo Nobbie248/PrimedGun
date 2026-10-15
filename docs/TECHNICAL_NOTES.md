@@ -8,7 +8,7 @@ Not affiliated with Valve, Nintendo, the Dolphin team or the PrimedGun author.
 
 ## AI disclosure
 
-I did not write this code by hand. The build, the wrapper, the scripts and these notes were written with Anthropic's Claude (Fable 5.1, Opus 5.5 and Sonnet 5.5, through Claude Code), running on my Steam Frame. I chose what to attempt and reviewed the scripts as they were written. PrimedGun's own README says Codex was used to assist its development. Neither Nobbie nor the Dolphin team has reviewed this port. Read the code before trusting it.
+I did not write this code by hand. The build, the wrapper, the scripts and these notes were written with Anthropic's Claude (Fable 5.1, Opus 5.5 and Sonnet 5.5, through Claude Code), running on my Steam Frame. I chose what to attempt, reviewed the code and the logic of the changes and the scripts as they were written, and tested each build in the headset. PrimedGun's own README says Codex was used to assist its development. Neither Nobbie nor the Dolphin team has reviewed this port. Read the code before trusting it.
 
 ## Status
 
