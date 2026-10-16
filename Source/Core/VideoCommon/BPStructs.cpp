@@ -361,11 +361,13 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
       //       display.
 
 #ifdef ENABLE_VR
+      // Every OpenXR path keeps the pose (and the locates its draws used) with the XFB copy, so
+      // the present knows what the XFB it shows was drawn with.
       if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
-          VR::g_openxr->IsFrameThreadActive() && VR::g_openxr->IsSessionRunning())
+          VR::g_openxr->IsSessionRunning())
       {
         VR::g_openxr->StampXFBPose(destAddr);
-        if (g_framebuffer_manager)
+        if (VR::g_openxr->IsFrameThreadActive() && g_framebuffer_manager)
           g_framebuffer_manager->RequestVRClearEFB();
       }
 #endif

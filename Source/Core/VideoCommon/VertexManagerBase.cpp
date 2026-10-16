@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
@@ -2648,9 +2649,31 @@ void VertexManagerBase::OnConfigChange()
   m_index_generator.Init();
 }
 
+// PrimedFrame (frame/PACING.md): in OpenXR, hand the GPU the frame's draws every
+// PRIMEDFRAME_KICK_DRAWS (100) draws instead of all of them at the present, so the GPU works while
+// the game still draws and only the last part of the frame is left after the present (the GPU
+// tail that every OpenXR frame waits for before its release). 0 turns it off.
+static u32 OpenXRKickDraws()
+{
+  static const u32 s_draws = [] {
+    const char* env = std::getenv("PRIMEDFRAME_KICK_DRAWS");
+    return env ? static_cast<u32>(std::max(0, std::atoi(env))) : 100u;
+  }();
+  return s_draws;
+}
+
 void VertexManagerBase::OnDraw()
 {
   m_draw_counter++;
+
+  if (const u32 kick = OpenXRKickDraws();
+      kick > 0 && m_draw_counter % kick == 0 && g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+  {
+    g_gfx->Flush();
+    m_unflushed_efb_copy = false;
+    m_last_efb_copy_draw_counter = m_draw_counter;
+    return;
+  }
 
   // If the last efb copy was too close to the one before it, don't forget about it until the next
   // efb copy happens (which might not be for a long time)

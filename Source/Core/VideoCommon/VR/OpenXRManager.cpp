@@ -11,7 +11,9 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -100,6 +102,8 @@ OpenXRManager::~OpenXRManager()
 
   if (m_reference_space != XR_NULL_HANDLE)
     xrDestroySpace(m_reference_space);
+  if (m_view_space != XR_NULL_HANDLE)
+    xrDestroySpace(m_view_space);
 
   if (m_session != XR_NULL_HANDLE)
   {
@@ -313,6 +317,7 @@ void OpenXRManager::SetSwapchain(IOpenXRSwapchain* swapchain)
     m_xfb_pose_stamp_next = 0;
     m_xfb_pose_stamp_serial = 0;
     m_present_eye_views_valid = false;
+    m_present_pose = {};
     return;
   }
 
@@ -1066,7 +1071,8 @@ void OpenXRManager::UpdateInputActions()
     location.next = &velocity;
 
     if (XR_FAILED(
-            xrLocateSpace(space, m_reference_space, m_frame_state.predictedDisplayTime, &location)))
+            xrLocateSpace(space, m_reference_space,
+                          m_frame_state.predictedDisplayTime + m_frame_extra_ns, &location)))
     {
       return;
     }
@@ -1271,6 +1277,24 @@ bool OpenXRManager::CreateReferenceSpace()
   return true;
 }
 
+XrSpace OpenXRManager::GetViewSpace()
+{
+  if (!m_view_space_tried && m_session != XR_NULL_HANDLE)
+  {
+    m_view_space_tried = true;
+    XrReferenceSpaceCreateInfo space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    space_info.poseInReferenceSpace = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+    space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    const XrResult result = xrCreateReferenceSpace(m_session, &space_info, &m_view_space);
+    if (XR_FAILED(result))
+    {
+      m_view_space = XR_NULL_HANDLE;
+      WARN_LOG_FMT(OPENXR, "PrimedFrame: no VIEW reference space ({}).", static_cast<int>(result));
+    }
+  }
+  return m_view_space;
+}
+
 bool OpenXRManager::PollEvents()
 {
   XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
@@ -1346,11 +1370,427 @@ void OpenXRManager::HandleSessionStateChange(XrSessionState new_state)
   }
 }
 
+// PRIMEDFRAME_PREDICT_EXTRA_MS (frame/PACING.md "Prediction for the real display time"): unset or 0
+// off; <ms> a fixed extra; auto: one display period for every period the frame is expected to
+// end past PRIMEDFRAME_PREDICT_ONTIME_MS (19.5) after the runtime's wake-up for it (SteamVR on the
+// Frame at framesToThrottle 1 showed frames ended later than that a whole period after their
+// predicted display time). Expected end: how late the xrWaitFrame call returned after the wake-up
+// plus the average xrWaitFrame return to xrEndFrame time.
+namespace
+{
+struct PredictConfig
+{
+  int mode = 0;  // 0 off, 1 fixed, 2 auto
+  int64_t fixed_ns = 0;
+  double ontime_ms = 19.5;
+};
+const PredictConfig& GetPredictConfig()
+{
+  static const PredictConfig s_config = [] {
+    PredictConfig c;
+    const char* extra = std::getenv("PRIMEDFRAME_PREDICT_EXTRA_MS");
+    if (extra && std::string_view(extra) == "auto")
+      c.mode = 2;
+    else if (extra && std::atof(extra) > 0.0)
+    {
+      c.mode = 1;
+      c.fixed_ns = static_cast<int64_t>(std::min(std::atof(extra), 100.0) * 1e6);
+    }
+    if (const char* ontime = std::getenv("PRIMEDFRAME_PREDICT_ONTIME_MS"))
+      c.ontime_ms = std::atof(ontime);
+    INFO_LOG_FMT(OPENXR, "PrimedFrame predict extra: {} (on time within {:.1f} ms of the wake-up)",
+                 c.mode == 2 ? std::string("auto") :
+                 c.mode == 1 ? fmt::format("{:.2f} ms", c.fixed_ns / 1e6) :
+                               std::string("off"),
+                 c.ontime_ms);
+    return c;
+  }();
+  return s_config;
+}
+}  // namespace
+
+// The runtime's wake-up grid (frame/PACING.md "The wake-up"), under m_clock_mutex, right after
+// xrWaitFrame returned (m_clock.display_time, m_clock.wake_ns set). SteamVR's XrTime is
+// CLOCK_MONOTONIC_RAW, which runs about 33 us a second slower than the steady clock: the lead
+// is kept in XrTime and converted with the offset of the moment, so it does not drift.
+void OpenXRManager::UpdateWakeGrid(uint64_t waited_us)
+{
+  const int64_t steady_now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::steady_clock::now().time_since_epoch())
+                                 .count();
+#ifdef _WIN32
+  // No raw clock on Windows: both choices read the steady clock.
+  const int64_t raw_now = steady_now;
+#else
+  timespec raw_ts{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &raw_ts);
+  const int64_t raw_now = static_cast<int64_t>(raw_ts.tv_sec) * 1'000'000'000LL + raw_ts.tv_nsec;
+#endif
+  const int64_t raw_offset = raw_now - steady_now;
+  if (m_xr_clock == 0 && m_clock.display_time > 0)
+  {
+    // The clock whose lead is plausible (0 to 500 ms); raw when both are (shortly after a boot
+    // they differ by little). PRIMEDFRAME_XR_CLOCK=raw|steady forces one.
+    const auto plausible = [](int64_t lead) { return lead > 0 && lead < 500'000'000LL; };
+    const int64_t lead_raw = m_clock.display_time - (m_clock.wake_ns + raw_offset);
+    const int64_t lead_steady = m_clock.display_time - m_clock.wake_ns;
+    const char* force = std::getenv("PRIMEDFRAME_XR_CLOCK");
+    if (force && std::string_view(force) == "raw")
+      m_xr_clock = 1;
+    else if (force && std::string_view(force) == "steady")
+      m_xr_clock = 2;
+    else if (plausible(lead_raw))
+      m_xr_clock = 1;
+    else if (plausible(lead_steady))
+      m_xr_clock = 2;
+    if (m_xr_clock != 0)
+    {
+      INFO_LOG_FMT(OPENXR,
+                   "PrimedFrame XrTime clock: {} (first lead {:.2f} ms; with the other clock it "
+                   "would read {:.2f} ms)",
+                   m_xr_clock == 1 ? "CLOCK_MONOTONIC_RAW" : "steady (CLOCK_MONOTONIC)",
+                   (m_xr_clock == 1 ? lead_raw : lead_steady) / 1e6,
+                   (m_xr_clock == 1 ? lead_steady : lead_raw) / 1e6);
+    }
+  }
+  m_xr_offset_ns = m_xr_clock == 1 ? raw_offset : 0;
+  const int64_t lead = m_clock.display_time - (m_clock.wake_ns + m_xr_offset_ns);
+
+  // A call that blocked (over 2 ms; returning at once still takes a fraction of a ms; WaitFrame
+  // passes 0 for a call made while a frame was pending, which may return early) returned at
+  // the runtime's wake-up or a little after it (the thread is woken late now and then): the
+  // largest lead of such calls is the runtime's. A longer one is taken at once; a shorter one
+  // (by over 1 ms) only when every blocked call of a 10 s window (at least three) was.
+  m_last_wait_blocked = waited_us > 2000;
+  if (m_last_wait_blocked)
+  {
+    if (!m_wake_lead_exact || lead > m_wake_lead_ns)
+    {
+      if (!m_wake_lead_exact || lead > m_wake_lead_ns + 1'000'000)
+      {
+        INFO_LOG_FMT(OPENXR, "PrimedFrame wake-up lead: {:.2f} ms (a call that blocked {:.2f} ms{})",
+                     lead / 1e6, waited_us / 1e3, m_wake_lead_exact ? "; was shorter" : "");
+      }
+      m_wake_lead_ns = lead;
+      m_wake_lead_exact = true;
+    }
+    m_lead_window_max_ns = m_lead_window_n == 0 ? lead : std::max(m_lead_window_max_ns, lead);
+    m_lead_window_n++;
+  }
+  else if (!m_wake_lead_exact && lead > m_wake_lead_ns && lead < 500'000'000LL)
+  {
+    m_wake_lead_ns = lead;
+  }
+  if (m_lead_window_start_ns == 0 || m_clock.wake_ns - m_lead_window_start_ns > 10'000'000'000LL)
+  {
+    if (m_lead_window_n >= 3 && m_lead_window_max_ns < m_wake_lead_ns - 1'000'000)
+    {
+      INFO_LOG_FMT(OPENXR, "PrimedFrame wake-up lead: {:.2f} ms (was {:.2f} ms; {} calls that blocked)",
+                   m_lead_window_max_ns / 1e6, m_wake_lead_ns / 1e6, m_lead_window_n);
+      m_wake_lead_ns = m_lead_window_max_ns;
+    }
+    m_lead_window_start_ns = m_clock.wake_ns;
+    m_lead_window_n = 0;
+  }
+  m_clock.grid_offset_ns = m_wake_lead_ns + m_xr_offset_ns;
+  m_clock.early = m_wake_lead_exact && lead > m_wake_lead_ns + 500'000;
+
+  // The refresh spacing: the smallest value seen at least four times among the last 64 steps
+  // between consecutive display times (a step of 0, the same refresh handed out twice, does not
+  // count) and the last 256 predictedDisplayPeriod values (SteamVR's are mostly 22.2 ms at
+  // framesToThrottle 1, but 16.67 recurs). It never grows: SteamVR can hand out the same refresh
+  // twice and then skip one for as long as the game's phase stays, and a loading game makes steps
+  // of two refreshes (session of 2026-10-14, light room: steps of 0 and 33.3 ms only, which made the
+  // slot 33.3 ms and the landing plan wrong by a refresh: the 1-3 cadence).
+  const auto smallest_recurring = [](const auto& ring, size_t count) {
+    int64_t best = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+      const int64_t v = ring[i];
+      if (v <= 2'000'000 || (best != 0 && v >= best))
+        continue;
+      int near = 0;
+      for (size_t j = 0; j < count; ++j)
+        near += std::abs(ring[j] - v) < 500'000;
+      if (near >= 4)
+        best = v;
+    }
+    return best;
+  };
+  if (m_clock.period_ns > 2'000'000)
+  {
+    m_periods[m_period_next] = m_clock.period_ns;
+    m_period_next = (m_period_next + 1) % m_periods.size();
+    m_period_count = std::min(m_period_count + 1, m_periods.size());
+  }
+  if (m_prev_wait_display_time != 0 && m_clock.display_time > m_prev_wait_display_time + 2'000'000)
+  {
+    m_display_steps[m_display_step_next] = m_clock.display_time - m_prev_wait_display_time;
+    m_display_step_next = (m_display_step_next + 1) % m_display_steps.size();
+    m_display_step_count = std::min(m_display_step_count + 1, m_display_steps.size());
+  }
+  int64_t best = smallest_recurring(m_display_steps, m_display_step_count);
+  const int64_t best_period = smallest_recurring(m_periods, m_period_count);
+  if (best_period != 0 && (best == 0 || best_period < best))
+    best = best_period;
+  if (best != 0 && (m_slot_ns == 0 || best < m_slot_ns))
+  {
+    if (m_slot_ns == 0 || best < m_slot_ns - 500'000)
+    {
+      INFO_LOG_FMT(OPENXR, "PrimedFrame refresh step: {:.2f} ms{}", best / 1e6,
+                   m_slot_ns ? fmt::format(" (was {:.2f} ms)", m_slot_ns / 1e6) : "");
+    }
+    m_slot_ns = best;
+  }
+  m_prev_wait_display_time = m_clock.display_time;
+}
+
+void OpenXRManager::GetWakeGrid(double* lead_ms, bool* lead_exact, double* slot_ms) const
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  *lead_ms = m_wake_lead_ns / 1e6;
+  *lead_exact = m_wake_lead_exact;
+  *slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
+}
+
+bool OpenXRManager::WaitForWaitAfter(uint64_t seq, int64_t deadline_ns)
+{
+  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  std::unique_lock<std::mutex> lock(m_wait_seq_mutex);
+  if (m_wait_seq > seq || deadline_ns <= now)
+    return m_wait_seq > seq;
+  return m_wait_seq_cv.wait_for(lock, std::chrono::nanoseconds(deadline_ns - now),
+                                [&] { return m_wait_seq > seq; });
+}
+
+bool OpenXRManager::WantsLeadCalibration() const
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  if (m_wake_lead_exact || m_calib_attempts >= 5 || m_clock.display_time == 0)
+    return false;
+  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  return m_calib_last_ns == 0 || now - m_calib_last_ns > 2'000'000'000LL;
+}
+
+// The frame's xrWaitFrame return to its GPU work finished (the releaser's fence), for the
+// expected finish of later frames (the landing plan, WaitFrame), and its slack before the on-time
+// limit of the refresh it was planned to land on.
+void OpenXRManager::NoteCycleFinish(uint64_t wait_seq, int64_t submit_ns, int64_t finish_ns,
+                                    double slack_ms)
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  for (const WaitNote& note : m_wait_notes)
+  {
+    if (note.seq != wait_seq || note.return_ns == 0)
+      continue;
+    const double sample = std::min((finish_ns - note.return_ns) / 1e6, 60.0);
+    double& avg = m_finish_avg_ms[note.early ? 1 : 0];
+    avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
+    m_cycle_finish_seen = true;
+    m_finish_ring[m_finish_next] = static_cast<float>(sample);
+    m_submit_ring[m_finish_next] = static_cast<float>(std::min((submit_ns - note.return_ns) / 1e6, 60.0));
+    m_finish_next = (m_finish_next + 1) % m_finish_ring.size();
+    m_finish_count = std::min(m_finish_count + 1, m_finish_ring.size());
+    m_slack_ring[m_slack_next] = static_cast<float>(slack_ms);
+    m_slack_next = (m_slack_next + 1) % m_slack_ring.size();
+    break;
+  }
+}
+
 bool OpenXRManager::WaitFrame()
 {
   XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
   m_frame_state = {XR_TYPE_FRAME_STATE};
+  // A frame begun and not ended: SteamVR may hand out a refresh at once, before its wake-up.
+  const bool pending_at_call = m_begun_frames.load(std::memory_order_acquire) >
+                               m_ended_frames.load(std::memory_order_acquire);
+  const auto wait_start = std::chrono::steady_clock::now();
   XR_CHECK(xrWaitFrame(m_session, &wait_info, &m_frame_state));
+  const auto wait_end = std::chrono::steady_clock::now();
+  const uint64_t waited_us = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(wait_end - wait_start).count());
+  m_wait_count.fetch_add(1, std::memory_order_relaxed);
+  m_wait_total_us.fetch_add(waited_us, std::memory_order_relaxed);
+  if (waited_us > m_wait_max_us.load(std::memory_order_relaxed))
+    m_wait_max_us.store(waited_us, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    const int64_t prev_call_ns = m_wait_call_ns;
+    m_wait_call_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         wait_start.time_since_epoch())
+                         .count();
+    m_wait_return_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           wait_end.time_since_epoch())
+                           .count();
+    m_wait_display_time = m_frame_state.predictedDisplayTime;
+    m_clock.display_time = m_frame_state.predictedDisplayTime;
+    m_clock.wake_ns = m_wait_return_ns;
+    m_clock.period_ns = m_frame_state.predictedDisplayPeriod;
+    UpdateWakeGrid(pending_at_call ? 0 : waited_us);
+
+    const PredictConfig& predict = GetPredictConfig();
+    const double slot_ms = (m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns) / 1e6;
+    const int64_t slot_ns = static_cast<int64_t>(slot_ms * 1e6);
+    // How late after the runtime's wake-up for its display time this call returned (negative:
+    // handed out early) plus the usual return-to-finish time of such frames: when the frame is
+    // expected to be ready, against SteamVR's on-time limit.
+    const double after_wake_ms = (m_wait_return_ns - (m_clock.display_time - m_clock.grid_offset_ns)) / 1e6;
+    const double finish_avg =
+        m_finish_avg_ms[m_clock.early ? 1 : 0] > 0 ? m_finish_avg_ms[m_clock.early ? 1 : 0] :
+                                                      m_finish_avg_ms[m_clock.early ? 0 : 1];
+    const double ready_ms = after_wake_ms + finish_avg;
+
+    // A hitch (this call came more than one and a half refreshes after the last one: the game
+    // itself was late) moves the landing anyway; the landing plan counts its stable frames from it.
+    const bool hitch = prev_call_ns == 0 ||
+                       (slot_ns > 0 && m_wait_call_ns - prev_call_ns > slot_ns * 3 / 2);
+
+    // The landing plan (frame/PACING.md "One landing"; cycle with the overlap, on unless
+    // PRIMEDFRAME_CYCLE_END=asap). Whatever refresh SteamVR handed out (the next one early, the
+    // running one, the same one again, one further), the frame lands on the refresh after the last
+    // frame's landing: a frame handed a refresh before that is held past the on-time limit and its
+    // poses are located for the landing refresh. Only a frame expected to miss that refresh (95th
+    // percentile of the last frames' return-to-finish time, later than 1 ms inside the limit) lands
+    // a refresh later (one image shown twice). Only within 40 s of the start or a load (a call over
+    // 100 ms after the last), when every frame of the last 5 s (more after a catch-up that did not
+    // hold) had 3 ms to spare a refresh before its landing, one frame lands on the last frame's
+    // refresh (that frame is not shown): the latency gets shorter and the cadence stays. No other
+    // change of landing during play.
+    int land = 0;
+    if (m_cycle_end_late.load(std::memory_order_relaxed) && slot_ns > 0)
+    {
+      const size_t n = std::min<size_t>(m_finish_count, 120);
+      const auto pct = [&](const std::array<float, 120>& ring, double p) {
+        std::array<float, 120> last{};
+        for (size_t i = 0; i < n; ++i)
+          last[i] = ring[(m_finish_next + ring.size() - 1 - i) % ring.size()];
+        const size_t k = std::min(n - 1, static_cast<size_t>(p * n));
+        std::nth_element(last.begin(), last.begin() + k, last.begin() + n);
+        return static_cast<double>(last[k]);
+      };
+      const double fin95 = n >= 10 ? pct(m_finish_ring, 0.95) : finish_avg;
+      // The next frame's present (where it acquires the eye images this frame still holds):
+      // about a refresh after this call plus the earliest usual call-to-submit time. A frame held
+      // past it stalls the video thread: the hold may reach it by 3 ms at most.
+      const double next_present_ms =
+          after_wake_ms + slot_ms + (n >= 10 ? pct(m_submit_ring, 0.1) : 0.0) - 1.0;
+      // The releaser holds such a frame to 2.5 ms past the limit of the refresh before its landing
+      // and ends the hold early when the next frame's present comes; past that limit it still
+      // lands right.
+      const auto hold_end_ms = [&](int kk) {
+        return kk <= 0 ? 0.0 : (kk - 1) * slot_ms + predict.ontime_ms + 0.5;
+      };
+      const double ready95 = after_wake_ms + fin95;
+      const int k_min =
+          fin95 <= 0 ? 0 :
+                       std::max(0, static_cast<int>(std::ceil((ready95 - (predict.ontime_ms - 1.0)) / slot_ms)));
+      int k = k_min;
+      m_plan_stable_frames = hitch ? 0 : m_plan_stable_frames + 1;
+      // A load (a call over 100 ms after the last) or the start: the room settles.
+      if (prev_call_ns == 0 || m_wait_call_ns - prev_call_ns > 100'000'000LL)
+        m_settle_until_ns = m_wait_return_ns + 40'000'000'000LL;
+      if (m_prev_land_time != 0)
+      {
+        const int64_t cont_ns = m_prev_land_time + slot_ns - m_clock.display_time;
+        const int k_cont = static_cast<int>(std::llround(static_cast<double>(cont_ns) / slot_ns));
+        k = std::max(k_min, k_cont);
+        if (k == k_cont && k_cont > k_min && n >= 10 && hold_end_ms(k_cont) > next_present_ms + 3.0)
+        {
+          // Continuity would hold this frame into the next one's present: land on the last
+          // frame's refresh instead (that frame is not shown).
+          k = std::max(k_min, k_cont - 1);
+          m_plan_stable_frames = 0;
+          m_frame_timing.plan_drops++;
+          if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)
+          {
+            m_plan_log_ns = m_wait_return_ns;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimedFrame cycle landing: {} refresh earlier (a hold to {:.1f} ms after "
+                         "the wake-up would reach the next frame's present at {:.1f}); the last "
+                         "frame is not shown",
+                         k_cont - k, hold_end_ms(k_cont), next_present_ms);
+          }
+        }
+        else if (k == k_cont && k_cont >= 1 && fin95 > 0 &&
+            m_plan_stable_frames >= m_catchup_need_frames && m_wait_return_ns < m_settle_until_ns &&
+            ready95 - (k_cont - 1) * slot_ms <= predict.ontime_ms - 3.0)
+        {
+          float min_slack = 1e9f;
+          for (size_t i = 0; i < m_catchup_need_frames && i < m_slack_ring.size(); ++i)
+          {
+            min_slack = std::min(
+                min_slack,
+                m_slack_ring[(m_slack_next + m_slack_ring.size() - 1 - i) % m_slack_ring.size()]);
+          }
+          if (min_slack >= slot_ms + 3.0)
+          {
+            k = k_cont - 1;
+            m_plan_stable_frames = 0;
+            m_last_catchup_ns = m_wait_return_ns;
+            m_plan_catchups_total++;
+            m_frame_timing.plan_catchups++;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimedFrame cycle landing: one refresh earlier ({}; every frame of the last "
+                         "{:.1f} s had at least {:.1f} ms to spare a refresh before its landing); "
+                         "the last frame is not shown",
+                         m_plan_catchups_total, m_catchup_need_frames / 60.0, min_slack - slot_ms);
+          }
+        }
+        if (k > k_cont && !hitch)
+        {
+          m_plan_breaks_total++;
+          m_frame_timing.plan_breaks++;
+          m_plan_stable_frames = 0;
+          if (m_last_catchup_ns != 0 && m_wait_return_ns - m_last_catchup_ns < 60'000'000'000LL)
+            m_catchup_need_frames = std::min<size_t>(m_catchup_need_frames * 2, m_slack_ring.size());
+          if (m_wait_return_ns - m_plan_log_ns > 1'000'000'000LL)
+          {
+            m_plan_log_ns = m_wait_return_ns;
+            INFO_LOG_FMT(OPENXR,
+                         "PrimedFrame cycle landing: {} refresh later ({}; expected ready {:.2f} ms "
+                         "after the wake-up of the refresh after the last frame's, limit {:.1f}); the "
+                         "last image is shown twice",
+                         k - k_cont, m_plan_breaks_total, ready95 - k_cont * slot_ms,
+                         predict.ontime_ms);
+          }
+        }
+      }
+      land = std::clamp(k, 0, 3);
+      m_frame_timing.plan_slots[std::min(land, 2)]++;
+    }
+    m_clock.plan_slots = land;
+    m_prev_land_time = m_clock.display_time + land * slot_ns;
+
+    m_frame_extra_ns = 0;
+    if (m_predict_allowed && predict.mode == 1)
+    {
+      m_frame_extra_ns = predict.fixed_ns;
+    }
+    else if (m_predict_allowed && predict.mode == 2 && land > 0)
+    {
+      m_frame_extra_ns = land * slot_ns;
+    }
+    else if (m_predict_allowed && predict.mode == 2 &&
+             !m_cycle_end_late.load(std::memory_order_relaxed) && finish_avg > 0 && slot_ms > 0 &&
+             ready_ms > predict.ontime_ms)
+    {
+      const int periods =
+          std::min(3, static_cast<int>(std::ceil((ready_ms - predict.ontime_ms) / slot_ms)));
+      m_frame_extra_ns = static_cast<int64_t>(periods * slot_ms * 1e6);
+    }
+    {
+      std::lock_guard<std::mutex> seq_lock(m_wait_seq_mutex);
+      m_clock.wait_seq = ++m_wait_seq;
+    }
+    m_wait_notes[m_wait_note_next] = {m_wait_display_time, m_wait_call_ns, m_wait_return_ns,
+                                      m_clock.early, m_clock.plan_slots, m_clock.wait_seq};
+    m_wait_note_next = (m_wait_note_next + 1) % m_wait_notes.size();
+  }
+  m_wait_seq_cv.notify_all();
   m_predicted_display_time_snapshot.store(m_frame_state.predictedDisplayTime,
                                           std::memory_order_release);
   m_predicted_display_period_snapshot.store(m_frame_state.predictedDisplayPeriod,
@@ -1385,6 +1825,9 @@ bool OpenXRManager::BeginFrame()
     ERROR_LOG_FMT(OPENXR, "OpenXR: xrBeginFrame failed: {}", buffer);
     return false;
   }
+  if (result == XR_FRAME_DISCARDED)  // the frame begun before was never ended: it is gone
+    m_ended_frames.fetch_add(1, std::memory_order_release);
+  m_begun_frames.fetch_add(1, std::memory_order_release);
   return true;
 }
 
@@ -1402,8 +1845,23 @@ bool OpenXRManager::EndFrame(const std::vector<XrCompositionLayerBaseHeader*>& l
     end_info.layers = layers.data();
   }
 
-  XR_CHECK(xrEndFrame(m_session, &end_info));
+  // The runtime's client may submit on our queue inside xrEndFrame (SteamVR does).
+  {
+    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                    std::unique_lock<std::mutex>{};
+    XR_CHECK(xrEndFrame(m_session, &end_info));
+  }
+  m_ended_frames.fetch_add(1, std::memory_order_release);
+  NoteFrameEnd(end_info.displayTime, m_submitted_eye_views_valid ? m_submitted_locate_time : 0,
+               end_info.layerCount > 0);
   return true;
+}
+
+void OpenXRManager::TakeWaitFrameStats(uint32_t* count, uint64_t* total_us, uint64_t* max_us)
+{
+  *count = m_wait_count.exchange(0, std::memory_order_relaxed);
+  *total_us = m_wait_total_us.exchange(0, std::memory_order_relaxed);
+  *max_us = m_wait_max_us.exchange(0, std::memory_order_relaxed);
 }
 
 XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
@@ -1419,7 +1877,8 @@ XrCompositionLayerFlags OpenXRManager::GetProjectionLayerExtraFlags() const
 bool OpenXRManager::EndFrameDetached(XrTime display_time,
                                      XrEnvironmentBlendMode environment_blend_mode,
                                      bool should_render,
-                                     const std::vector<XrCompositionLayerBaseHeader*>& layers)
+                                     const std::vector<XrCompositionLayerBaseHeader*>& layers,
+                                     XrTime pose_time)
 {
   XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
   end_info.displayTime = display_time;
@@ -1431,9 +1890,246 @@ bool OpenXRManager::EndFrameDetached(XrTime display_time,
     end_info.layers = layers.data();
   }
 
-  auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
-                                  std::unique_lock<std::mutex>{};
-  XR_CHECK(xrEndFrame(m_session, &end_info));
+  {
+    auto queue_lock = m_swapchain ? m_swapchain->AcquireGraphicsQueueLock() :
+                                    std::unique_lock<std::mutex>{};
+    XR_CHECK(xrEndFrame(m_session, &end_info));
+  }
+  m_ended_frames.fetch_add(1, std::memory_order_release);
+  NoteFrameEnd(display_time, pose_time, end_info.layerCount > 0);
+  return true;
+}
+
+static bool FrameLogEnabled()
+{
+  static const bool s_enabled = [] {
+    const char* env = std::getenv("PRIMEDFRAME_FRAME_LOG");
+    return !env || std::string_view(env) != "0";
+  }();
+  return s_enabled;
+}
+
+static double OnTimeMs()
+{
+  static const double s_ms = [] {
+    const char* env = std::getenv("PRIMEDFRAME_ONTIME_MS");
+    return env ? std::atof(env) : 2.5;
+  }();
+  return s_ms;
+}
+
+// One line per ended frame (XRF), the per-second sums for XRSTATS. Times in ms: blk how long its
+// xrWaitFrame blocked; lead its predicted display time minus the xrWaitFrame return; r the
+// xrWaitFrame return to the xrEndFrame; rg the runtime's wake-up for the display time (display
+// time minus the runtime's lead, UpdateWakeGrid) to the xrEndFrame; age the poses' xrLocateViews call
+// to the xrEndFrame (-1: unknown); pdt the poses' display time minus the end's (0: the frame
+// ends with the display time its poses were located for); dd refreshes since the last ended
+// display time (in refresh steps); per the predictedDisplayPeriod; ex how far past the display time
+// the poses were located; w the xrWaitFrame return minus the runtime's wake-up for the display
+// time (negative: handed out early); pl the refreshes the frame was planned to land after its
+// display time (cycle end late).
+void OpenXRManager::NoteFrameEnd(XrTime display_time, XrTime pose_time, bool has_layers)
+{
+  const int64_t end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+  double blk = -1, lead = -1, r = -1, rg = -1, age = -1, pdt = 0, period_ms = 0, ex = 0, w = 0;
+  int64_t dd = 0;
+  uint64_t n = 0;
+  bool early = false;
+  int plan_slots = 0;
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    const int64_t period = m_slot_ns > 0 ? m_slot_ns : m_clock.period_ns;
+    period_ms = m_clock.period_ns / 1e6;
+    for (const WaitNote& note : m_wait_notes)
+    {
+      if (note.display_time == display_time && note.return_ns != 0)
+      {
+        blk = (note.return_ns - note.call_ns) / 1e6;
+        lead = (display_time - note.return_ns) / 1e6;
+        r = (end_ns - note.return_ns) / 1e6;
+        early = note.early;
+        plan_slots = note.plan_slots;
+        if (m_clock.grid_offset_ns != 0)
+          w = (note.return_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
+      }
+    }
+    if (m_clock.grid_offset_ns != 0)
+      rg = (end_ns - (display_time - m_clock.grid_offset_ns)) / 1e6;
+    int64_t extra_ns = 0;
+    if (pose_time != 0)
+    {
+      for (const LocateNote& note : m_locate_notes)
+      {
+        if (note.display_time == pose_time && note.call_ns != 0)
+        {
+          age = (end_ns - note.call_ns) / 1e6;
+          extra_ns = note.extra_ns;
+        }
+      }
+      // Poses located past their display time on purpose count as located for it.
+      pose_time -= extra_ns;
+      pdt = (pose_time - display_time) / 1e6;
+      ex = extra_ns / 1e6;
+    }
+    if (period > 0 && m_prev_end_display_time != 0)
+      dd = (display_time - m_prev_end_display_time + period / 2) / period;
+    m_prev_end_display_time = display_time;
+    if (has_layers)
+    {
+      FrameTimingStats& t = m_frame_timing;
+      t.frames++;
+      if (pose_time != 0 && pose_time != display_time)
+        t.pose_mismatch++;
+      const double rr = rg >= 0 ? rg : r;
+      if (rr > OnTimeMs())
+        t.ended_late++;
+      if (rr >= 0)
+      {
+        t.end_sum_ms += rr;
+        t.end_max_ms = std::max(t.end_max_ms, rr);
+      }
+      if (age >= 0)
+      {
+        t.age_sum_ms += age;
+        t.age_max_ms = std::max(t.age_max_ms, age);
+        t.age_count++;
+      }
+      if (lead >= 0)
+        t.lead_sum_ms += lead;
+      if (extra_ns != 0)
+      {
+        t.extra_sum_ms += ex;
+        t.extra_frames++;
+      }
+      if (early)
+        t.early_frames++;
+      if (r >= 0 && !m_cycle_finish_seen)
+      {
+        const double sample = std::min(r, 50.0);
+        double& avg = m_finish_avg_ms[early ? 1 : 0];
+        avg = avg <= 0 ? sample : avg * 0.9 + sample * 0.1;
+      }
+    }
+    n = ++m_frame_log_count;
+  }
+  if (FrameLogEnabled())
+  {
+    INFO_LOG_FMT(OPENXR,
+                 "XRF n={} blk={:.2f} lead={:.2f} r={:.2f} rg={:.2f} age={:.2f} pdt={:.2f} dd={} "
+                 "per={:.3f} ex={:.2f} w={:.2f} pl={}{}",
+                 n, blk, lead, r, rg, age, pdt, dd, period_ms, ex, w, plan_slots,
+                 has_layers ? "" : " empty");
+  }
+}
+
+void OpenXRManager::TakeFrameTimingStats(FrameTimingStats* out)
+{
+  std::lock_guard<std::mutex> lock(m_clock_mutex);
+  *out = m_frame_timing;
+  m_frame_timing = {};
+}
+
+void OpenXRManager::ArmLazyFrameStart()
+{
+  m_lazy_thread = std::this_thread::get_id();
+  m_lazy_started = false;
+  m_lazy_armed.store(true, std::memory_order_release);
+}
+
+bool OpenXRManager::TakeLazyFrameStarted()
+{
+  m_lazy_armed.store(false, std::memory_order_relaxed);
+  const bool started = m_lazy_started;
+  m_lazy_started = false;
+  return started;
+}
+
+// The pose readers are const (the geometry shader manager reads the views through them); the
+// frame start they trigger is not.
+void OpenXRManager::StartLazyFrameIfArmed() const
+{
+  if (!m_lazy_armed.load(std::memory_order_acquire) ||
+      std::this_thread::get_id() != m_lazy_thread)
+  {
+    return;
+  }
+  OpenXRManager* self = const_cast<OpenXRManager*>(this);
+  self->m_lazy_armed.store(false, std::memory_order_relaxed);
+  if (!self->PollEvents() || !self->IsSessionRunning())
+    return;
+  if (!self->StartCycleFrame(true))
+    return;
+  self->m_lazy_started = true;
+}
+
+bool OpenXRManager::StartCycleFrame(bool locate_views)
+{
+  if (WantsLeadCalibration())
+  {
+    // No exact lead yet (no xrWaitFrame has blocked): end whatever is pending, so that SteamVR
+    // blocks the next call until its wake-up; if this one returns at once, spend it on an empty
+    // frame and wait for the next refresh.
+    if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("lead calibration"))
+      return false;
+    {
+      std::lock_guard<std::mutex> lock(m_clock_mutex);
+      m_calib_attempts++;
+      m_calib_last_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    }
+    if (!WaitFrame())
+      return false;
+    if (!m_last_wait_blocked)
+    {
+      if (!BeginFrame() || !EndFrame({}))
+        return false;
+      {
+        // The empty frame does not count for the landing plan.
+        std::lock_guard<std::mutex> lock(m_clock_mutex);
+        m_prev_land_time = 0;
+      }
+      if (!WaitFrame())
+        return false;
+    }
+    INFO_LOG_FMT(OPENXR, "PrimedFrame lead calibration {}: the frame's xrWaitFrame {}",
+                 m_calib_attempts, m_last_wait_blocked ? "blocked" : "did not block");
+    if (!BeginFrame())
+      return false;
+  }
+  else if (m_swapchain && m_swapchain->UsesCycleOverlap())
+  {
+    // Cycle end asap (frame/PACING.md "The wake-up"): wait for the last frame's end first, so
+    // that SteamVR blocks this call until its wake-up. Called while a frame is pending, SteamVR
+    // hands out the next refresh at once, up to a period before its wake-up: the frame is
+    // located that much earlier for the same refresh (a longer prediction). A room whose frames
+    // finish in time does not need the overlap; the late mode (heavy rooms) keeps it.
+    static const bool s_asap_wait = [] {
+      const char* env = std::getenv("PRIMEDFRAME_CYCLE_ASAP_WAIT");
+      return !(env && std::string_view(env) == "0");
+    }();
+    if (s_asap_wait && !m_cycle_end_late.load(std::memory_order_relaxed) &&
+        !m_swapchain->WaitForPendingFrameFinalization("cycle asap"))
+    {
+      return false;
+    }
+    // The last frame may still be ending on the releaser thread: wait only until it was begun.
+    if (!m_swapchain->CycleBeforeWait() || !WaitFrame())
+      return false;
+    if (m_swapchain->CycleBeginNowAfterWait() && !BeginFrame())
+      return false;
+  }
+  else
+  {
+    if (m_swapchain && !m_swapchain->WaitForPendingFrameFinalization("cycle frame start"))
+      return false;
+    if (!WaitFrame() || !BeginFrame())
+      return false;
+  }
+  if (locate_views && ShouldRender())
+    LocateViews();
   return true;
 }
 
@@ -1444,11 +2140,18 @@ bool OpenXRManager::LocateViews()
   if (snapshot_time == 0)
     return false;
 
-  const XrTime display_time =
-      IsFrameThreadActive() ?
-          snapshot_time +
-              m_predicted_display_period_snapshot.load(std::memory_order_acquire) :
-          snapshot_time;
+  if (IsFrameThreadActive())
+  {
+    return LocateViewsAt(snapshot_time +
+                         m_predicted_display_period_snapshot.load(std::memory_order_acquire));
+  }
+  return LocateViewsAt(snapshot_time + m_frame_extra_ns, m_frame_extra_ns);
+}
+
+bool OpenXRManager::LocateViewsAt(XrTime display_time, int64_t extra_ns)
+{
+  if (display_time == 0)
+    return false;
   XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
   locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
   locate_info.displayTime = display_time;
@@ -1458,6 +2161,16 @@ bool OpenXRManager::LocateViews()
   uint32_t view_count = static_cast<uint32_t>(m_views.size());
   m_views.fill({XR_TYPE_VIEW});
   m_eye_views_valid = false;
+  {
+    std::lock_guard<std::mutex> lock(m_clock_mutex);
+    m_locate_notes[m_locate_note_next] = {
+        display_time,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count(),
+        extra_ns};
+    m_locate_note_next = (m_locate_note_next + 1) % m_locate_notes.size();
+  }
 
   XR_CHECK(xrLocateViews(m_session, &locate_info, &view_state,
                           view_count, &view_count, m_views.data()));
@@ -1477,6 +2190,7 @@ bool OpenXRManager::LocateViews()
     m_eye_views[i].pose = m_views[i].pose;
     m_eye_views[i].fov = m_views[i].fov;
   }
+  m_eye_views_locate_time = display_time;
 
   if (m_recenter_requested.exchange(false, std::memory_order_acq_rel) && view_count >= 2)
   {
@@ -1524,10 +2238,15 @@ void OpenXRManager::RecordRenderedEyeViews()
 {
   m_submitted_eye_views = m_eye_views;
   m_submitted_eye_views_valid = m_eye_views_valid;
+  m_submitted_locate_time = m_eye_views_locate_time;
 }
 
 void OpenXRManager::StampXFBPose(uint32_t xfb_addr)
 {
+  const XrTime draw_oldest = m_draw_pose_min;
+  const XrTime draw_newest = m_draw_pose_max;
+  m_draw_pose_min = 0;
+  m_draw_pose_max = 0;
   if (!m_submitted_eye_views_valid)
     return;
 
@@ -1550,6 +2269,9 @@ void OpenXRManager::StampXFBPose(uint32_t xfb_addr)
   slot->xfb_addr = xfb_addr;
   slot->serial = ++m_xfb_pose_stamp_serial;
   slot->views = m_submitted_eye_views;
+  slot->locate_time = m_submitted_locate_time;
+  slot->draw_oldest = draw_oldest;
+  slot->draw_newest = draw_newest;
 }
 
 void OpenXRManager::SelectPresentPoseForXFB(uint32_t xfb_addr)
@@ -1566,6 +2288,14 @@ void OpenXRManager::SelectPresentPoseForXFB(uint32_t xfb_addr)
       newest = &stamp;
   }
 
+  m_present_pose = {};
+  if (match)
+  {
+    m_present_pose.valid = true;
+    m_present_pose.locate_time = match->locate_time;
+    m_present_pose.draw_oldest = match->draw_oldest;
+    m_present_pose.draw_newest = match->draw_newest;
+  }
   if (!match)
     match = newest;
   if (match)
@@ -1613,6 +2343,7 @@ void OpenXRManager::GetEyeProjectionRows(
     std::array<std::array<float, 4>, 4>& out_proj_rows,
     std::array<std::array<float, 4>, 2>& out_z_rows) const
 {
+  StartLazyFrameIfArmed();
   static uint64_t s_proj_log_counter = 0;
   ++s_proj_log_counter;
   const bool do_log = false;
@@ -1755,6 +2486,7 @@ void OpenXRManager::GetRawEyeProjectionRows(
     float units_per_meter,
     std::array<std::array<float, 4>, 4>& out_proj_rows) const
 {
+  StartLazyFrameIfArmed();
   const float s = std::max(units_per_meter, 0.0001f);
 
   // Compute head center (average of both eyes) for extracting per-eye local offset.
@@ -1814,6 +2546,7 @@ bool OpenXRManager::GetHeadCullProjection(float cone_degrees, float units_per_me
                                           std::array<std::array<float, 4>, 4>* out_matrix,
                                           float* out_effective_degrees) const
 {
+  StartLazyFrameIfArmed();
   if (!m_eye_views_valid || !m_home_set)
     return false;
   std::array<XrView, 2> views{};

@@ -313,6 +313,7 @@ void SetUserDirectory(std::string custom_path)
 #endif
 
 #if defined(LINUX_LOCAL_DEV)
+  if (custom_path.empty())  // -u still wins: the user dir lives outside the relocatable app dir
   {
     const std::string user_path = File::GetExeDirectory() + DIR_SEP PORTABLE_USER_DIR DIR_SEP;
     File::CreateFullPath(user_path);
