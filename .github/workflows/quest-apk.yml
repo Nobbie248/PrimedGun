@@ -28,6 +28,11 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # The scan also covers submodules, and SDL's example android-project ships a wrapper
+          # jar that isn't in Gradle's checksum list. The wrapper actually used
+          # (Source/Android) validates fine.
+          validate-wrappers: false
 
       - name: Install NDK r29 and CMake
         run: |
