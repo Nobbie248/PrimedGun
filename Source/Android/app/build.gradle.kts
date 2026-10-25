@@ -133,7 +133,7 @@ android {
             applicationIdSuffix = ".quest"
             versionNameSuffix = "-quest"
             buildConfigField("boolean", "IS_QUEST", "true")
-            manifestPlaceholders["questSupportedDevices"] = "quest2|quest3|quest3s|questpro"
+            manifestPlaceholders["questSupportedDevices"] = "quest|quest2"
             ndk {
                 abiFilters += listOf("arm64-v8a")
             }
