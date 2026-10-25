@@ -1,0 +1,70 @@
+name: Quest APK
+
+on:
+  push:
+    branches: [quest1, android-quest]
+    tags: ['v*']
+  pull_request:
+    branches: [quest1, android-quest]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so versionName/versionCode come from git describe/rev-list.
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install NDK r29 and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Cache ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: quest-${{ github.ref_name }}
+
+      - name: Build Quest APK
+        working-directory: Source/Android
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon app:assembleQuestReleaseNoMinify
+
+      - name: Collect APK
+        id: apk
+        run: |
+          apk=$(find Source/Android/app/build/outputs/apk -name '*.apk' | head -n1)
+          name="PrimedGun-quest-$(git describe --always --tags)-${GITHUB_SHA::7}.apk"
+          mkdir -p dist && cp "$apk" "dist/$name"
+          echo "path=dist/$name" >> "$GITHUB_OUTPUT"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrimedGun-quest-apk
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
