@@ -45,6 +45,12 @@ jobs:
         with:
           key: quest-${{ github.ref_name }}
 
+      - name: Use the repo's fixed debug keystore
+        # A fresh runner generates a new debug key every run, so each APK would need an
+        # uninstall (wiping saves) before the next one installs. This key is public on purpose;
+        # use real release signing for anything published under your own name.
+        run: mkdir -p ~/.android && cp .github/ci-debug.keystore ~/.android/debug.keystore
+
       - name: Build Quest APK
         working-directory: Source/Android
         env:
