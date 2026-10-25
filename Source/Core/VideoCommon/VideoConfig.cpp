@@ -7,9 +7,14 @@
 #include <cmath>
 #include <optional>
 
+#ifdef ANDROID
+#include <android/log.h>
+#endif
+
 #include "Common/CPUDetect.h"
 #include "Common/CommonTypes.h"
 #include "Common/Contains.h"
+#include "Common/Logging/Log.h"
 
 #include "Core/CPUThreadConfigCallback.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -334,6 +339,23 @@ void VideoConfig::VerifyValidity()
 #endif
     if (!g_backend_info.bSupportsGeometryShaders && !stereo_without_gs)
     {
+#ifdef ENABLE_VR
+      if (stereo_mode == StereoMode::OpenXR)
+      {
+        // Without stereo no OpenXR session starts, so the OpenXR controller bindings the
+        // VR profile sets up never receive input. Say so instead of failing quietly.
+        constexpr const char* message =
+            "VR unavailable: this GPU has neither geometry shaders nor Vulkan multiview. "
+            "Running flat; OpenXR controllers will not work.";
+        OSD::AddMessage(message, 30000, OSD::Color::RED);
+        ERROR_LOG_FMT(VIDEO, "{}", message);
+#ifdef ANDROID
+        __android_log_print(ANDROID_LOG_ERROR, "DolphinXR", "%s", message);
+#endif
+        stereo_mode = StereoMode::Off;
+        return;
+      }
+#endif
       OSD::AddMessage(
           "Stereoscopic 3D isn't supported by your GPU, support for OpenGL 3.2 is required.",
           10000);
