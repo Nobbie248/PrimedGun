@@ -71,6 +71,16 @@ constexpr std::string_view LEGACY_VR_SECTION_NAME = "GFX.VR";
 
 using VRSettingMap = std::map<std::string, std::string, Common::CaseInsensitiveLess>;
 
+#ifdef ANDROID
+// Quest 1 ("monterey"): Adreno 540 and ~4 GB RAM, far below the Quest 3 these defaults target.
+static bool IsQuest1Device()
+{
+  char device[PROP_VALUE_MAX] = {};
+  __system_property_get("ro.product.device", device);
+  return std::string_view{device} == "monterey";
+}
+#endif
+
 static void EnsurePrimedGunDefaultGFXConfig()
 {
   const std::string path = File::GetUserPath(F_GFXCONFIG_IDX);
@@ -112,11 +122,8 @@ FastDepthCalc = True
   // the Adreno GPU can fill at 60fps (measured: jitter and slow-motion). 3x is the highest
   // that holds frame rate on this hardware.
 #ifdef ANDROID
-  // Quest 1 ("monterey", Adreno 540) is far slower than that; native resolution is its best shot.
-  char device[PROP_VALUE_MAX] = {};
-  __system_property_get("ro.product.device", device);
-  file << (std::string_view{device} == "monterey" ? "InternalResolution = 1\n" :
-                                                     "InternalResolution = 3\n");
+  // Quest 1 is far slower than that; native resolution is its best shot.
+  file << (IsQuest1Device() ? "InternalResolution = 1\n" : "InternalResolution = 3\n");
 #else
   file << "InternalResolution = 4\n";
 #endif
@@ -159,8 +166,14 @@ SWDumpTevStages = False
 SWDumpTevTexFetches = False
 FrameDumpsResolutionType = 1
 EnableMods = False
-WaitForShadersBeforeStarting = True
 )";
+  // Quest 1: the up-front compile pushes the process past the low-memory killer's limit.
+#ifdef ANDROID
+  file << (IsQuest1Device() ? "WaitForShadersBeforeStarting = False\n" :
+                              "WaitForShadersBeforeStarting = True\n");
+#else
+  file << "WaitForShadersBeforeStarting = True\n";
+#endif
   // Adreno's Vulkan driver segfaults inside vkUpdateDescriptorSets when Dolphin's GPU
   // texture decoder binds its compute texel buffers. Dolphin assumes every Vulkan backend
   // supports this path (VulkanContext.cpp sets bSupportsGPUTextureDecoding unconditionally),
@@ -170,8 +183,13 @@ WaitForShadersBeforeStarting = True
 #else
   file << "EnableGPUTextureDecoding = True\n";
 #endif
-  file << R"(ShaderCompilationMode = 2
-CPUCull = False
+  // Quest 1: hybrid ubershaders cost memory it doesn't have; use plain specialized shaders.
+#ifdef ANDROID
+  file << (IsQuest1Device() ? "ShaderCompilationMode = 0\n" : "ShaderCompilationMode = 2\n");
+#else
+  file << "ShaderCompilationMode = 2\n";
+#endif
+  file << R"(CPUCull = False
 UseLossless = False
 [Stereoscopy]
 StereoMode = 6
@@ -310,12 +328,16 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
   stereo->Set("StereoEFBMonoDepth", "False");
 
   auto* video = game_ini->GetOrCreateSection("Video_Settings");
+#ifdef ANDROID
+  video->Set("ShaderCompilationMode", IsQuest1Device() ? "0" : "2");
+#else
   video->Set("ShaderCompilationMode", "2");
+#endif
   video->Set("MSAA", "0x00000001");
   video->Set("SSAA", "False");
 #ifdef ANDROID
   // See EnsurePrimedGunDefaultGFXConfig: 4x does not hold 60fps on Quest hardware.
-  video->Set("InternalResolution", "3");
+  video->Set("InternalResolution", IsQuest1Device() ? "1" : "3");
 #else
   video->Set("InternalResolution", "4");
 #endif
@@ -325,7 +347,11 @@ static void ApplyPrimedGunMetroidDefaults(Common::IniFile* game_ini)
 #else
   video->Set("EnableGPUTextureDecoding", "True");
 #endif
+#ifdef ANDROID
+  video->Set("WaitForShadersBeforeStarting", IsQuest1Device() ? "False" : "True");
+#else
   video->Set("WaitForShadersBeforeStarting", "True");
+#endif
   video->Set("SafeTextureCacheColorSamples", "512");
 
   auto* hacks = game_ini->GetOrCreateSection("Video_Hacks");
