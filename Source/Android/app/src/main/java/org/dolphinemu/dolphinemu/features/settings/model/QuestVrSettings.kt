@@ -2,6 +2,7 @@
 
 package org.dolphinemu.dolphinemu.features.settings.model
 
+import android.os.Build
 import org.dolphinemu.dolphinemu.BuildConfig
 import org.dolphinemu.dolphinemu.features.input.model.controlleremu.EmulatedController
 
@@ -249,6 +250,9 @@ object QuestVrSettings {
     private fun controllerProfilesAppliedSetting() =
         androidBooleanSetting("QuestControllerProfilesApplied", false)
 
+    /** Quest 1 (codename "monterey") has a Snapdragon 835 and needs a much lighter profile. */
+    fun isQuest1(): Boolean = Build.DEVICE.equals("monterey", ignoreCase = true)
+
     fun isLaunchInVrEnabled(): Boolean {
         return BuildConfig.IS_QUEST &&
             openXrEnabledSetting().boolean &&
@@ -263,8 +267,8 @@ object QuestVrSettings {
         StringSetting.MAIN_GFX_BACKEND.setString(settings, "Vulkan")
         BooleanSetting.GFX_BACKEND_MULTITHREADING.setBoolean(settings, true)
         // 3x is the highest internal resolution that holds 60fps on Quest 3; 4x produces
-        // visible jitter and slow-motion.
-        IntSetting.GFX_EFB_SCALE.setInt(settings, 3)
+        // visible jitter and slow-motion. Quest 1 can only hope to keep up at native (1x).
+        IntSetting.GFX_EFB_SCALE.setInt(settings, if (isQuest1()) 1 else 3)
         // Compile the seeded pipeline list before the game starts, with the progress panel the
         // overlays draw for it. Without the wait the first frames compile their pipelines inline
         // on the video thread anyway, which is a black screen with nothing to show.

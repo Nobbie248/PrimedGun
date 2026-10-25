@@ -15,6 +15,10 @@
 
 #include <fmt/format.h>
 
+#ifdef ANDROID
+#include <sys/system_properties.h>
+#endif
+
 #include "AudioCommon/AudioCommon.h"
 
 #include "Common/CommonPaths.h"
@@ -108,7 +112,11 @@ FastDepthCalc = True
   // the Adreno GPU can fill at 60fps (measured: jitter and slow-motion). 3x is the highest
   // that holds frame rate on this hardware.
 #ifdef ANDROID
-  file << "InternalResolution = 3\n";
+  // Quest 1 ("monterey", Adreno 540) is far slower than that; native resolution is its best shot.
+  char device[PROP_VALUE_MAX] = {};
+  __system_property_get("ro.product.device", device);
+  file << (std::string_view{device} == "monterey" ? "InternalResolution = 1\n" :
+                                                     "InternalResolution = 3\n");
 #else
   file << "InternalResolution = 4\n";
 #endif
