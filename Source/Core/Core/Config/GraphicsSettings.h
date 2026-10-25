@@ -169,6 +169,7 @@ static constexpr float GFX_STEREO_CONVERGENCE_MAXIMUM = 200;
 // Graphics.VR
 
 extern const Info<bool> GFX_VR_ENABLE_OPENXR;
+extern const Info<bool> GFX_VR_FLAT_SCREEN;
 extern const Info<bool> GFX_VR_AUTO_IMMEDIATE_XFB;
 extern const Info<float> GFX_VR_UNITS_PER_METER;
 extern const Info<float> GFX_VR_LEAN_BACK_ANGLE;

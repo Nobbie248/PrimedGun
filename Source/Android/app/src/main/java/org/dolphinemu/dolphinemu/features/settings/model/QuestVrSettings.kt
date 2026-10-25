@@ -84,6 +84,9 @@ object QuestVrSettings {
 
     fun launchInVrSetting() = androidBooleanSetting("QuestLaunchInVr", true)
 
+    /** Mono game on a floating screen in the headset; only applies with Launch in VR on. */
+    fun flatScreenSetting() = vrBooleanSetting("FlatScreen", false)
+
     fun recenterOnLaunchSetting() = androidBooleanSetting("QuestRecenterOnLaunch", true)
 
     fun leftHandedSetting() = androidBooleanSetting("QuestLeftHanded", false)

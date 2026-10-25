@@ -543,7 +543,7 @@ static bool ApplyPrimedGunModernControls(GCPadStatus* pad)
   static bool s_last_right_thumbstick = false;
   static bool s_last_orbit_lock = false;
 
-  const auto snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+  const auto snapshot = Common::VR::OpenXRInputState::GetVrGameplaySnapshot();
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
   if (!snapshot.runtime_active)
     return false;
@@ -946,7 +946,7 @@ void GCPad::SetOutput(const ControlState strength)
   const auto lock = GetStateLock();
   m_rumble->controls[0]->control_ref->State(strength);
 #ifdef ENABLE_VR
-  if (m_index == 0 && Common::VR::OpenXRInputState::GetSnapshot().runtime_active)
+  if (m_index == 0 && Common::VR::OpenXRInputState::GetVrGameplaySnapshot().runtime_active)
     Common::VR::OpenXRInputState::SetRumble(static_cast<float>(strength));
 #endif
 }

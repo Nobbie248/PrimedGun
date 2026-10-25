@@ -30,6 +30,7 @@
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/AbstractGfx.h"
+#include "VideoCommon/Present.h"
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #include "VideoCommon/VR/PrimedGunOverlayCommon.h"
@@ -125,6 +126,53 @@ bool BuildCinematicScreenLayer(const std::array<XRVkEyeSwapchain, 2>& eye_swapch
                           s_cinematic_screen_anchor.position.y + offset.y,
                           s_cinematic_screen_anchor.position.z + offset.z};
   layer->size = {2.2f, 1.65f};
+  return true;
+}
+
+// The flat screen in VR gets its own anchor so Prime's cutscene state (and its re-anchoring on
+// every new cutscene) never moves it. It is placed once, in front of the first valid head pose.
+static CinematicScreenAnchor s_flat_screen_anchor;
+constexpr float FLAT_SCREEN_DISTANCE_M = 2.0f;
+constexpr float FLAT_SCREEN_HEIGHT_M = 1.5f;
+
+bool BuildFlatScreenLayer(const std::array<XRVkEyeSwapchain, 2>& eye_swapchains,
+                          XrCompositionLayerQuad* layer)
+{
+  if (!VR::g_openxr || !layer || eye_swapchains[0].swapchain == XR_NULL_HANDLE)
+    return false;
+
+  if (!s_flat_screen_anchor.valid)
+  {
+    XrQuaternionf orientation{};
+    XrVector3f position{};
+    if (!ReadCinematicScreenViewerPose(&orientation, &position))
+      return false;
+
+    s_flat_screen_anchor.valid = true;
+    s_flat_screen_anchor.orientation = PGO::YawOnlyQuaternion(orientation);
+    s_flat_screen_anchor.position = position;
+  }
+
+  // The eye image holds the whole XFB stretched to the eye size; the quad's shape restores the
+  // game's aspect ratio.
+  float aspect = g_presenter ? g_presenter->CalculateDrawAspectRatio(false) : 4.0f / 3.0f;
+  if (!(aspect > 0.5f && aspect < 3.0f))
+    aspect = 4.0f / 3.0f;
+
+  const XrVector3f offset = PGO::RotateVector(s_flat_screen_anchor.orientation,
+                                              {0.0f, 0.0f, -FLAT_SCREEN_DISTANCE_M});
+  *layer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  layer->space = VR::g_openxr->GetReferenceSpace();
+  layer->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  layer->subImage.swapchain = eye_swapchains[0].swapchain;
+  layer->subImage.imageRect.offset = {0, 0};
+  layer->subImage.imageRect.extent = {static_cast<int32_t>(eye_swapchains[0].width),
+                                      static_cast<int32_t>(eye_swapchains[0].height)};
+  layer->pose.orientation = s_flat_screen_anchor.orientation;
+  layer->pose.position = {s_flat_screen_anchor.position.x + offset.x,
+                          s_flat_screen_anchor.position.y + offset.y,
+                          s_flat_screen_anchor.position.z + offset.z};
+  layer->size = {FLAT_SCREEN_HEIGHT_M * aspect, FLAT_SCREEN_HEIGHT_M};
   return true;
 }
 
@@ -2109,7 +2157,17 @@ bool VulkanOpenXR::SubmitFrame()
                               m_layered_swapchain.swapchain != XR_NULL_HANDLE;
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
   std::vector<XrCompositionLayerBaseHeader*> quad_layers;
-  if (overlay.cinematic_screen_active && !submit_layered &&
+  if (g_ActiveConfig.vr_flat_screen)
+  {
+    // Flat screen in VR: always one quad, independent of the cutscene flag. With no head pose
+    // yet the frame carries no game layer, which only shows black until tracking starts.
+    if (BuildFlatScreenLayer(m_eye_swapchains, &m_cinematic_screen_layer))
+    {
+      quad_layers.push_back(
+          reinterpret_cast<XrCompositionLayerBaseHeader*>(&m_cinematic_screen_layer));
+    }
+  }
+  else if (overlay.cinematic_screen_active && !submit_layered &&
       BuildCinematicScreenLayer(m_eye_swapchains, overlay.cinematic_screen_generation,
                                 &m_cinematic_screen_layer))
   {

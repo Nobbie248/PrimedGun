@@ -20,6 +20,8 @@ namespace Pad
 void Shutdown();
 void Initialize();
 void LoadConfig();
+// Loads the "Quest Touch GameCube (Flat)" profile into port 1 without saving it.
+void LoadFlatScreenProfile();
 void GenerateDynamicInputTextures();
 bool IsInitialized();
 

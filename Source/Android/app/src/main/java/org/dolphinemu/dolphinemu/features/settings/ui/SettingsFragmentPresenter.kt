@@ -1357,6 +1357,10 @@ class SettingsFragmentPresenter(
             R.string.quest_launch_in_vr, R.string.quest_launch_in_vr_description
         )
         questSwitch(
+            sl, QuestVrSettings.flatScreenSetting(),
+            R.string.quest_flat_screen, R.string.quest_flat_screen_description
+        )
+        questSwitch(
             sl, QuestVrSettings.recenterOnLaunchSetting(),
             R.string.quest_recenter_on_launch, R.string.quest_recenter_on_launch_description
         )

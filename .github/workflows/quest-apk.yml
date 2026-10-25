@@ -2,7 +2,7 @@ name: Quest APK
 
 on:
   push:
-    branches: [quest1, android-quest]
+    branches: [quest1, android-quest, flat-vr]
     tags: ['v*']
   pull_request:
     branches: [quest1, android-quest]

@@ -361,6 +361,9 @@ struct VideoConfig final
   bool vr_enable_camera_height = true;
   float vr_camera_height = 0.0f;
   bool vr_virtual_screen = true;
+  // Mono render shown on a floating screen inside the OpenXR session. Chosen by the user, or
+  // set by VerifyValidity when the GPU cannot render OpenXR stereo. stereo_mode stays Off.
+  bool vr_flat_screen = false;
   float vr_screen_distance = 1.5f;
   float vr_screen_size = 1.5f;
   float vr_head_locked_curvature = 0.0f;
@@ -459,6 +462,9 @@ struct VideoConfig final
     return bPreferVSForLinePointExpansion;
   }
   bool MultisamplingEnabled() const { return iMultisamples > 1; }
+  // Session-level checks (create the session, run the XR frame loop, submit layers) use this;
+  // rendering checks keep keying on stereo_mode so the flat screen renders plain mono.
+  bool UsesOpenXRSession() const { return stereo_mode == StereoMode::OpenXR || vr_flat_screen; }
   bool ExclusiveFullscreenEnabled() const
   {
     return g_backend_info.bSupportsExclusiveFullscreen && !bBorderlessFullscreen;

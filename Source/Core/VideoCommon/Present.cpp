@@ -1098,7 +1098,7 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
 #ifdef ENABLE_VR
 bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
 {
-  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !VR::g_openxr)
+  if (!g_ActiveConfig.UsesOpenXRSession() || !VR::g_openxr)
     return false;
 
   if (!VR::g_openxr->PollEvents() || !VR::g_openxr->IsSessionRunning())
@@ -1121,7 +1121,7 @@ bool Presenter::StartOpenXRFrameNow(bool do_locate_views)
 
 void Presenter::PrepareNextOpenXRFrame()
 {
-  if (g_ActiveConfig.stereo_mode != StereoMode::OpenXR || !VR::g_openxr)
+  if (!g_ActiveConfig.UsesOpenXRSession() || !VR::g_openxr)
   {
     m_openxr_frame_prepared = false;
     return;
@@ -1156,7 +1156,9 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
   {
     return;
   }
-  if (source_texture->GetLayers() < 2)
+  // The flat screen in VR renders mono, so its XFB has one layer.
+  const bool flat_screen = g_ActiveConfig.vr_flat_screen;
+  if (!flat_screen && source_texture->GetLayers() < 2)
     return;
 
   VR::IOpenXRSwapchain* const swapchain = VR::g_openxr->GetSwapchain();
@@ -1164,14 +1166,15 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
     return;
 
   const auto overlay = Common::VR::OpenXRInputState::GetPrimedGunOverlay();
-  const bool cinematic_screen_active = overlay.cinematic_screen_active;
+  // One panel image for Prime's cutscene screen and for the flat screen in VR.
+  const bool single_panel = flat_screen || overlay.cinematic_screen_active;
   AbstractFramebuffer* const saved_framebuffer = g_gfx->GetCurrentFramebuffer();
   const MathUtil::Rectangle<int> eye_rect{
       0, 0, static_cast<int>(swapchain->GetEyeWidth()),
       static_cast<int>(swapchain->GetEyeHeight())};
   bool rendered_layered = false;
 
-  if (!cinematic_screen_active && swapchain->SupportsLayeredRendering() &&
+  if (!single_panel && swapchain->SupportsLayeredRendering() &&
       m_post_processor->CanBlitFromTextureLayered())
   {
     AbstractFramebuffer* const layered_framebuffer =
@@ -1185,7 +1188,7 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
     }
   }
 
-  const uint32_t eye_count = cinematic_screen_active ? 1u : 2u;
+  const uint32_t eye_count = single_panel ? 1u : 2u;
   for (uint32_t eye = 0; !rendered_layered && eye < eye_count; ++eye)
   {
     AbstractFramebuffer* const eye_framebuffer =
@@ -1194,8 +1197,7 @@ void Presenter::BlitCurrentSourceToOpenXREyes(
       continue;
 
     g_gfx->SetAndClearFramebuffer(eye_framebuffer, {0.f, 0.f, 0.f, 1.f});
-    const int source_layer =
-        cinematic_screen_active ? 0 : static_cast<int>(eye);
+    const int source_layer = single_panel ? 0 : static_cast<int>(eye);
     m_post_processor->BlitFromTexture(eye_rect, source_rect, source_texture, source_layer);
     swapchain->ReleaseEyeTexture(eye);
   }
@@ -1240,12 +1242,12 @@ void Presenter::Present(PresentInfo* present_info)
   // frame at the previous Present, bracketing the game's full rendering interval.
   // Start the first inline frame here if no frame was prepared previously.
   const bool vr_pacing_active =
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+      g_ActiveConfig.UsesOpenXRSession() && VR::g_openxr &&
       VR::g_openxr->IsFrameThreadActive();
   bool vr_frame_started =
       vr_pacing_active ? VR::g_openxr->IsSessionRunning() : m_openxr_frame_prepared;
   if (!vr_pacing_active && !vr_frame_started &&
-      g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr)
+      g_ActiveConfig.UsesOpenXRSession() && VR::g_openxr)
   {
     vr_frame_started = StartOpenXRFrameNow();
     m_openxr_frame_prepared = vr_frame_started;
@@ -1261,7 +1263,7 @@ void Presenter::Present(PresentInfo* present_info)
   // XR compositor and its window is never shown, so mirroring into it is wasted even while the
   // session is down (boot, headset taken off). The backbuffer is still bound and presented
   // then, because that submit is what recycles frame resources until the XR submission does.
-  const bool android_window_hidden = g_ActiveConfig.stereo_mode == StereoMode::OpenXR &&
+  const bool android_window_hidden = g_ActiveConfig.UsesOpenXRSession() &&
                                      g_ActiveConfig.vr_android_direct_to_hmd && VR::g_openxr;
   // The XR submission owns frame-resource recycling in direct mode. Presenting
   // the Android window as well would advance the resource ring twice per frame.
@@ -1302,7 +1304,7 @@ void Presenter::Present(PresentInfo* present_info)
 
 #ifdef ENABLE_VR
     const bool openxr_session_active =
-        g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr &&
+        g_ActiveConfig.UsesOpenXRSession() && VR::g_openxr &&
         VR::g_openxr->IsSessionRunning();
 #else
     constexpr bool openxr_session_active = false;
@@ -1328,7 +1330,8 @@ void Presenter::Present(PresentInfo* present_info)
   {
     VR::OpenXRManager::ScopedVideoFrameHandoff handoff(vr_pacing_active ? VR::g_openxr.get() :
                                                                           nullptr);
-    if (vr_pacing_active || openxr_direct_to_hmd)
+    // The flat screen in VR has no eye blit inside RenderXFBToScreen, so it always blits here.
+    if (vr_pacing_active || openxr_direct_to_hmd || g_ActiveConfig.vr_flat_screen)
     {
       // Keep both stereo and Prime's cinematic eye blits inside the pose/content
       // handoff. Direct mode also needs this blit with the inline frame loop,

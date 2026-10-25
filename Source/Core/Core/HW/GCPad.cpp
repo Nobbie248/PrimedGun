@@ -3,9 +3,15 @@
 
 #include "Core/HW/GCPad.h"
 
+#include <string>
+
 #include "Common/Common.h"
+#include "Common/FileUtil.h"
+#include "Common/IniFile.h"
+#include "Common/Logging/Log.h"
 #include "Core/HW/GCPadEmu.h"
 #include "InputCommon/ControllerEmu/ControlGroup/ControlGroup.h"
+#include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/GCPadStatus.h"
 #include "InputCommon/InputConfig.h"
 
@@ -41,6 +47,23 @@ void Initialize()
 void LoadConfig()
 {
   s_config.LoadConfig();
+}
+
+void LoadFlatScreenProfile()
+{
+  const std::string path = File::GetSysDirectory() + "Profiles/GCPad/Quest Touch GameCube (Flat).ini";
+  Common::IniFile ini;
+  if (!ini.Load(path))
+  {
+    WARN_LOG_FMT(CONTROLLERINTERFACE, "Flat screen in VR: could not load {}", path);
+    return;
+  }
+
+  auto* const controller = s_config.GetController(0);
+  const auto lock = ControllerEmu::EmulatedController::GetStateLock();
+  controller->LoadConfig(ini.GetOrCreateSection("Profile"));
+  controller->UpdateReferences(g_controller_interface);
+  NOTICE_LOG_FMT(CONTROLLERINTERFACE, "Flat screen in VR: loaded {}", path);
 }
 
 void GenerateDynamicInputTextures()

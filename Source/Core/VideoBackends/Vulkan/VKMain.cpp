@@ -21,6 +21,7 @@
 #include "VideoCommon/VideoConfig.h"
 
 #ifdef ENABLE_VR
+#include "Common/VR/OpenXRInputState.h"
 #include "VideoBackends/Vulkan/VulkanOpenXR.h"
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
@@ -120,7 +121,7 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
   // both the instance and device; without them xrCreateSession will crash.
   Vulkan::VulkanExtensionRequirements vr_ext_requirements;
   bool vr_extensions_queried = false;
-  if (g_Config.stereo_mode == StereoMode::OpenXR)
+  if (g_Config.UsesOpenXRSession())
   {
     vr_extensions_queried = Vulkan::VulkanOpenXR::PreQueryVulkanExtensions(vr_ext_requirements);
     if (!vr_extensions_queried)
@@ -287,10 +288,12 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
   // OpenXR init must happen after ObjectCache, CommandBufferManager, and StateTracker
   // are ready — VKFramebuffer::Create() needs render passes from ObjectCache, and
   // VKTexture needs CommandBufferManager for deferred destruction.
-  INFO_LOG_FMT(VIDEO, "VR: stereo_mode={} (OpenXR={})",
+  INFO_LOG_FMT(VIDEO, "VR: stereo_mode={} (OpenXR={}) flat_screen={}",
                static_cast<int>(g_ActiveConfig.stereo_mode),
-               g_ActiveConfig.stereo_mode == StereoMode::OpenXR ? "YES" : "NO");
-  if (g_ActiveConfig.stereo_mode == StereoMode::OpenXR)
+               g_ActiveConfig.stereo_mode == StereoMode::OpenXR ? "YES" : "NO",
+               g_ActiveConfig.vr_flat_screen ? "YES" : "NO");
+  Common::VR::OpenXRInputState::SetFlatScreen(false);
+  if (g_ActiveConfig.UsesOpenXRSession())
   {
     auto openxr = std::make_unique<Vulkan::VulkanOpenXR>();
     if (!openxr->Initialize())
@@ -300,6 +303,7 @@ bool VideoBackend::Initialize(const WindowSystemInfo& wsi)
     else
     {
       Vulkan::g_openxr_vk = std::move(openxr);
+      Common::VR::OpenXRInputState::SetFlatScreen(g_ActiveConfig.vr_flat_screen);
     }
   }
 #endif
@@ -325,6 +329,7 @@ void VideoBackend::Shutdown()
   // Both must happen before g_vulkan_context is destroyed.
   Vulkan::g_openxr_vk.reset();
   VR::g_openxr.reset();
+  Common::VR::OpenXRInputState::SetFlatScreen(false);
 #endif
 
   if (g_object_cache)

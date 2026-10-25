@@ -397,7 +397,7 @@ void VKGfx::PresentBackbuffer()
     // The OpenXR pacing thread owns submission ordering; submitting off-thread as well
     // would race it.
     const bool submit_off_thread =
-        !(g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr);
+        !(g_ActiveConfig.UsesOpenXRSession() && VR::g_openxr);
 #else
     const bool submit_off_thread = true;
 #endif
@@ -410,7 +410,7 @@ void VKGfx::PresentBackbuffer()
     // The OpenXR pacing thread owns submission ordering; submitting off-thread as well
     // would race it.
     const bool submit_off_thread =
-        !(g_ActiveConfig.stereo_mode == StereoMode::OpenXR && VR::g_openxr);
+        !(g_ActiveConfig.UsesOpenXRSession() && VR::g_openxr);
 #else
     const bool submit_off_thread = true;
 #endif

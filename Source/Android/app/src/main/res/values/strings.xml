@@ -994,6 +994,8 @@ It can efficiently compress both junk data and encrypted Wii data.
     <string name="quest_enable_openxr_description">Allows Quest launches to switch Dolphin into the OpenXR renderer.</string>
     <string name="quest_launch_in_vr">Launch games in VR</string>
     <string name="quest_launch_in_vr_description">On: renders the game in stereoscopic 3D VR. Off: shows the game on a flat screen (requires Enable OpenXR).</string>
+    <string name="quest_flat_screen">Flat screen in VR</string>
+    <string name="quest_flat_screen_description">With Launch games in VR on, shows the game on a floating screen in the headset instead of in 3D. Touch controls use the flat profile: hold the right trigger to aim with the controller (gyro). Also used automatically when the GPU can\'t render VR stereo.</string>
     <string name="quest_recenter_on_launch">Recenter on launch</string>
     <string name="quest_recenter_on_launch_description">Recenters the active OpenXR view as soon as emulation starts, putting you at the centre of the play space at whatever height you are standing.</string>
     <string name="quest_units_per_meter">Units Per Meter</string>

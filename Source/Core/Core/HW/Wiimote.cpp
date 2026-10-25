@@ -320,7 +320,7 @@ ControllerEmu::InputOverrideFunction CreateOpenXRInputOverrideFunction(unsigned 
     if (s_wiimote_sources[wiimote_index].load() != WiimoteSource::OpenXR)
       return std::nullopt;
 
-    const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+    const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetVrGameplaySnapshot();
     if (!snapshot.runtime_active)
       return std::nullopt;
 
@@ -533,7 +533,7 @@ std::optional<OpenXRWiiRemoteState> GetOpenXRWiiRemoteState(unsigned int index)
 std::optional<OpenXRWiiRemoteState> GetOpenXRHandState(bool left_hand)
 {
 #ifdef ENABLE_VR
-  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetVrGameplaySnapshot();
   if (!snapshot.runtime_active)
     return std::nullopt;
 

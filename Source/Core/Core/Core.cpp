@@ -82,6 +82,9 @@
 #if defined(ANDROID) && defined(ENABLE_VR)
 #include "VideoCommon/VR/OpenXRManager.h"
 #endif
+#ifdef ENABLE_VR
+#include "Common/VR/OpenXRInputState.h"
+#endif
 
 #include "DiscIO/RiivolutionPatcher.h"
 
@@ -670,6 +673,14 @@ static void EmuThread(Core::System& system, std::unique_ptr<BootParameters> boot
     PanicAlertFmt("Failed to initialize video backend!");
     return;
   }
+
+#ifdef ENABLE_VR
+  // The video backend decides the flat screen in VR (setting or GPU fallback). It plays with a
+  // mapped controller profile instead of PrimedGun's VR aim, so swap port 1's mapping in memory
+  // for this session only; the saved stereo mapping is untouched.
+  if (Common::VR::OpenXRInputState::IsFlatScreen())
+    Pad::LoadFlatScreenProfile();
+#endif
 
   if (cpu_info.HTT)
     Config::SetBaseOrCurrent(Config::MAIN_DSP_THREAD, cpu_info.num_cores > 4);

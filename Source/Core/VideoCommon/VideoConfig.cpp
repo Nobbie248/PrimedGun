@@ -177,6 +177,9 @@ void VideoConfig::Refresh()
     // Prevent stale legacy config values from forcing OpenXR.
     stereo_mode = StereoMode::Off;
   }
+  vr_flat_screen = vr_openxr_enabled && Config::Get(Config::GFX_VR_FLAT_SCREEN);
+  if (vr_flat_screen)
+    stereo_mode = StereoMode::Off;
   stereo_per_eye_resolution_full = Config::Get(Config::GFX_STEREO_PER_EYE_RESOLUTION_FULL);
   stereo_depth = Config::Get(Config::GFX_STEREO_DEPTH) *
                  Config::Get(Config::GFX_STEREO_DEPTH_PERCENTAGE) * 0.00001f;
@@ -334,9 +337,18 @@ void VideoConfig::VerifyValidity()
 #endif
     if (!g_backend_info.bSupportsGeometryShaders && !stereo_without_gs)
     {
-      OSD::AddMessage(
-          "Stereoscopic 3D isn't supported by your GPU, support for OpenGL 3.2 is required.",
-          10000);
+      if (stereo_mode == StereoMode::OpenXR)
+      {
+        // Keep the OpenXR session (and the Touch controllers) and show the game on a flat
+        // screen in VR instead of dropping to the Android window.
+        vr_flat_screen = true;
+      }
+      else
+      {
+        OSD::AddMessage(
+            "Stereoscopic 3D isn't supported by your GPU, support for OpenGL 3.2 is required.",
+            10000);
+      }
       stereo_mode = StereoMode::Off;
     }
   }

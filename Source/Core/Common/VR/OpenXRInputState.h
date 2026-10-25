@@ -186,6 +186,31 @@ public:
     return s_state;
   }
 
+  // The snapshot the PrimedGun VR gameplay (gun aim, HMD camera, VR menu, pad override) runs
+  // from. On the flat screen in VR it reports the runtime as inactive, so the game plays with
+  // its normal camera and the mapped controller profile. The raw OpenXR controller device keeps
+  // reading GetSnapshot().
+  static OpenXRInputSnapshot GetVrGameplaySnapshot()
+  {
+    std::lock_guard lk(s_state_mutex);
+    OpenXRInputSnapshot snapshot = s_state;
+    if (s_flat_screen)
+      snapshot.runtime_active = false;
+    return snapshot;
+  }
+
+  static void SetFlatScreen(bool flat_screen)
+  {
+    std::lock_guard lk(s_state_mutex);
+    s_flat_screen = flat_screen;
+  }
+
+  static bool IsFlatScreen()
+  {
+    std::lock_guard lk(s_state_mutex);
+    return s_flat_screen;
+  }
+
   static void SetControllers(const std::array<OpenXRControllerState, 2>& controllers,
                              bool runtime_active, const OpenXRPoseState& head_pose = {},
                              const std::array<float, 3>& tracking_origin_position = {},
@@ -336,6 +361,7 @@ private:
 
   static inline std::mutex s_state_mutex;
   static inline OpenXRInputSnapshot s_state{};
+  static inline bool s_flat_screen = false;
   static inline OpenXRHapticsState s_haptics{};
   static inline PrimedGunVrOverlayState s_primedgun_overlay{};
 };

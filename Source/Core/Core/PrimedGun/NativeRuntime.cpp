@@ -6367,7 +6367,7 @@ void UpdateCannonTracking(const Core::CPUThreadGuard& guard)
   if (!settings.enabled)
     return;
 
-  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+  const Common::VR::OpenXRInputSnapshot snapshot = Common::VR::OpenXRInputState::GetVrGameplaySnapshot();
   if (!snapshot.runtime_active)
   {
     ClearAudioListenerScratch(guard);
@@ -8271,7 +8271,7 @@ void UpdateSpringBallInput(const Core::CPUThreadGuard& guard, const RuntimeSetti
   float c_stick_y = 0.0f;
   float xr_stick_y = 0.0f;
 #ifdef ENABLE_VR
-  const auto snapshot = Common::VR::OpenXRInputState::GetSnapshot();
+  const auto snapshot = Common::VR::OpenXRInputState::GetVrGameplaySnapshot();
   if (snapshot.runtime_active && snapshot.controllers[1].connected)
     xr_stick_y = snapshot.controllers[1].thumbstick_y;
 #endif

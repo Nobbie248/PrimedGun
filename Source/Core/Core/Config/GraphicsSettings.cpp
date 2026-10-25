@@ -195,6 +195,7 @@ const Info<float> GFX_STEREO_DEPTH_PERCENTAGE{{System::GFX, "Stereoscopy", "Ster
 // Graphics.VR
 
 const Info<bool> GFX_VR_ENABLE_OPENXR{{System::GFX, "VR", "EnableOpenXR"}, true};
+const Info<bool> GFX_VR_FLAT_SCREEN{{System::GFX, "VR", "FlatScreen"}, false};
 const Info<bool> GFX_VR_AUTO_IMMEDIATE_XFB{{System::GFX, "VR", "AutoImmediateXFB"}, false};
 const Info<float> GFX_VR_UNITS_PER_METER{{System::GFX, "VR", "UnitsPerMeter"}, 1.5f};
 const Info<float> GFX_VR_LEAN_BACK_ANGLE{{System::GFX, "VR", "LeanBackAngle"}, 0.0f};
