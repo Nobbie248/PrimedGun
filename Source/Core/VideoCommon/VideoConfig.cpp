@@ -323,7 +323,16 @@ void VideoConfig::VerifyValidity()
 
   if (stereo_mode != StereoMode::Off)
   {
-    if (!g_backend_info.bSupportsGeometryShaders)
+    bool stereo_without_gs = false;
+#ifdef ENABLE_VR
+    // The VK_KHR_multiview OpenXR path renders both eyes with gl_ViewIndex and has no GS
+    // stage at all. Quest 1's Adreno 540 driver exposes multiview but not geometryShader,
+    // so don't turn stereo off there.
+    stereo_without_gs = stereo_mode == StereoMode::OpenXR &&
+                        g_backend_info.api_type == APIType::Vulkan && vr_use_vulkan_multiview &&
+                        g_backend_info.bSupportsMultiview && iMultisamples == 1;
+#endif
+    if (!g_backend_info.bSupportsGeometryShaders && !stereo_without_gs)
     {
       OSD::AddMessage(
           "Stereoscopic 3D isn't supported by your GPU, support for OpenGL 3.2 is required.",
